@@ -32,7 +32,7 @@ const defaultPlebbitOptions: InputPlebbitOptions = {
 };
 
 export default class Daemon extends Command {
-    static override description = `Run a network-connected BitSocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
+    static override description = `Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
     Options can be passed to the RPC's instance through flag --plebbitOptions.optionName. For a list of plebbit options (https://github.com/plebbit/plebbit-js?tab=readme-ov-file#plebbitoptions)
     If you need to modify ipfs config, you should head to {bitsocial-data-path}/.ipfs-bitsocial-cli/config and modify the config file
     `;
@@ -319,7 +319,7 @@ export default class Daemon extends Command {
             console.log(`plebbit rpc: listening on ${plebbitRpcUrl} (local connections only)`);
             console.log(`plebbit rpc: listening on ${plebbitRpcUrl}${daemonServer.rpcAuthKey} (secret auth key for remote connections)`);
 
-            console.log(`BitSocial data path: ${path.resolve(mergedPlebbitOptions.dataPath!)}`);
+            console.log(`Bitsocial data path: ${path.resolve(mergedPlebbitOptions.dataPath!)}`);
             console.log(`Communities in data path: `, daemonServer.listedSub);
 
             const localIpAddress = "localhost";
