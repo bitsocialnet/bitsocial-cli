@@ -8,10 +8,12 @@ import tcpPortUsed from "tcp-port-used";
 import {
     getLanIpV4Address,
     getPlebbitLogger,
+    setupDebugLogger,
     loadKuboConfigFile,
     parseMultiAddrKuboRpcToUrl,
     parseMultiAddrIpfsGatewayToUrl
 } from "../../util.js";
+import type { PlebbitLogger } from "../../util.js";
 import { startDaemonServer } from "../../webui/daemon-server.js";
 import { loadChallengesIntoPlebbit } from "../../challenge-packages/challenge-utils.js";
 import fs from "fs";
@@ -25,10 +27,6 @@ import type { InputPlebbitOptions } from "@plebbit/plebbit-js/dist/node/types.js
 import DataObjectParser from "dataobject-parser";
 
 import * as remeda from "remeda";
-
-type PlebbitLogger = typeof import("@plebbit/plebbit-logger").default & {
-    inspectOpts?: { depth?: number; colors?: boolean; [key: string]: any };
-};
 
 const defaultPlebbitOptions: InputPlebbitOptions = {
     dataPath: defaults.PLEBBIT_DATA_PATH,
@@ -66,21 +64,7 @@ export default class Daemon extends Command {
     ];
 
     private _setupLogger(Logger: PlebbitLogger) {
-        const envDebug: string | undefined = process.env["_PLEBBIT_DEBUG"] || process.env["DEBUG"];
-        const debugNamespace = envDebug === "0" || envDebug === "" ? undefined : envDebug;
-
-        const debugDepth = process.env["DEBUG_DEPTH"] ? parseInt(process.env["DEBUG_DEPTH"]) : 10;
-        Logger.inspectOpts = Logger.inspectOpts || {};
-        Logger.inspectOpts.depth = debugDepth;
-
-        const defaultNamespace = "bitsocial*,plebbit*,-plebbit*trace";
-
-        if (debugNamespace) {
-            Logger.enable(debugNamespace);
-        } else {
-            Logger.enable(defaultNamespace);
-        }
-
+        setupDebugLogger(Logger, { enableDefaultNamespace: true });
         console.log("To view logs, run: bitsocial logs");
         console.log("For custom debug logging, restart the daemon with DEBUG env, e.g.: DEBUG='bitsocial*,plebbit*' bitsocial daemon");
     }

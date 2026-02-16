@@ -3,9 +3,43 @@ import path from "path";
 import fs from "fs";
 import * as fsPromises from "fs/promises";
 
+export type PlebbitLogger = Awaited<ReturnType<typeof getPlebbitLogger>> & {
+    inspectOpts?: { depth?: number; colors?: boolean; [key: string]: any };
+};
+
 export async function getPlebbitLogger() {
     const Logger = await import("@plebbit/plebbit-logger");
     return Logger.default;
+}
+
+/**
+ * Read _PLEBBIT_DEBUG / DEBUG env vars and configure the Logger instance.
+ * Does NOT redirect output — debug logs go to stderr (the default for the debug module).
+ *
+ * @param options.enableDefaultNamespace - If true, enable "bitsocial*,plebbit*,-plebbit*trace"
+ *   when no DEBUG env is set (used by daemon). If false, only enable if user
+ *   explicitly set DEBUG or _PLEBBIT_DEBUG (used by non-daemon commands).
+ */
+export function setupDebugLogger(
+    Logger: PlebbitLogger,
+    options: { enableDefaultNamespace?: boolean } = {}
+): { debugNamespace: string | undefined; debugDepth: number } {
+    const envDebug: string | undefined = process.env["_PLEBBIT_DEBUG"] || process.env["DEBUG"];
+    const debugNamespace = envDebug === "0" || envDebug === "" ? undefined : envDebug;
+
+    const debugDepth = process.env["DEBUG_DEPTH"] ? parseInt(process.env["DEBUG_DEPTH"]) : 10;
+    Logger.inspectOpts = Logger.inspectOpts || {};
+    Logger.inspectOpts.depth = debugDepth;
+
+    const defaultNamespace = "bitsocial*,plebbit*,-plebbit*trace";
+
+    if (debugNamespace) {
+        Logger.enable(debugNamespace);
+    } else if (options.enableDefaultNamespace) {
+        Logger.enable(defaultNamespace);
+    }
+
+    return { debugNamespace, debugDepth };
 }
 
 export function getLanIpV4Address(): string | undefined {
