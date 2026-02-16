@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import { getPlebbitLogger } from "../util.js";
 import { randomBytes } from "crypto";
 import express from "express";
+import { loadChallengesIntoPlebbit } from "../challenge-packages/challenge-utils.js";
 
 async function _generateModifiedIndexHtmlWithRpcSettings(webuiPath: string, webuiName: string, ipfsGatewayPort: number) {
     const indexHtmlString = (await fs.readFile(path.join(webuiPath, "index_backup_no_rpc.html")))
@@ -123,6 +124,33 @@ export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, plebbi
 
         webuis.push({ name: webuiName, endpointLocal, endpointRemote });
     }
+
+    // Challenge reload endpoints
+    const handleChallengeReload = async (_req: express.Request, res: express.Response) => {
+        try {
+            const loadedNames = await loadChallengesIntoPlebbit(plebbitOptions.dataPath);
+            res.json({ ok: true, challenges: loadedNames });
+        } catch (err) {
+            log.error("Failed to reload challenges", err);
+            res.status(500).json({ ok: false, error: String(err) });
+        }
+    };
+
+    // Local-only endpoint (same isLocal check as webui routes)
+    webuiExpressApp.post("/api/challenges/reload", (req, res) => {
+        const isLocal = req.socket.localAddress && req.socket.localAddress === req.socket.remoteAddress;
+        if (!isLocal) {
+            res.status(403).send("This endpoint does not exist for remote connections");
+            return;
+        }
+        handleChallengeReload(req, res);
+    });
+
+    // Remote endpoint with auth key
+    webuiExpressApp.post(`/${rpcAuthKey}/api/challenges/reload`, (req, res) => {
+        handleChallengeReload(req, res);
+    });
+
     let daemonServerDestroyed = false;
 
     const cleanupDaemonServer = async () => {

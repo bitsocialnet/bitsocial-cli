@@ -51,6 +51,9 @@
             "@oclif/plugin-not-found"
         ],
         "topics": {
+            "challenge": {
+                "description": "Manage challenge packages"
+            },
             "community": {
                 "description": "Access and manage your communities"
             }

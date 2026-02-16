@@ -588,6 +588,14 @@ describe(`bitsocial daemon webui`, async () => {
         const html = await res.text();
         expect(html).not.toMatch(/Redirect non-hash URLs/);
     });
+
+    it(`POST /api/challenges/reload returns 200 for local connections`, async () => {
+        const res = await fetch(`http://localhost:${rpcUrl.port}/api/challenges/reload`, { method: "POST" });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { ok: boolean; challenges: string[] };
+        expect(body.ok).toBe(true);
+        expect(Array.isArray(body.challenges)).toBe(true);
+    });
 });
 
 describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown call)", async () => {

@@ -13,6 +13,7 @@ import {
     parseMultiAddrIpfsGatewayToUrl
 } from "../../util.js";
 import { startDaemonServer } from "../../webui/daemon-server.js";
+import { loadChallengesIntoPlebbit } from "../../challenge-packages/challenge-utils.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
 import { EOL } from "node:os";
@@ -305,6 +306,11 @@ export default class Daemon extends Command {
                 usingDifferentProcessRpc = true;
                 return;
             }
+
+            // Load installed challenge packages before starting the RPC server
+            const loadedChallenges = await loadChallengesIntoPlebbit(mergedPlebbitOptions.dataPath);
+            if (loadedChallenges.length > 0)
+                console.log(`Loaded challenge packages: ${loadedChallenges.join(", ")}`);
 
             daemonServer = await startDaemonServer(plebbitRpcUrl, ipfsGatewayEndpoint, mergedPlebbitOptions);
 
