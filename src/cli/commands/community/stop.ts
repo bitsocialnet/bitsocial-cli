@@ -17,7 +17,7 @@ export default class Stop extends BaseCommand {
     };
 
     static override examples = [
-        "bitsocial community stop plebbit.eth",
+        "bitsocial community stop plebbit.bso",
         "bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW"
     ];
 

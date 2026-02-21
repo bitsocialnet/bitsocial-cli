@@ -19,33 +19,33 @@ export default class Edit extends BaseCommand {
 
     static override examples = [
         {
-            description: "Change the address of the community to a new ENS address",
-            command: "bitsocial community edit 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu --address newAddress.eth"
+            description: "Change the address of the community to a new domain address",
+            command: "bitsocial community edit 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu --address newAddress.bso"
         },
         {
-            description: "Add the author address 'esteban.eth' as an admin on the community",
-            command: `bitsocial community edit mysub.eth '--roles["esteban.eth"].role' admin`
+            description: "Add the author address 'esteban.bso' as an admin on the community",
+            command: `bitsocial community edit mysub.bso '--roles["esteban.bso"].role' admin`
         },
         {
             description:
                 "Add two challenges to the community. The first challenge will be a question and answer, and the second will be an image captcha",
-            command: `bitsocial community edit mysub.eth --settings.challenges[0].name question --settings.challenges[0].options.question "what is the password?" --settings.challenges[0].options.answer thepassword --settings.challenges[1].name captcha-canvas-v3`
+            command: `bitsocial community edit mysub.bso --settings.challenges[0].name question --settings.challenges[0].options.question "what is the password?" --settings.challenges[0].options.answer thepassword --settings.challenges[1].name captcha-canvas-v3`
         },
         {
             description: "Change the title and description",
-            command: `bitsocial community edit mysub.eth --title "This is the new title" --description "This is the new description" `
+            command: `bitsocial community edit mysub.bso --title "This is the new title" --description "This is the new description" `
         },
         {
             description: "Remove a role from a moderator/admin/owner",
-            command: "bitsocial community edit plebbit.eth --roles['rinse12.eth'] null"
+            command: "bitsocial community edit plebbit.bso --roles['rinse12.bso'] null"
         },
         {
             description: "Enable settings.fetchThumbnailUrls to fetch the thumbnail of url submitted by authors",
-            command: "bitsocial community edit plebbit.eth --settings.fetchThumbnailUrls"
+            command: "bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls"
         },
         {
             description: "disable settings.fetchThumbnailUrls",
-            command: "bitsocial community edit plebbit.eth --settings.fetchThumbnailUrls=false"
+            command: "bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls=false"
         }
     ];
 

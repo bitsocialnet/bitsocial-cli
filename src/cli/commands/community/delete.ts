@@ -16,7 +16,7 @@ export default class Delete extends BaseCommand {
     };
 
     static override examples = [
-        "bitsocial community delete plebbit.eth",
+        "bitsocial community delete plebbit.bso",
         "bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu"
     ];
 

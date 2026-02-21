@@ -5,7 +5,7 @@ import { runCliCommand } from "../helpers/run-cli.js";
 
 describe("bitsocial community list", () => {
     const sandbox = Sinon.createSandbox();
-    const fakeCommunities = ["plebbit1.eth", "plebbit2.eth"];
+    const fakeCommunities = ["plebbit1.bso", "plebbit2.bso"];
 
     beforeAll(() => {
         const plebbitInstanceFake = sandbox.fake.resolves({

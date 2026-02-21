@@ -4,7 +4,7 @@ import { clearPlebbitRpcConnectOverride, setPlebbitRpcConnectOverride } from "..
 import { runCliCommand } from "../helpers/run-cli.js";
 
 describe("bitsocial community stop", () => {
-    const addresses = ["plebbit.eth", "plebbit2.eth"];
+    const addresses = ["plebbit.bso", "plebbit2.bso"];
     const sandbox = Sinon.createSandbox();
 
     const stopFake = sandbox.fake();

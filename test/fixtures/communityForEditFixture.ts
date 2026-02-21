@@ -39,7 +39,7 @@ export const currentSubProps: Partial<SubplebbitInstance> = {
     address: "12KWOsomething",
     rules: ["Rule 1", "Rule 2"],
     settings: { challenges: [{ name: "captcha-canvas-v3" }], fetchThumbnailUrls: false, fetchThumbnailUrlsProxyUrl: undefined },
-    roles: { "rinse12.eth": { role: "admin" } },
+    roles: { "rinse12.bso": { role: "admin" } },
     createdAt: 12345678,
     started: true,
     updatedAt: 123456
@@ -56,8 +56,8 @@ export const objectPropsToEdit: Required<Pick<SubplebbitEditOptions, "roles" | "
         // fetchThumbnailUrlsProxyUrl: "http://localhost:12345" // explicitly don't modify it
     },
     roles: {
-        "rinse12.eth": null as any, //remove rinse from roles
-        "esteban.eth": { role: "admin" } // add esteban.eth as an addmin
+        "rinse12.bso": null as any, //remove rinse from roles
+        "esteban.bso": { role: "admin" } // add esteban.bso as an addmin
     },
     features: {
         noVideos: true,

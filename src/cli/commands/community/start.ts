@@ -16,7 +16,7 @@ export default class Start extends BaseCommand {
     };
 
     static override examples = [
-        "bitsocial community start plebbit.eth",
+        "bitsocial community start plebbit.bso",
         "bitsocial community start 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu",
         {
             description: "Start all communities in your data path",

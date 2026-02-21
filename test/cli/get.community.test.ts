@@ -6,7 +6,7 @@ import { runCliCommand } from "../helpers/run-cli.js";
 describe("bitsocial community get", () => {
     const sandbox = Sinon.createSandbox();
     const fakeCommunity = {
-        address: "plebbit.eth",
+        address: "plebbit.bso",
         title: "Plebbit",
         posts: [{ cid: "post1" }, { cid: "post2" }],
         updatedAt: 1234
@@ -34,10 +34,10 @@ describe("bitsocial community get", () => {
     });
 
     it("Outputs community json and keeps posts first", async () => {
-        const { result, stdout } = await runCliCommand("community get plebbit.eth");
+        const { result, stdout } = await runCliCommand("community get plebbit.bso");
 
         expect(result.error).toBeUndefined();
-        expect(getSubplebbitFake.calledOnceWith({ address: "plebbit.eth" })).toBe(true);
+        expect(getSubplebbitFake.calledOnceWith({ address: "plebbit.bso" })).toBe(true);
         expect(destroyFake.calledOnce).toBe(true);
 
         const output = stdout.trim();

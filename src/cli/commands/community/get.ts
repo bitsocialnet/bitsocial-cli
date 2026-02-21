@@ -7,7 +7,7 @@ export default class Get extends BaseCommand {
     static override description = "Fetch a local or remote community, and print its json in the terminal";
 
     static override examples = [
-        "bitsocial community get plebmusic.eth",
+        "bitsocial community get plebmusic.bso",
         "bitsocial community get 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu"
     ];
 

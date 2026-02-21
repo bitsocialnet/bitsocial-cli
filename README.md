@@ -203,7 +203,7 @@ IPFS Gateway listening on: http://localhost:6473
 plebbit rpc: listening on ws://localhost:9138 (local connections only)
 plebbit rpc: listening on ws://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL (secret auth key for remote connections)
 Bitsocial data path: /root/.local/share/bitsocial
-Communities in data path:  [ 'pleblore.eth' ]
+Communities in data path:  [ 'pleblore.bso' ]
 WebUI (plebones - A bare bones UI client): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/plebones (local connections only)
 WebUI (plebones - A bare bones UI client): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/plebones (secret auth key for remote connections)
 WebUI (seedit - Similar to old reddit UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit (local connections only)
@@ -229,38 +229,38 @@ $ bitsocial community list
 Address                                              Started
  ──────────────────────────────────────────────────── ───────
  12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu true
- business-and-finance.eth                             true
- censorship-watch.eth                                 true
- health-nutrition-science.eth                         true
- movies-tv-anime.eth                                  true
- pleblore.eth                                         true
- politically-incorrect.eth                            true
- reddit-screenshots.eth                               false
- videos-livestreams-podcasts.eth                      false
+ business-and-finance.bso                             true
+ censorship-watch.bso                                 true
+ health-nutrition-science.bso                         true
+ movies-tv-anime.bso                                  true
+ pleblore.bso                                         true
+ politically-incorrect.bso                            true
+ reddit-screenshots.bso                               false
+ videos-livestreams-podcasts.bso                      false
 ```
 
 ### Adding a role moderator to your community
 
 ```sh-session
-$ bitsocial community edit mysub.eth '--roles["author-address.eth"].role' moderator
+$ bitsocial community edit mysub.bso '--roles["author-address.bso"].role' moderator
 ```
 
 ### Adding a role owner to your community
 
 ```sh-session
-$ bitsocial community edit mysub.eth '--roles["author-address.eth"].role' owner
+$ bitsocial community edit mysub.bso '--roles["author-address.bso"].role' owner
 ```
 
 ### Adding a role admin to your community
 
 ```sh-session
-$ bitsocial community edit mysub.eth '--roles["author-address.eth"].role' admin
+$ bitsocial community edit mysub.bso '--roles["author-address.bso"].role' admin
 ```
 
 ### Removing a role
 
 ```sh-session
-$ bitsocial community edit mysub.eth '--roles["author-address.eth"]' null
+$ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 ```
 
 # Commands
@@ -321,7 +321,7 @@ DESCRIPTION
   Delete a community permanently.
 
 EXAMPLES
-  $ bitsocial community delete plebbit.eth
+  $ bitsocial community delete plebbit.bso
 
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
@@ -347,36 +347,36 @@ DESCRIPTION
   https://github.com/plebbit/plebbit-js#subplebbiteditsubplebbiteditoptions
 
 EXAMPLES
-  Change the address of the community to a new ENS address
+  Change the address of the community to a new domain address
 
-    $ bitsocial community edit 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu --address newAddress.eth
+    $ bitsocial community edit 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu --address newAddress.bso
 
-  Add the author address 'esteban.eth' as an admin on the community
+  Add the author address 'esteban.bso' as an admin on the community
 
-    $ bitsocial community edit mysub.eth '--roles["esteban.eth"].role' admin
+    $ bitsocial community edit mysub.bso '--roles["esteban.bso"].role' admin
 
   Add two challenges to the community. The first challenge will be a question and answer, and the second will be an
   image captcha
 
-    $ bitsocial community edit mysub.eth --settings.challenges[0].name question \
+    $ bitsocial community edit mysub.bso --settings.challenges[0].name question \
       --settings.challenges[0].options.question "what is the password?" --settings.challenges[0].options.answer \
       thepassword --settings.challenges[1].name captcha-canvas-v3
 
   Change the title and description
 
-    $ bitsocial community edit mysub.eth --title "This is the new title" --description "This is the new description"
+    $ bitsocial community edit mysub.bso --title "This is the new title" --description "This is the new description"
 
   Remove a role from a moderator/admin/owner
 
-    $ bitsocial community edit plebbit.eth --roles['rinse12.eth'] null
+    $ bitsocial community edit plebbit.bso --roles['rinse12.bso'] null
 
   Enable settings.fetchThumbnailUrls to fetch the thumbnail of url submitted by authors
 
-    $ bitsocial community edit plebbit.eth --settings.fetchThumbnailUrls
+    $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls
 
   disable settings.fetchThumbnailUrls
 
-    $ bitsocial community edit plebbit.eth --settings.fetchThumbnailUrls=false
+    $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls=false
 ```
 
 _See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.15/src/cli/commands/community/edit.ts)_
@@ -399,7 +399,7 @@ DESCRIPTION
   Fetch a local or remote community, and print its json in the terminal
 
 EXAMPLES
-  $ bitsocial community get plebmusic.eth
+  $ bitsocial community get plebmusic.bso
 
   $ bitsocial community get 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
@@ -447,7 +447,7 @@ DESCRIPTION
   Start a community
 
 EXAMPLES
-  $ bitsocial community start plebbit.eth
+  $ bitsocial community start plebbit.bso
 
   $ bitsocial community start 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 
@@ -476,7 +476,7 @@ DESCRIPTION
   Stop a community. The community will not publish or receive any publications until it is started again.
 
 EXAMPLES
-  $ bitsocial community stop plebbit.eth
+  $ bitsocial community stop plebbit.bso
 
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
