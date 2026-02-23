@@ -43,7 +43,7 @@ jobs:
           node-version: 22
           cache: 'yarn'
 
-      - run: yarn install --frozen-lockfile
+      - run: yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
       - run: yarn build
       - run: yarn oclif manifest
 

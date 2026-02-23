@@ -24,7 +24,7 @@ jobs:
           node-version: 22
 
       # build dist folder
-      - run: yarn install --frozen-lockfile
+      - run: yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
       - run: yarn build
 
       - name: Set up Git commit author
