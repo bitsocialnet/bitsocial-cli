@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.19 (2026-02-23)</small>
+
+* fix(docker): increase yarn network timeout to prevent viem extraction failures ([e48965d](https://github.com/bitsocialhq/bitsocial-cli/commit/e48965d))
+
 ## <small>0.19.18 (2026-02-23)</small>
 
 * fix(docker): clean yarn cache in builder stage to prevent corrupt layers ([d044b92](https://github.com/bitsocialhq/bitsocial-cli/commit/d044b92))
