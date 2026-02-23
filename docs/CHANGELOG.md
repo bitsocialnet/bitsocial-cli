@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.21 (2026-02-23)</small>
+
+* fix(ci): clean yarn cache before install to prevent tar extraction corruption ([a845797](https://github.com/bitsocialhq/bitsocial-cli/commit/a845797))
+
 ## <small>0.19.20 (2026-02-23)</small>
 
 * fix(ci): set HUSKY=0 in CI Release to prevent install failures on cache miss ([8317ba3](https://github.com/bitsocialhq/bitsocial-cli/commit/8317ba3))
