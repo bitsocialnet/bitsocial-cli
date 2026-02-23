@@ -129,6 +129,18 @@ export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, plebbi
     const handleChallengeReload = async (_req: express.Request, res: express.Response) => {
         try {
             const loadedNames = await loadChallengesIntoPlebbit(plebbitOptions.dataPath);
+            // Notify all connected RPC clients about the updated challenges
+            const onSettingsChange = (rpcServer as any)._onSettingsChange;
+            if (onSettingsChange) {
+                for (const connectionId of Object.keys(onSettingsChange)) {
+                    const handlers = onSettingsChange[connectionId];
+                    if (!handlers) continue;
+                    for (const subscriptionId of Object.keys(handlers)) {
+                        const handler = handlers[subscriptionId];
+                        if (handler) await handler({ newPlebbit: (rpcServer as any).plebbit });
+                    }
+                }
+            }
             res.json({ ok: true, challenges: loadedNames });
         } catch (err) {
             log.error("Failed to reload challenges", err);
