@@ -28,7 +28,9 @@ jobs:
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: |
+          yarn cache clean
+          yarn install --frozen-lockfile
         env:
           HUSKY: "0"
       - name: Build from source
@@ -76,7 +78,9 @@ jobs:
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: |
+          yarn cache clean
+          yarn install --frozen-lockfile
         env:
           HUSKY: "0"
       - name: Build from source
@@ -121,7 +125,9 @@ jobs:
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: |
+          yarn cache clean
+          yarn install --frozen-lockfile
         env:
           HUSKY: "0"
       - name: Build from source
@@ -176,7 +182,7 @@ jobs:
           with:
             base_image: raspios_lite_arm64:latest
             cpu_info: cpuinfo/raspberrypi_zero2_w_arm64
-            image_additional_mb: 2048
+            image_additional_mb: 4096
             import_github_env: true
             bind_mount_repository: true
             commands: |
@@ -185,6 +191,7 @@ jobs:
               curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
               sudo apt install -y nodejs
               npm install --global yarn
+              yarn cache clean
               HUSKY=0 yarn install --frozen-lockfile
               yarn build
               yarn oclif manifest
