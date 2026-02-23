@@ -1,5 +1,23 @@
 # Changelog
 
+## <small>0.19.17 (2026-02-23)</small>
+
+* fix: correct BitSocial casing to Bitsocial in daemon output ([1e355bc](https://github.com/bitsocialhq/bitsocial-cli/commit/1e355bc))
+* fix(ci): remove invalid github.head_ref from workflow_run checkouts ([09c1d13](https://github.com/bitsocialhq/bitsocial-cli/commit/09c1d13))
+* fix(daemon): if daemon fails to start make sure to print an error with latest logs ([7315ad0](https://github.com/bitsocialhq/bitsocial-cli/commit/7315ad0))
+* fix(daemon): redirect all debug output to log file, not terminal ([f710aaf](https://github.com/bitsocialhq/bitsocial-cli/commit/f710aaf))
+* fix(edit): preserve string values that start with digits ([e33563a](https://github.com/bitsocialhq/bitsocial-cli/commit/e33563a))
+* chore: upgrade plebbit-js to cfb998ee6334 ([8278892](https://github.com/bitsocialhq/bitsocial-cli/commit/8278892))
+* docs: replace .eth with .bso as default naming system ([e2bc02a](https://github.com/bitsocialhq/bitsocial-cli/commit/e2bc02a))
+* test: speed up test suite with file-level parallelism and polling ([e5747ec](https://github.com/bitsocialhq/bitsocial-cli/commit/e5747ec))
+* test(challenge): add @mintpass/challenge integration tests ([208093c](https://github.com/bitsocialhq/bitsocial-cli/commit/208093c))
+* test(challenge): add integration tests for full challenge lifecycle ([f6fc522](https://github.com/bitsocialhq/bitsocial-cli/commit/f6fc522))
+* ci: test docker compose before pushing images ([2c3cc62](https://github.com/bitsocialhq/bitsocial-cli/commit/2c3cc62))
+* feat: show debug logs on stderr for non-daemon commands ([8753bd3](https://github.com/bitsocialhq/bitsocial-cli/commit/8753bd3))
+* feat(challenge): add challenge package management commands ([4580bf8](https://github.com/bitsocialhq/bitsocial-cli/commit/4580bf8))
+* feat(challenge): support all npm specifiers in challenge install ([a1e0cb9](https://github.com/bitsocialhq/bitsocial-cli/commit/a1e0cb9))
+* refactor(daemon): type Logger param and use debug logger in _setupLogger ([0e85716](https://github.com/bitsocialhq/bitsocial-cli/commit/0e85716))
+
 ## <small>0.19.16 (2026-02-15)</small>
 
 * build(deps): upgrade plebbit-js ([8943c2c](https://github.com/bitsocialhq/bitsocial-cli/commit/8943c2c))

@@ -266,6 +266,9 @@ $ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 # Commands
 
 <!-- commands -->
+* [`bitsocial challenge install PACKAGE`](#bitsocial-challenge-install-package)
+* [`bitsocial challenge list`](#bitsocial-challenge-list)
+* [`bitsocial challenge remove NAME`](#bitsocial-challenge-remove-name)
 * [`bitsocial community create`](#bitsocial-community-create)
 * [`bitsocial community delete ADDRESSES`](#bitsocial-community-delete-addresses)
 * [`bitsocial community edit ADDRESS`](#bitsocial-community-edit-address)
@@ -276,6 +279,85 @@ $ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 * [`bitsocial daemon`](#bitsocial-daemon)
 * [`bitsocial help [COMMAND]`](#bitsocial-help-command)
 * [`bitsocial logs`](#bitsocial-logs)
+
+## `bitsocial challenge install PACKAGE`
+
+Install a challenge package (npm package name, git URL, tarball URL, or local path)
+
+```
+USAGE
+  $ bitsocial challenge install PACKAGE [--plebbitOptions.dataPath <value>]
+
+ARGUMENTS
+  PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
+
+FLAGS
+  --plebbitOptions.dataPath=<value>  Data path to install the challenge into
+
+DESCRIPTION
+  Install a challenge package (npm package name, git URL, tarball URL, or local path)
+
+EXAMPLES
+  $ bitsocial challenge install @mintpass/challenge
+
+  $ bitsocial challenge install @mintpass/challenge@1.0.0
+
+  $ bitsocial challenge install github:user/repo
+
+  $ bitsocial challenge install https://example.com/my-challenge-1.0.0.tar.gz
+
+  $ bitsocial challenge install ./my-local-challenge
+```
+
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/challenge/install.ts)_
+
+## `bitsocial challenge list`
+
+List installed challenge packages
+
+```
+USAGE
+  $ bitsocial challenge list [-q] [--plebbitOptions.dataPath <value>]
+
+FLAGS
+  -q, --quiet                            Only display challenge names
+      --plebbitOptions.dataPath=<value>  Data path where challenges are installed
+
+DESCRIPTION
+  List installed challenge packages
+
+EXAMPLES
+  $ bitsocial challenge list
+
+  $ bitsocial challenge list -q
+```
+
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/challenge/list.ts)_
+
+## `bitsocial challenge remove NAME`
+
+Remove an installed challenge package
+
+```
+USAGE
+  $ bitsocial challenge remove NAME [--plebbitOptions.dataPath <value>]
+
+ARGUMENTS
+  NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
+
+FLAGS
+  --plebbitOptions.dataPath=<value>  Data path where challenges are installed
+
+DESCRIPTION
+  Remove an installed challenge package
+
+EXAMPLES
+  $ bitsocial challenge remove my-challenge
+
+  $ bitsocial challenge remove @scope/my-challenge
+```
+
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/challenge/remove.ts)_
 
 ## `bitsocial community create`
 
@@ -301,7 +383,7 @@ EXAMPLES
     $ bitsocial community create --title 'Hello Plebs' --description 'Welcome'
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/create.ts)_
 
 ## `bitsocial community delete ADDRESSES`
 
@@ -326,7 +408,7 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/delete.ts)_
 
 ## `bitsocial community edit ADDRESS`
 
@@ -379,7 +461,7 @@ EXAMPLES
     $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls=false
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/edit.ts)_
 
 ## `bitsocial community get ADDRESS`
 
@@ -404,7 +486,7 @@ EXAMPLES
   $ bitsocial community get 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/get.ts)_
 
 ## `bitsocial community list`
 
@@ -427,7 +509,7 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/list.ts)_
 
 ## `bitsocial community start ADDRESSES`
 
@@ -456,7 +538,7 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q)
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/start.ts)_
 
 ## `bitsocial community stop ADDRESSES`
 
@@ -481,11 +563,11 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/community/stop.ts)_
 
 ## `bitsocial daemon`
 
-Run a network-connected BitSocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
+Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
 
 ```
 USAGE
@@ -497,7 +579,7 @@ FLAGS
   --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] Specify Plebbit RPC URL to listen on
 
 DESCRIPTION
-  Run a network-connected BitSocial node. Once the daemon is running you can create and start your communities and
+  Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and
   receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on
   any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
   Options can be passed to the RPC's instance through flag --plebbitOptions.optionName. For a list of plebbit options
@@ -518,7 +600,7 @@ EXAMPLES
   $ bitsocial daemon --plebbitOptions.kuboRpcClientsOptions[0] https://remoteipfsnode.com
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/daemon.ts)_
 
 ## `bitsocial help [COMMAND]`
 
@@ -574,7 +656,7 @@ EXAMPLES
   $ bitsocial logs --since 1h -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.16/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.17/src/cli/commands/logs.ts)_
 <!-- commandsstop -->
 
 # Contribution
