@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.18 (2026-02-23)</small>
+
+* fix(docker): clean yarn cache in builder stage to prevent corrupt layers ([d044b92](https://github.com/bitsocialhq/bitsocial-cli/commit/d044b92))
+
 ## <small>0.19.17 (2026-02-23)</small>
 
 * fix: correct BitSocial casing to Bitsocial in daemon output ([1e355bc](https://github.com/bitsocialhq/bitsocial-cli/commit/1e355bc))
