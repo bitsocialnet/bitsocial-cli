@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.20 (2026-02-23)</small>
+
+* fix(ci): set HUSKY=0 in CI Release to prevent install failures on cache miss ([8317ba3](https://github.com/bitsocialhq/bitsocial-cli/commit/8317ba3))
+* fix(docker): serialize yarn installs to prevent viem extraction race condition ([e959b1e](https://github.com/bitsocialhq/bitsocial-cli/commit/e959b1e))
+
 ## <small>0.19.19 (2026-02-23)</small>
 
 * fix(docker): increase yarn network timeout to prevent viem extraction failures ([e48965d](https://github.com/bitsocialhq/bitsocial-cli/commit/e48965d))
