@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.24 (2026-02-25)</small>
+
+* build(deps): upgrade plebbit-js ([8ea4797](https://github.com/bitsocialhq/bitsocial-cli/commit/8ea4797))
+* fix: add 20s timeout to RPC connection to prevent CLI from hanging forever ([07afc13](https://github.com/bitsocialhq/bitsocial-cli/commit/07afc13))
+
 ## <small>0.19.23 (2026-02-23)</small>
 
 * fix(deps): regenerate yarn.lock to resolve stale dependency resolutions ([14dd623](https://github.com/bitsocialhq/bitsocial-cli/commit/14dd623))
