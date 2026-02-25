@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.25 (2026-02-25)</small>
+
+* build(deps): upgrade plebbit-js ([2c91b4e](https://github.com/bitsocialhq/bitsocial-cli/commit/2c91b4e))
+* fix(docker): increase UDP buffer limits to silence QUIC warning ([db58d53](https://github.com/bitsocialhq/bitsocial-cli/commit/db58d53))
+
 ## <small>0.19.24 (2026-02-25)</small>
 
 * build(deps): upgrade plebbit-js ([8ea4797](https://github.com/bitsocialhq/bitsocial-cli/commit/8ea4797))
