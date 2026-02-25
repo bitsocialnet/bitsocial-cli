@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.27 (2026-02-25)</small>
+
+* fix(ci): use standalone compose file instead of override to remove sysctls ([dd29c08](https://github.com/bitsocialhq/bitsocial-cli/commit/dd29c08))
+
 ## <small>0.19.26 (2026-02-25)</small>
 
 * fix(ci): disable sysctls in Docker Publish workflow for GitHub Actions ([1d48ceb](https://github.com/bitsocialhq/bitsocial-cli/commit/1d48ceb))
