@@ -1,22 +1,32 @@
 # ---- Builder stage ----
 FROM node:22-slim AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1 && yarn cache clean
+COPY package.json package-lock.json ./
+RUN npm ci && npm cache clean --force
 
 COPY src/ src/
 COPY bin/ bin/
 COPY ci-bin/ ci-bin/
 COPY config/ config/
 
-RUN yarn build && yarn oclif manifest
+RUN npm run build && npx oclif manifest
 
 RUN --mount=type=secret,id=github_token \
-    GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || true) yarn ci:download-web-uis
+    GITHUB_TOKEN=$(cat /run/secrets/github_token 2>/dev/null || true) npm run ci:download-web-uis
+
+# ---- Production dependencies ----
+FROM node:22-slim AS deps
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
 # ---- Runtime stage ----
 FROM node:22-slim
@@ -28,8 +38,8 @@ RUN groupadd --gid 1001 bitsocial && \
 
 WORKDIR /app
 
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile --production --network-timeout 600000 --network-concurrency 1 && yarn cache clean
+COPY --from=deps /app/node_modules/ node_modules/
+COPY package.json package-lock.json ./
 
 COPY --from=builder /app/dist/ dist/
 COPY --from=builder /app/oclif.manifest.json ./

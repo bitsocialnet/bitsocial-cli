@@ -261,7 +261,7 @@ bitsocial community stop
 - [x] Installation instructions updated
 - [x] GitHub URLs updated
 - [x] Data path examples updated
-- [ ] Commands section (auto-generated, will update with `yarn generate:readme`)
+- [ ] Commands section (auto-generated, will update with `npm run generate:readme`)
 
 ---
 

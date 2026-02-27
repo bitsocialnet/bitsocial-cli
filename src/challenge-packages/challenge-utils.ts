@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs/promises";
+import type { Dirent } from "fs";
 import { spawn } from "child_process";
 import defaults from "../common-utils/defaults.js";
 
@@ -39,7 +40,7 @@ export async function listInstalledChallenges(dataPath?: string): Promise<Instal
     const challengesDir = getChallengesDir(dataPath);
     const results: InstalledChallenge[] = [];
 
-    let entries: Awaited<ReturnType<typeof fs.readdir>>;
+    let entries: Dirent[];
     try {
         entries = await fs.readdir(challengesDir, { withFileTypes: true });
     } catch {
@@ -52,7 +53,7 @@ export async function listInstalledChallenges(dataPath?: string): Promise<Instal
         if (entry.name.startsWith("@")) {
             // Scoped package: read @scope/*/package.json
             const scopeDir = path.join(challengesDir, entry.name);
-            let scopeEntries: Awaited<ReturnType<typeof fs.readdir>>;
+            let scopeEntries: Dirent[];
             try {
                 scopeEntries = await fs.readdir(scopeDir, { withFileTypes: true });
             } catch {

@@ -13,7 +13,7 @@ on:
       - 'ci-bin/**'
       - 'ci-bin/*'
       - 'package.json'
-      - 'yarn.lock'
+      - 'package-lock.json'
       - 'Dockerfile'
   push:
     branches:
@@ -26,7 +26,7 @@ on:
       - 'ci-bin/**'
       - '.github/**'
       - 'package.json'
-      - 'yarn.lock'
+      - 'package-lock.json'
       - 'Dockerfile'
 
 jobs:
@@ -41,15 +41,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'yarn'
+          cache: 'npm'
 
-      - run: yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
-      - run: yarn build
-      - run: yarn oclif manifest
+      - run: npm ci
+      - run: npm run build
+      - run: npx oclif manifest
 
       # disable hosts we shouldn't use
       - run: sudo echo "255.255.255.255 cloudflare-ipfs.com" | sudo tee -a /etc/hosts
       - run: sudo echo "255.255.255.255 pubsubprovider.xyz" | sudo tee -a /etc/hosts
 
-      - run: DEBUG="bitsocial*, plebbit*, oclif*" yarn test:cli
-
+      - run: DEBUG="bitsocial*, plebbit*, oclif*" npm run test:cli

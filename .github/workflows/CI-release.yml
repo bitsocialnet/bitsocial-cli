@@ -23,30 +23,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
+          cache: npm
       - name: Get latest release tag
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Install dependencies
         run: |
-          yarn cache clean
-          yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
+          npm ci
         env:
           HUSKY: "0"
       - name: Build from source
-        run: yarn build
+        run: npm run build
       - name: Generate oclif manifest
-        run: yarn oclif manifest
+        run: npx oclif manifest
       - name: Download web uis
-        run: yarn ci:download-web-uis
+        run: npm run ci:download-web-uis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run daemon and make sure it's online
-        run: yarn ci:daemon:test-before-release
+        run: npm run ci:daemon:test-before-release
       - name: Generate tarballs
-        run: yarn generate:executable:tarballs:linux:x64
+        run: npm run generate:executable:tarballs:linux:x64
       - name: Rename tarballs and installers
-        run: yarn ci:rename-tarballs
+        run: npm run ci:rename-tarballs
       - name: Upload tarballs to release
         uses: svenstaro/upload-release-action@v2
         with:
@@ -73,30 +72,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
+          cache: npm
       - name: Get latest release tag
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Install dependencies
         run: |
-          yarn cache clean
-          yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
+          npm ci
         env:
           HUSKY: "0"
       - name: Build from source
-        run: yarn build
+        run: npm run build
       - name: Generate oclif manifest
-        run: yarn oclif manifest
+        run: npx oclif manifest
       - name: Download web uis
-        run: yarn ci:download-web-uis
+        run: npm run ci:download-web-uis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run daemon and make sure it's online
-        run: yarn ci:daemon:test-before-release
+        run: npm run ci:daemon:test-before-release
       - name: Generate tarballs
-        run: yarn generate:executable:tarballs:macos:${{ matrix.arch }}
+        run: npm run generate:executable:tarballs:macos:${{ matrix.arch }}
       - name: Rename tarballs and installers
-        run: yarn ci:rename-tarballs
+        run: npm run ci:rename-tarballs
       - name: Upload tarballs to release
         uses: svenstaro/upload-release-action@v2
         with:
@@ -120,26 +118,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
+          cache: npm
       - name: Get latest release tag
         id: previoustag
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Install dependencies
         run: |
-          yarn cache clean
-          yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
+          npm ci
         env:
           HUSKY: "0"
       - name: Build from source
-        run: yarn build
+        run: npm run build
       - name: Generate oclif manifest
-        run: yarn oclif manifest
+        run: npx oclif manifest
       - name: Download web uis
-        run: yarn ci:download-web-uis
+        run: npm run ci:download-web-uis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run daemon and make sure it's online
-        run: yarn ci:daemon:test-before-release
+        run: npm run ci:daemon:test-before-release
       - name: Install NSIS
         run: choco install nsis -y
         shell: powershell
@@ -147,13 +144,13 @@ jobs:
         run: Add-Content $env:GITHUB_PATH 'C:\Program Files (x86)\NSIS'
         shell: powershell
       - name: Generate Windows installer
-        run: yarn generate:installer:windows
+        run: npm run generate:installer:windows
         shell: bash
       # You can't use oclif pack on windows, so we're skipping it for now
       # - name: Generate Windows tarballs
-      #   run: yarn generate:executable:tarballs:windows
+      #   run: npm run generate:executable:tarballs:windows
       - name: Rename tarballs and installers
-        run: yarn ci:rename-tarballs
+        run: npm run ci:rename-tarballs
       - name: Upload windows installers to release
         uses: svenstaro/upload-release-action@v2
         with:
@@ -190,15 +187,13 @@ jobs:
               sudo apt-get install -y ca-certificates curl gnupg gcc g++ make git build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libfontconfig1 fontconfig libfontconfig1-dev libfontconfig
               curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
               sudo apt install -y nodejs
-              npm install --global yarn
-              yarn cache clean
-              HUSKY=0 yarn install --frozen-lockfile --network-timeout 600000 --network-concurrency 1
-              yarn build
-              yarn oclif manifest
-              yarn ci:download-web-uis
-              yarn ci:daemon:test-before-release
-              yarn generate:executable:tarballs:linux:arm64
-              yarn ci:rename-tarballs
+              HUSKY=0 npm ci
+              npm run build
+              npx oclif manifest
+              npm run ci:download-web-uis
+              npm run ci:daemon:test-before-release
+              npm run generate:executable:tarballs:linux:arm64
+              npm run ci:rename-tarballs
         - name: Upload tarballs to release
           uses: svenstaro/upload-release-action@v2
           with:

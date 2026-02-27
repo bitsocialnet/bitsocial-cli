@@ -48,15 +48,15 @@ For Windows, You need to install [vc-redist](https://learn.microsoft.com/en-US/c
 
 ## Build your Bitsocial executable manually (optional)
 
-In case the installation script is not working for you or you just want to build the source code directly. First, you need to have `NodeJS 20`, `npm` and `yarn` installed
+In case the installation script is not working for you or you just want to build the source code directly. First, you need to have `NodeJS 22` and `npm` installed
 
 ```
 git clone https://github.com/bitsocialhq/bitsocial-cli
 cd bitsocial-cli
-yarn install --frozen-lockfile
-yarn build
-yarn oclif manifest
-yarn ci:download-web-uis
+npm ci
+npm run build
+npx oclif manifest
+npm run ci:download-web-uis
 ./bin/run --help
 ```
 
@@ -663,7 +663,7 @@ _See code: [src/cli/commands/logs.ts](https://github.com/bitsocialhq/bitsocial-c
 
 We're always happy to receive pull requests. Few things to keep in mind:
 
--   This repo follows [Angular commit conventions](https://github.com/angular/angular/blob/main/CONTRIBUTING.md). Easiest way to follow these conventions is by using `yarn commit` instead of `git commit`
+-   This repo follows [Angular commit conventions](https://github.com/angular/angular/blob/main/CONTRIBUTING.md). Easiest way to follow these conventions is by using `npm run commit` instead of `git commit`
 -   If you're adding a feature, make sure to add tests to your pull requests
 
 # Feedback
