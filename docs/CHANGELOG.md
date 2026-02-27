@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.31 (2026-02-27)</small>
+
+* fix(ci): add retry logic to tarball generation for transient network failures ([f31cd0f](https://github.com/bitsocialhq/bitsocial-cli/commit/f31cd0f))
+* build(deps): update package-lock.json ([9fb9818](https://github.com/bitsocialhq/bitsocial-cli/commit/9fb9818))
+
 ## <small>0.19.30 (2026-02-27)</small>
 
 * fix(deps): override react-devtools-core to fix CI dependency conflict ([83f9d0c](https://github.com/bitsocialhq/bitsocial-cli/commit/83f9d0c))
