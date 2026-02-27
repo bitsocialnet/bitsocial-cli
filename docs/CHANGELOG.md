@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.28 (2026-02-26)</small>
+
+* chore(deps): upgrade kubo from 0.39.0 to 0.40.0 ([7539af6](https://github.com/bitsocialhq/bitsocial-cli/commit/7539af6))
+* test: add CLI command completion time integration tests ([85a6319](https://github.com/bitsocialhq/bitsocial-cli/commit/85a6319))
+* fix: clear RPC connection timeout on success to prevent ~20s hang ([41938e7](https://github.com/bitsocialhq/bitsocial-cli/commit/41938e7))
+
 ## <small>0.19.27 (2026-02-25)</small>
 
 * fix(ci): use standalone compose file instead of override to remove sysctls ([dd29c08](https://github.com/bitsocialhq/bitsocial-cli/commit/dd29c08))
