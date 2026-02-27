@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.30 (2026-02-27)</small>
+
+* fix(deps): override react-devtools-core to fix CI dependency conflict ([83f9d0c](https://github.com/bitsocialhq/bitsocial-cli/commit/83f9d0c))
+* fix(deps): update plebbit-js and override node-datachannel to fix CI-release ([ec3837e](https://github.com/bitsocialhq/bitsocial-cli/commit/ec3837e))
+* fix(docker): skip prepare in deps install and add CI smoke build ([b8ef303](https://github.com/bitsocialhq/bitsocial-cli/commit/b8ef303))
+
 ## <small>0.19.29 (2026-02-27)</small>
 
 * chore: migrate repo and CI from yarn to npm ([0b9991c](https://github.com/bitsocialhq/bitsocial-cli/commit/0b9991c))
