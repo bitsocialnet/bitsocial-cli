@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm pkg delete scripts.prepare && npm ci --omit=dev && npm cache clean --force
 
 # ---- Runtime stage ----
 FROM node:22-slim

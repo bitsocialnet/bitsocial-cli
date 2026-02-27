@@ -43,6 +43,9 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      - name: Smoke test Docker deps stage
+        run: docker build --target deps -t bitsocial-cli:deps-smoke .
+
       - run: npm ci
       - run: npm run build
       - run: npx oclif manifest
