@@ -112,7 +112,7 @@
         "@oclif/plugin-help": "6.2.36",
         "@oclif/plugin-not-found": "3.2.73",
         "@oclif/table": "0.5.1",
-        "@plebbit/plebbit-js": "https://github.com/plebbit/plebbit-js#fd7486d31ce71b29b6dc49c019278af8fb0b0d45",
+        "@plebbit/plebbit-js": "https://github.com/plebbit/plebbit-js#e6ba6b50fdda4c1fe5d6f81d33ff740a732756fd",
         "dataobject-parser": "1.2.22",
         "decompress": "4.2.1",
         "env-paths": "2.2.1",
@@ -122,5 +122,8 @@
         "tcp-port-used": "1.0.2",
         "tslib": "2.6.2",
         "typescript": "5.9.3"
+    },
+    "overrides": {
+        "node-datachannel": "0.32.1"
     }
 }
