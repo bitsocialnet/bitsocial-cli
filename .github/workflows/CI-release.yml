@@ -43,12 +43,7 @@ jobs:
       - name: Run daemon and make sure it's online
         run: npm run ci:daemon:test-before-release
       - name: Generate tarballs
-        run: |
-          for i in 1 2 3; do
-            npm run generate:executable:tarballs:linux:x64 && break
-            echo "Attempt $i failed, retrying in 15s..."
-            sleep 15
-          done
+        run: npm run generate:executable:tarballs:linux:x64
       - name: Rename tarballs and installers
         run: npm run ci:rename-tarballs
       - name: Upload tarballs to release
@@ -97,12 +92,7 @@ jobs:
       - name: Run daemon and make sure it's online
         run: npm run ci:daemon:test-before-release
       - name: Generate tarballs
-        run: |
-          for i in 1 2 3; do
-            npm run generate:executable:tarballs:macos:${{ matrix.arch }} && break
-            echo "Attempt $i failed, retrying in 15s..."
-            sleep 15
-          done
+        run: npm run generate:executable:tarballs:macos:${{ matrix.arch }}
       - name: Rename tarballs and installers
         run: npm run ci:rename-tarballs
       - name: Upload tarballs to release
@@ -154,13 +144,7 @@ jobs:
         run: Add-Content $env:GITHUB_PATH 'C:\Program Files (x86)\NSIS'
         shell: powershell
       - name: Generate Windows installer
-        run: |
-          for i in 1 2 3; do
-            npm run generate:installer:windows && break
-            echo "Attempt $i failed, retrying in 15s..."
-            sleep 15
-          done
-        shell: bash
+        run: npm run generate:installer:windows
       # You can't use oclif pack on windows, so we're skipping it for now
       # - name: Generate Windows tarballs
       #   run: npm run generate:executable:tarballs:windows
@@ -207,11 +191,7 @@ jobs:
               npx oclif manifest
               npm run ci:download-web-uis
               npm run ci:daemon:test-before-release
-              for i in 1 2 3; do
-                npm run generate:executable:tarballs:linux:arm64 && break
-                echo "Attempt $i failed, retrying in 15s..."
-                sleep 15
-              done
+              npm run generate:executable:tarballs:linux:arm64
               npm run ci:rename-tarballs
         - name: Upload tarballs to release
           uses: svenstaro/upload-release-action@v2

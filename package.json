@@ -18,7 +18,7 @@
         "build:test:watch": "tsc --watch --project config/test.tsconfig.json",
         "test:cli": "npm run ci:download-web-uis && vitest run --bail 1 --config config/vitest.config.ts",
         "commit": "cz",
-        "prepare": "husky install",
+        "prepare": "test -d .git && husky install || true",
         "release": "HUSKY=0 release-it --config config/.release-it.json",
         "generate:readme": "oclif readme && sed -i 's@/src/commands/@/src/cli/commands/@g' README.md && sed -i 's@src/commands@src/cli/commands@g' README.md",
         "generate:executable:tarballs:macos:x64": "npm run clean && oclif pack tarballs --no-xz --targets darwin-x64",
