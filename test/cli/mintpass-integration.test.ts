@@ -64,7 +64,7 @@ async function publishCommentWithChallenge(opts: {
 }): Promise<{
     challengeSuccess: boolean;
     challengeText?: string;
-    challengeErrors?: (string | undefined)[];
+    challengeErrors?: Record<string, string>;
 }> {
     const { pkc, communityAddress, challengeAnswer, timeoutMs = 60000 } = opts;
     const signer = await pkc.createSigner();
@@ -94,13 +94,10 @@ async function publishCommentWithChallenge(opts: {
 
         comment.on("challengeverification", (verification: any) => {
             clearTimeout(timeout);
-            // pkc-js may put errors in challengeErrors or in individual challenge error fields
-            const errors = verification.challengeErrors
-                ?? verification.challenges?.map((c: any) => c?.error).filter(Boolean);
             resolve({
                 challengeSuccess: verification.challengeSuccess,
                 challengeText,
-                challengeErrors: errors?.length ? errors : undefined
+                challengeErrors: verification.challengeErrors
             });
         });
 
@@ -115,7 +112,7 @@ async function publishCommentWithChallenge(opts: {
 
 // --- Tests ---
 
-describe("@mintpass/challenge integration tests", { timeout: 600_000 }, () => {
+describe("@bitsocial/mintpass-challenge integration tests", { timeout: 600_000 }, () => {
     let daemonProcess: ManagedChildProcess | undefined;
     let pkc: PKCInstance;
     let dataPath: string;
@@ -123,10 +120,10 @@ describe("@mintpass/challenge integration tests", { timeout: 600_000 }, () => {
     beforeAll(async () => {
         dataPath = randomDirectory();
 
-        // Install the real @mintpass/challenge package from npm
-        const installResult = await runBitsocialChallenge(["install", "@mintpass/challenge", "--pkcOptions.dataPath", dataPath]);
+        // Install the real @bitsocial/mintpass-challenge package from npm
+        const installResult = await runBitsocialChallenge(["install", "@bitsocial/mintpass-challenge", "--pkcOptions.dataPath", dataPath]);
         expect(installResult.exitCode).toBe(0);
-        expect(installResult.stdout).toContain("Installed challenge '@mintpass/challenge");
+        expect(installResult.stdout).toContain("Installed challenge '@bitsocial/mintpass-challenge");
 
         // Start daemon — it handles kubo, RPC, and webui internally
         daemonProcess = await startPkcDaemon(["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", rpcWsUrl], {
@@ -156,56 +153,44 @@ describe("@mintpass/challenge integration tests", { timeout: 600_000 }, () => {
         await stopPkcDaemon(daemonProcess);
     });
 
-    it("daemon loads @mintpass/challenge on startup", () => {
-        expect(daemonProcess?.capturedStdout).toContain("@mintpass/challenge");
+    it("daemon loads @bitsocial/mintpass-challenge on startup", () => {
+        expect(daemonProcess?.capturedStdout).toContain("@bitsocial/mintpass-challenge");
     });
 
-    it("challenge list includes @mintpass/challenge", { timeout: 120_000 }, async () => {
+    it("challenge list includes @bitsocial/mintpass-challenge", { timeout: 120_000 }, async () => {
         const listResult = await runBitsocialChallenge(["list", "--pkcOptions.dataPath", dataPath]);
         expect(listResult.exitCode).toBe(0);
-        expect(listResult.stdout).toContain("@mintpass/challenge");
+        expect(listResult.stdout).toContain("@bitsocial/mintpass-challenge");
     });
 
-    it("challenge reload endpoint includes @mintpass/challenge", { timeout: 120_000 }, async () => {
+    it("challenge reload endpoint includes @bitsocial/mintpass-challenge", { timeout: 120_000 }, async () => {
         const reloadRes = await fetch(`http://localhost:${RPC_PORT}/api/challenges/reload`, { method: "POST" });
         expect(reloadRes.status).toBe(200);
         const reloadBody = (await reloadRes.json()) as { ok: boolean; challenges: string[] };
         expect(reloadBody.ok).toBe(true);
-        expect(reloadBody.challenges).toContain("@mintpass/challenge");
+        expect(reloadBody.challenges).toContain("@bitsocial/mintpass-challenge");
     });
 
     it("publish without wallet fails with wallet-not-defined error", { timeout: 120_000 }, async () => {
         const sub = await pkc.createCommunity();
         await sub.edit({
             settings: {
-                challenges: [{ name: "@mintpass/challenge" }]
+                challenges: [{ name: "@bitsocial/mintpass-challenge" }]
             }
         });
         await sub.start();
         await waitForCondition(() => !!sub.updatedAt, 60000, 500);
 
         try {
-            let gotExpectedError = false;
-            try {
-                const result = await publishCommentWithChallenge({
-                    pkc,
-                    communityAddress: sub.address,
-                    challengeAnswer: ""
-                });
-                // Old behavior: challengeSuccess false with challengeErrors
-                expect(result.challengeSuccess).toBe(false);
-                expect(result.challengeErrors).toBeDefined();
-                const errors = result.challengeErrors!;
-                const errorText = Array.isArray(errors) ? errors.filter(Boolean).join(" ") : Object.values(errors).filter(Boolean).join(" ");
-                expect(errorText).toContain("Author wallet address is not defined");
-                gotExpectedError = true;
-            } catch (err: any) {
-                // New behavior: pkc-js may emit an error event when the challenge plugin returns an invalid result
-                const errMsg = err?.message || err?.code || String(err);
-                expect(errMsg).toMatch(/wallet|challenge|INVALID_RESULT/i);
-                gotExpectedError = true;
-            }
-            expect(gotExpectedError).toBe(true);
+            const result = await publishCommentWithChallenge({
+                pkc,
+                communityAddress: sub.address,
+                challengeAnswer: ""
+            });
+            expect(result.challengeSuccess).toBe(false);
+            expect(result.challengeErrors).toBeDefined();
+            const errorText = Object.values(result.challengeErrors!).filter(Boolean).join(" ");
+            expect(errorText).toContain("Author wallet address is not defined");
         } finally {
             try {
                 await sub.stop();

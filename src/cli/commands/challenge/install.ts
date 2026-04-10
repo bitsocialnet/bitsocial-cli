@@ -31,8 +31,8 @@ export default class Install extends Command {
     };
 
     static override examples = [
-        "bitsocial challenge install @mintpass/challenge",
-        "bitsocial challenge install @mintpass/challenge@1.0.0",
+        "bitsocial challenge install @bitsocial/mintpass-challenge",
+        "bitsocial challenge install @bitsocial/mintpass-challenge@1.0.0",
         "bitsocial challenge install github:user/repo",
         "bitsocial challenge install https://example.com/my-challenge-1.0.0.tar.gz",
         "bitsocial challenge install ./my-local-challenge"

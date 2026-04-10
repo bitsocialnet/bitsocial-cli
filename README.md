@@ -330,9 +330,9 @@ DESCRIPTION
   Install a challenge package (npm package name, git URL, tarball URL, or local path)
 
 EXAMPLES
-  $ bitsocial challenge install @mintpass/challenge
+  $ bitsocial challenge install @bitsocial/mintpass-challenge
 
-  $ bitsocial challenge install @mintpass/challenge@1.0.0
+  $ bitsocial challenge install @bitsocial/mintpass-challenge@1.0.0
 
   $ bitsocial challenge install github:user/repo
 
