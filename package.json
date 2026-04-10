@@ -6,7 +6,7 @@
     "homepage": "https://github.com/bitsocialhq/bitsocial-cli",
     "repository": "git@github.com:bitsocialhq/bitsocial-cli.git",
     "author": "Bitsocial Labs",
-    "license": "GPL-2.0-only",
+    "license": "GPL-3.0-or-later",
     "type": "module",
     "private": true,
     "exports": null,
