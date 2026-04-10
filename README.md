@@ -312,19 +312,19 @@ $ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 * [`bitsocial help [COMMAND]`](#bitsocial-help-command)
 * [`bitsocial logs`](#bitsocial-logs)
 
-### `bitsocial challenge install PACKAGE`
+## `bitsocial challenge install PACKAGE`
 
 Install a challenge package (npm package name, git URL, tarball URL, or local path)
 
 ```
 USAGE
-  $ bitsocial challenge install PACKAGE [--plebbitOptions.dataPath <value>]
+  $ bitsocial challenge install PACKAGE [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
 
 FLAGS
-  --plebbitOptions.dataPath=<value>  Data path to install the challenge into
+  --pkcOptions.dataPath=<value>  Data path to install the challenge into
 
 DESCRIPTION
   Install a challenge package (npm package name, git URL, tarball URL, or local path)
@@ -341,19 +341,19 @@ EXAMPLES
   $ bitsocial challenge install ./my-local-challenge
 ```
 
-_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/challenge/install.ts)_
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/challenge/install.ts)_
 
-### `bitsocial challenge list`
+## `bitsocial challenge list`
 
 List installed challenge packages
 
 ```
 USAGE
-  $ bitsocial challenge list [-q] [--plebbitOptions.dataPath <value>]
+  $ bitsocial challenge list [-q] [--pkcOptions.dataPath <value>]
 
 FLAGS
-  -q, --quiet                            Only display challenge names
-      --plebbitOptions.dataPath=<value>  Data path where challenges are installed
+  -q, --quiet                        Only display challenge names
+      --pkcOptions.dataPath=<value>  Data path where challenges are installed
 
 DESCRIPTION
   List installed challenge packages
@@ -364,21 +364,21 @@ EXAMPLES
   $ bitsocial challenge list -q
 ```
 
-_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/challenge/list.ts)_
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/challenge/list.ts)_
 
-### `bitsocial challenge remove NAME`
+## `bitsocial challenge remove NAME`
 
 Remove an installed challenge package
 
 ```
 USAGE
-  $ bitsocial challenge remove NAME [--plebbitOptions.dataPath <value>]
+  $ bitsocial challenge remove NAME [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
 
 FLAGS
-  --plebbitOptions.dataPath=<value>  Data path where challenges are installed
+  --pkcOptions.dataPath=<value>  Data path where challenges are installed
 
 DESCRIPTION
   Remove an installed challenge package
@@ -389,25 +389,24 @@ EXAMPLES
   $ bitsocial challenge remove @scope/my-challenge
 ```
 
-_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/challenge/remove.ts)_
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/challenge/remove.ts)_
 
-### `bitsocial community create`
+## `bitsocial community create`
 
-Create a community with specific properties. A newly created community will be started after creation and be able to receive publications. For a list of properties, visit https://github.com/plebbit/plebbit-js#subplebbiteditsubplebbiteditoptions
+Create a community with specific properties. A newly created community will be started after creation and be able to receive publications. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
 
 ```
 USAGE
-  $ bitsocial community create --plebbitRpcUrl <value> [--privateKeyPath <value>]
+  $ bitsocial community create --pkcRpcUrl <value> [--privateKeyPath <value>]
 
 FLAGS
-  --plebbitRpcUrl=<value>   (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  --pkcRpcUrl=<value>       (required) [default: ws://localhost:9138/] URL to PKC RPC
   --privateKeyPath=<value>  Private key (PEM) of the community signer that will be used to determine address (if address
-                            is not a domain). If it's not provided then Plebbit will generate a private key
+                            is not a domain). If it's not provided then PKC will generate a private key
 
 DESCRIPTION
   Create a community with specific properties. A newly created community will be started after creation and be able to
-  receive publications. For a list of properties, visit
-  https://github.com/plebbit/plebbit-js#subplebbiteditsubplebbiteditoptions
+  receive publications. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
 
 EXAMPLES
   Create a community with title 'Hello Plebs' and description 'Welcome'
@@ -415,21 +414,21 @@ EXAMPLES
     $ bitsocial community create --title 'Hello Plebs' --description 'Welcome'
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/create.ts)_
 
-### `bitsocial community delete ADDRESSES`
+## `bitsocial community delete ADDRESSES`
 
 Delete a community permanently.
 
 ```
 USAGE
-  $ bitsocial community delete ADDRESSES... --plebbitRpcUrl <value>
+  $ bitsocial community delete ADDRESSES... --pkcRpcUrl <value>
 
 ARGUMENTS
   ADDRESSES...  Addresses of communities to delete. Separated by space
 
 FLAGS
-  --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Delete a community permanently.
@@ -440,25 +439,24 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/delete.ts)_
 
-### `bitsocial community edit ADDRESS`
+## `bitsocial community edit ADDRESS`
 
-Edit a community's properties. For a list of properties, visit https://github.com/plebbit/plebbit-js#subplebbiteditsubplebbiteditoptions
+Edit a community's properties. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
 
 ```
 USAGE
-  $ bitsocial community edit ADDRESS --plebbitRpcUrl <value>
+  $ bitsocial community edit ADDRESS --pkcRpcUrl <value>
 
 ARGUMENTS
   ADDRESS  Address of the community to edit
 
 FLAGS
-  --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
-  Edit a community's properties. For a list of properties, visit
-  https://github.com/plebbit/plebbit-js#subplebbiteditsubplebbiteditoptions
+  Edit a community's properties. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
 
 EXAMPLES
   Change the address of the community to a new domain address
@@ -493,21 +491,21 @@ EXAMPLES
     $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls=false
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/edit.ts)_
 
-### `bitsocial community get ADDRESS`
+## `bitsocial community get ADDRESS`
 
 Fetch a local or remote community, and print its json in the terminal
 
 ```
 USAGE
-  $ bitsocial community get ADDRESS --plebbitRpcUrl <value>
+  $ bitsocial community get ADDRESS --pkcRpcUrl <value>
 
 ARGUMENTS
   ADDRESS  Address of the community to fetch
 
 FLAGS
-  --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Fetch a local or remote community, and print its json in the terminal
@@ -518,19 +516,19 @@ EXAMPLES
   $ bitsocial community get 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/get.ts)_
 
-### `bitsocial community list`
+## `bitsocial community list`
 
 List your communities
 
 ```
 USAGE
-  $ bitsocial community list --plebbitRpcUrl <value> [-q]
+  $ bitsocial community list --pkcRpcUrl <value> [-q]
 
 FLAGS
-  -q, --quiet                  Only display community addresses
-      --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  -q, --quiet              Only display community addresses
+      --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   List your communities
@@ -541,21 +539,21 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/list.ts)_
 
-### `bitsocial community start ADDRESSES`
+## `bitsocial community start ADDRESSES`
 
 Start a community
 
 ```
 USAGE
-  $ bitsocial community start ADDRESSES... --plebbitRpcUrl <value>
+  $ bitsocial community start ADDRESSES... --pkcRpcUrl <value>
 
 ARGUMENTS
   ADDRESSES...  Addresses of communities to start. Separated by space
 
 FLAGS
-  --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Start a community
@@ -570,21 +568,21 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q)
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/start.ts)_
 
-### `bitsocial community stop ADDRESSES`
+## `bitsocial community stop ADDRESSES`
 
 Stop a community. The community will not publish or receive any publications until it is started again.
 
 ```
 USAGE
-  $ bitsocial community stop ADDRESSES... --plebbitRpcUrl <value>
+  $ bitsocial community stop ADDRESSES... --pkcRpcUrl <value>
 
 ARGUMENTS
   ADDRESSES...  Addresses of communities to stop. Separated by space
 
 FLAGS
-  --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to Plebbit RPC
+  --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Stop a community. The community will not publish or receive any publications until it is started again.
@@ -595,27 +593,30 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/community/stop.ts)_
 
-### `bitsocial daemon`
+## `bitsocial daemon`
 
 Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
 
 ```
 USAGE
-  $ bitsocial daemon --plebbitRpcUrl <value> --logPath <value>
+  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--chainProviderUrls <value>...]
 
 FLAGS
-  --logPath=<value>        (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which will be
-                           used to store logs
-  --plebbitRpcUrl=<value>  (required) [default: ws://localhost:9138/] Specify Plebbit RPC URL to listen on
+  --chainProviderUrls=<value>...  [default: viem,https://ethrpc.xyz] Ethereum RPC URL(s) for .bso/.eth name resolution.
+                                  Can be specified multiple times. Defaults to viem public transport and
+                                  https://ethrpc.xyz
+  --logPath=<value>               (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
+                                  will be used to store logs
+  --pkcRpcUrl=<value>             (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
 
 DESCRIPTION
   Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and
   receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on
   any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
-  Options can be passed to the RPC's instance through flag --plebbitOptions.optionName. For a list of plebbit options
-  (https://github.com/plebbit/plebbit-js?tab=readme-ov-file#plebbitoptions)
+  Options can be passed to the RPC's instance through flag --pkcOptions.optionName. For a list of pkc options
+  (https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#pkcoptions)
   If you need to modify ipfs config, you should head to {bitsocial-data-path}/.ipfs-bitsocial-cli/config and modify the
   config file
 
@@ -623,18 +624,20 @@ DESCRIPTION
 EXAMPLES
   $ bitsocial daemon
 
-  $ bitsocial daemon --plebbitRpcUrl ws://localhost:53812
+  $ bitsocial daemon --pkcRpcUrl ws://localhost:53812
 
-  $ bitsocial daemon --plebbitOptions.dataPath /tmp/bitsocial-datapath/
+  $ bitsocial daemon --pkcOptions.dataPath /tmp/bitsocial-datapath/
 
-  $ bitsocial daemon --plebbitOptions.chainProviders.eth[0].url https://ethrpc.com
+  $ bitsocial daemon --pkcOptions.kuboRpcClientsOptions[0] https://remoteipfsnode.com
 
-  $ bitsocial daemon --plebbitOptions.kuboRpcClientsOptions[0] https://remoteipfsnode.com
+  $ bitsocial daemon --chainProviderUrls https://mainnet.infura.io/v3/YOUR_KEY
+
+  $ bitsocial daemon --chainProviderUrls viem --chainProviderUrls https://mainnet.infura.io/v3/YOUR_KEY
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/daemon.ts)_
 
-### `bitsocial help [COMMAND]`
+## `bitsocial help [COMMAND]`
 
 Display help for bitsocial.
 
@@ -654,7 +657,7 @@ DESCRIPTION
 
 _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v6.2.36/src/cli/commands/help.ts)_
 
-### `bitsocial logs`
+## `bitsocial logs`
 
 View the latest BitSocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output in real-time (like tail -f).
 
@@ -688,7 +691,7 @@ EXAMPLES
   $ bitsocial logs --since 1h -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.35/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.36/src/cli/commands/logs.ts)_
 <!-- commandsstop -->
 
 ## Contribution

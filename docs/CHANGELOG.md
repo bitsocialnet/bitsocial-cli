@@ -1,5 +1,18 @@
 # Changelog
 
+## <small>0.19.36 (2026-04-10)</small>
+
+* chore: migrate @pkc/pkc-js to @pkcprotocol/pkc-js from npm registry ([1ccf31a](https://github.com/bitsocialhq/bitsocial-cli/commit/1ccf31a))
+* chore: upgrade @plebbit/plebbit-js to @pkc/pkc-js 542952a1 ([e623e32](https://github.com/bitsocialhq/bitsocial-cli/commit/e623e32))
+* chore(gitignore): ignore local agent and macOS files ([2b25ae3](https://github.com/bitsocialhq/bitsocial-cli/commit/2b25ae3))
+* feat: integrate @bitsocial/bso-resolver for .bso/.eth name resolution ([1cc8685](https://github.com/bitsocialhq/bitsocial-cli/commit/1cc8685))
+* fix: migrate mintpass challenge from @mintpass/challenge to @bitsocial/mintpass-challenge ([3db6243](https://github.com/bitsocialhq/bitsocial-cli/commit/3db6243))
+* docs: restructure AGENTS.md with prioritized rules and task router ([b63203f](https://github.com/bitsocialhq/bitsocial-cli/commit/b63203f))
+* docs(readme): add cli banner image asset ([6f46cb8](https://github.com/bitsocialhq/bitsocial-cli/commit/6f46cb8))
+* docs(readme): fix headers ([818bc94](https://github.com/bitsocialhq/bitsocial-cli/commit/818bc94))
+* Update README.md ([94b2dec](https://github.com/bitsocialhq/bitsocial-cli/commit/94b2dec))
+* Update README.md ([2c9661f](https://github.com/bitsocialhq/bitsocial-cli/commit/2c9661f))
+
 ## <small>0.19.35 (2026-03-05)</small>
 
 * chore: upgrade @plebbit/plebbit-js to 10ed04e3 and kubo to 0.40.1 ([afa5101](https://github.com/bitsocialhq/bitsocial-cli/commit/afa5101))
