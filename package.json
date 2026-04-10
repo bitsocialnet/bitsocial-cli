@@ -114,7 +114,7 @@
         "@oclif/plugin-help": "6.2.36",
         "@oclif/plugin-not-found": "3.2.73",
         "@oclif/table": "0.5.1",
-        "@pkc/pkc-js": "https://github.com/pkcprotocol/pkc-js#542952a1a63211be218c31fe3dc256df2cdc6375",
+        "@pkcprotocol/pkc-js": "0.0.12",
         "dataobject-parser": "1.2.22",
         "decompress": "4.2.1",
         "env-paths": "2.2.1",

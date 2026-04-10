@@ -1,4 +1,4 @@
-type PKCModule = Awaited<typeof import("@pkc/pkc-js", { with: { "resolution-mode": "import" } })>;
+type PKCModule = Awaited<typeof import("@pkcprotocol/pkc-js", { with: { "resolution-mode": "import" } })>;
 type PKCFactory = PKCModule["default"];
 
 

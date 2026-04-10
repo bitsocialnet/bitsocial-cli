@@ -4,7 +4,7 @@ import { directory as randomDirectory } from "tempy";
 import fsPromise from "fs/promises";
 import path from "path";
 import dns from "node:dns";
-import PKC from "@pkc/pkc-js";
+import PKC from "@pkcprotocol/pkc-js";
 import {
     type ManagedChildProcess,
     stopPkcDaemon,

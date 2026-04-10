@@ -2,7 +2,7 @@ import { ChildProcess, spawn } from "child_process";
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import dns from "node:dns";
-import PKC from "@pkc/pkc-js";
+import PKC from "@pkcprotocol/pkc-js";
 import {
     type ManagedChildProcess,
     stopPkcDaemon,

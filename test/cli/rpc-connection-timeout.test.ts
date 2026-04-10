@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import EventEmitter from "events";
 
-vi.mock("@pkc/pkc-js", () => {
+vi.mock("@pkcprotocol/pkc-js", () => {
     return {
         default: vi.fn()
     };
@@ -26,7 +26,7 @@ describe("RPC connection timeout", () => {
     });
 
     it("should throw if communitieschange is not emitted within 20s", async () => {
-        const { default: PKCMock } = await import("@pkc/pkc-js");
+        const { default: PKCMock } = await import("@pkcprotocol/pkc-js");
         const fakePkc = new EventEmitter();
         vi.mocked(PKCMock).mockResolvedValue(fakePkc as any);
 
@@ -53,7 +53,7 @@ describe("RPC connection timeout", () => {
     });
 
     it("should resolve immediately and clear timeout when communitieschange is emitted", async () => {
-        const { default: PKCMock } = await import("@pkc/pkc-js");
+        const { default: PKCMock } = await import("@pkcprotocol/pkc-js");
         const fakePkc = new EventEmitter();
         vi.mocked(PKCMock).mockResolvedValue(fakePkc as any);
 
@@ -82,7 +82,7 @@ describe("RPC connection timeout", () => {
     });
 
     it("should reject with the last pkc error if one was emitted before timeout", async () => {
-        const { default: PKCMock } = await import("@pkc/pkc-js");
+        const { default: PKCMock } = await import("@pkcprotocol/pkc-js");
         const fakePkc = new EventEmitter();
         vi.mocked(PKCMock).mockResolvedValue(fakePkc as any);
 

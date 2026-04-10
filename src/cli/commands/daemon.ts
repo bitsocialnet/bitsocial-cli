@@ -24,7 +24,7 @@ import { EOL } from "node:os";
 import { formatWithOptions } from "node:util";
 import { createRequire } from "node:module";
 //@ts-expect-error
-import type { InputPKCOptions } from "@pkc/pkc-js/dist/node/types.js";
+import type { InputPKCOptions } from "@pkcprotocol/pkc-js/dist/node/types.js";
 //@ts-expect-error
 import DataObjectParser from "dataobject-parser";
 
@@ -340,7 +340,7 @@ export default class Daemon extends Command {
                 );
                 console.log("Using the already started RPC server at:", pkcRpcUrl);
                 console.log("bitsocial-cli daemon will monitor the PKC RPC and kubo ipfs API to make sure they're always up");
-                const PKC = await import("@pkc/pkc-js");
+                const PKC = await import("@pkcprotocol/pkc-js");
                 const pkc = await PKC.default({ pkcRpcClientsOptions: [pkcRpcUrl.toString()] });
                 await new Promise((resolve) => pkc.once("communitieschange", resolve));
                 pkc.on("error", (error) => console.error("Error from pkc instance", error));

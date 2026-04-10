@@ -7,7 +7,7 @@ import { dirname, join } from "path";
 const getPkcJsVersion = (): string => {
     const require = createRequire(import.meta.url);
     // Get path to pkc-js module
-    const pkcJsPath = require.resolve("@pkc/pkc-js");
+    const pkcJsPath = require.resolve("@pkcprotocol/pkc-js");
     // Navigate to package root (pkc-js main export is dist/node/index.js)
     const pkcJsRoot = dirname(dirname(dirname(pkcJsPath)));
     const pkcPkgPath = join(pkcJsRoot, "package.json");
@@ -15,12 +15,12 @@ const getPkcJsVersion = (): string => {
     return pkcPkg.version;
 };
 
-// Get commit hash from CLI's package.json dependency URL
+// Get commit hash from CLI's package.json dependency URL (if installed from git)
 const getPkcJsCommit = (cliRoot: string): string | undefined => {
     try {
         const cliPkgPath = join(cliRoot, "package.json");
         const cliPkg = JSON.parse(readFileSync(cliPkgPath, "utf-8"));
-        const pkcJsDep = cliPkg.dependencies["@pkc/pkc-js"];
+        const pkcJsDep = cliPkg.dependencies["@pkcprotocol/pkc-js"];
         // Extract commit hash from URL like "https://github.com/pkcprotocol/pkc-js#542952a1..."
         const match = pkcJsDep?.match(/#([a-f0-9]+)$/);
         return match ? match[1].substring(0, 7) : undefined;

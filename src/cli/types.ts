@@ -1,7 +1,7 @@
 import type {
     CreateNewLocalCommunityUserOptions as PKCCreateCommunityOptions
     //@ts-expect-error
-} from "@pkc/pkc-js/dist/node/community/types.js";
+} from "@pkcprotocol/pkc-js/dist/node/community/types.js";
 
 export interface CliCreateCommunityOptions
     extends Pick<

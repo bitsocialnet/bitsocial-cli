@@ -10,7 +10,7 @@ const PACKAGE_JSON_PATH = join(process.cwd(), "package.json");
 const getExpectedValues = () => {
     const cliPkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf-8"));
     const cliVersion = cliPkg.version;
-    const pkcJsDep = cliPkg.dependencies["@pkc/pkc-js"];
+    const pkcJsDep = cliPkg.dependencies["@pkcprotocol/pkc-js"];
     // Extract commit hash from URL like "https://github.com/pkcprotocol/pkc-js#542952a1..."
     const commitMatch = pkcJsDep?.match(/#([a-f0-9]+)$/);
     const commit = commitMatch ? commitMatch[1].substring(0, 7) : undefined;

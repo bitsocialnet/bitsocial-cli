@@ -49,7 +49,7 @@ export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, pkcOpt
     const httpServer = webuiExpressApp.listen(Number(rpcUrl.port));
     log("HTTP server is running on", "0.0.0.0" + ":" + rpcUrl.port);
     const rpcAuthKey = await _generateRpcAuthKeyIfNotExisting(pkcOptions.dataPath!);
-    const PKCRpc = await import("@pkc/pkc-js/rpc");
+    const PKCRpc = await import("@pkcprotocol/pkc-js/rpc");
 
     // Will add ability to edit later, but it's hard coded for now
 

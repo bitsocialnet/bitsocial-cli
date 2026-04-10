@@ -1,6 +1,6 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../common-utils/defaults.js";
-import PKC from "@pkc/pkc-js";
+import PKC from "@pkcprotocol/pkc-js";
 import { getPKCLogger, setupDebugLogger } from "../util.js";
 type PKCInstance = Awaited<ReturnType<typeof PKC>>;
 type PKCConnectOverride = (pkcRpcUrl: string) => Promise<PKCInstance>;

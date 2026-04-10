@@ -5,7 +5,7 @@ This document provides a comprehensive checklist for renaming the plebbit-cli co
 - **plebbit** (command) → **bitsocial** (command)
 - **subplebbit** → **community**
 
-> **Note:** plebbit-js has been rebranded to pkc-js (@pkc/pkc-js). All imports, class names, and API calls have been updated (PKC, createCommunity, getCommunity, etc.).
+> **Note:** plebbit-js has been rebranded to pkc-js (@pkcprotocol/pkc-js). All imports, class names, and API calls have been updated (PKC, createCommunity, getCommunity, etc.).
 
 ## Summary Statistics
 
@@ -360,6 +360,6 @@ These repositories are outside bitsocial-cli but will need coordinated updates:
 
 | Repository | Changes Needed | Status |
 |------------|---------------|--------|
-| @plebbit/plebbit-js → @pkc/pkc-js | Core library rename | [ ] Not Started |
+| @plebbit/plebbit-js → @pkcprotocol/pkc-js | Core library rename | [ ] Not Started |
 | @plebbit/plebbit-logger → @pkc/pkc-logger | Logger package rename | [ ] Not Started |
 | WebUIs (seedit, plebchan, plebones) | Update default options variable names | [ ] Not Started |

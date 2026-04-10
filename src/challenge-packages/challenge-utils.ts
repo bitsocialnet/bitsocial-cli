@@ -228,7 +228,7 @@ export async function loadChallengesIntoPKC(dataPath?: string): Promise<string[]
     const challenges = await listInstalledChallenges(dataPath);
     if (challenges.length === 0) return [];
 
-    const PKC = await import("@pkc/pkc-js");
+    const PKC = await import("@pkcprotocol/pkc-js");
     const loadedNames: string[] = [];
 
     for (const challenge of challenges) {
