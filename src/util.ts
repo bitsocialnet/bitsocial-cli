@@ -8,7 +8,7 @@ export type PKCLogger = Awaited<ReturnType<typeof getPKCLogger>> & {
 };
 
 export async function getPKCLogger() {
-    const Logger = await import("@pkc/pkc-logger");
+    const Logger = await import("@pkcprotocol/pkc-logger");
     return Logger.default;
 }
 

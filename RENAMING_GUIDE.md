@@ -361,5 +361,5 @@ These repositories are outside bitsocial-cli but will need coordinated updates:
 | Repository | Changes Needed | Status |
 |------------|---------------|--------|
 | @plebbit/plebbit-js → @pkcprotocol/pkc-js | Core library rename | [ ] Not Started |
-| @plebbit/plebbit-logger → @pkc/pkc-logger | Logger package rename | [ ] Not Started |
+| @plebbit/plebbit-logger → @pkcprotocol/pkc-logger | Logger package rename | [ ] Not Started |
 | WebUIs (seedit, plebchan, plebones) | Update default options variable names | [ ] Not Started |
