@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.38 (2026-04-11)</small>
+
+* chore: upgrade @pkcprotocol/pkc-js to 0.0.14 ([52176bd](https://github.com/bitsocialhq/bitsocial-cli/commit/52176bd))
+* fix: increase npm network timeout for Docker arm64 builds ([c173a40](https://github.com/bitsocialhq/bitsocial-cli/commit/c173a40))
+* fix(ci): restore shell: bash for Windows installer step ([817c76e](https://github.com/bitsocialhq/bitsocial-cli/commit/817c76e))
+
 ## <small>0.19.37 (2026-04-11)</small>
 
 * chore: rename @pkc/pkc-logger to @pkcprotocol/pkc-logger ([418587c](https://github.com/bitsocialhq/bitsocial-cli/commit/418587c))
