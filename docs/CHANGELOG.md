@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.37 (2026-04-11)</small>
+
+* chore: rename @pkc/pkc-logger to @pkcprotocol/pkc-logger ([418587c](https://github.com/bitsocialhq/bitsocial-cli/commit/418587c))
+* chore: upgrade @pkcprotocol/pkc-js to 0.0.13 ([c669558](https://github.com/bitsocialhq/bitsocial-cli/commit/c669558))
+* chore: upgrade license to GPL-3.0-or-later ([ff01071](https://github.com/bitsocialhq/bitsocial-cli/commit/ff01071))
+
 ## <small>0.19.36 (2026-04-10)</small>
 
 * chore: migrate @pkc/pkc-js to @pkcprotocol/pkc-js from npm registry ([1ccf31a](https://github.com/bitsocialhq/bitsocial-cli/commit/1ccf31a))
