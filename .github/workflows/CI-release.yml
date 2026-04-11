@@ -146,6 +146,17 @@ jobs:
       - name: Use GNU tar (oclif requires --force-local flag)
         run: echo "C:\Program Files\Git\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: powershell
+      - name: Patch oclif to fix makensis error handling on Windows
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const f = "node_modules/oclif/lib/commands/pack/win.js";
+            let c = fs.readFileSync(f, "utf8");
+            c = c.replace(" | grep -v \"\\\\[compress\\\\]\" | grep -v \"^File: Descending to\"", "");
+            fs.writeFileSync(f, c);
+          '
+          grep 'makensis' node_modules/oclif/lib/commands/pack/win.js
       - name: Generate Windows installer
         run: npm run generate:installer:windows
         shell: bash
