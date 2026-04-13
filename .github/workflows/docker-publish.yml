@@ -135,7 +135,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/bitsocialhq/bitsocial-cli
+          images: ghcr.io/bitsocialnet/bitsocial-cli
           tags: |
             type=semver,pattern={{version}},value=${{ steps.previoustag.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.previoustag.outputs.tag }}

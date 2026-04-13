@@ -14,7 +14,7 @@
 
 services:
   bitsocial:
-    image: ${BITSOCIAL_IMAGE:-ghcr.io/bitsocialhq/bitsocial-cli:latest}
+    image: ${BITSOCIAL_IMAGE:-ghcr.io/bitsocialnet/bitsocial-cli:latest}
     container_name: bitsocial
     restart: unless-stopped
     ports:

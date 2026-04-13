@@ -6,7 +6,7 @@ import { Readable } from "stream";
 import decompress from "decompress";
 
 (async () => {
-    const webuiGithubRepos = ["plebbit/seedit", "plebbit/plebones", "bitsocialhq/5chan"];
+    const webuiGithubRepos = ["plebbit/seedit", "plebbit/plebones", "bitsocialnet/5chan"];
     console.log("Github repos to download", webuiGithubRepos);
     const githubToken: string | undefined = process.env["GITHUB_TOKEN"]; // we need a token to avoid getting rate limited in CI
     if (githubToken) console.log("github token length", githubToken.length);

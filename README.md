@@ -35,27 +35,27 @@ Bitsocial is p2p and decentralized social media protocol built completely with I
 ### For Linux/MacOS
 
 ```sh-session
-curl https://raw.githubusercontent.com/bitsocialhq/bitsocial-cli/master/bin/install.sh | sh
+curl https://raw.githubusercontent.com/bitsocialnet/bitsocial-cli/master/bin/install.sh | sh
 ```
 
 #### If you want to install a specific bitsocial-cli version
 
 ```sh-session
-curl https://raw.githubusercontent.com/bitsocialhq/bitsocial-cli/master/bin/install.sh | sh -s 0.14.4
+curl https://raw.githubusercontent.com/bitsocialnet/bitsocial-cli/master/bin/install.sh | sh -s 0.14.4
 ```
 
 If you get `libfontconfig dependency error`, then you need to install libfontconfig by running `sudo apt install -y libfontconfig1 fontconfig libfontconfig1-dev libfontconfig`
 
 ### For Windows
 
-For Windows, You need to install [vc-redist](https://learn.microsoft.com/en-US/cpp/windows/latest-supported-vc-redist?view=msvc-170) first. After you install `vc-redist`, download the installer of [bitsocial](https://github.com/bitsocialhq/bitsocial-cli/releases/latest/download/bitsocial_installer_win32_x64.exe) and next your way to the end
+For Windows, You need to install [vc-redist](https://learn.microsoft.com/en-US/cpp/windows/latest-supported-vc-redist?view=msvc-170) first. After you install `vc-redist`, download the installer of [bitsocial](https://github.com/bitsocialnet/bitsocial-cli/releases/latest/download/bitsocial_installer_win32_x64.exe) and next your way to the end
 
 ### Build your Bitsocial executable manually (optional)
 
 In case the installation script is not working for you or you just want to build the source code directly. First, you need to have `NodeJS 22` and `npm` installed
 
 ```
-git clone https://github.com/bitsocialhq/bitsocial-cli
+git clone https://github.com/bitsocialnet/bitsocial-cli
 cd bitsocial-cli
 npm ci
 npm run build
@@ -146,7 +146,7 @@ Debug and trace logs are written only to the log file, not to stdout, so `docker
 ```yaml
 services:
   bitsocial:
-    image: ghcr.io/bitsocialhq/bitsocial-cli:latest
+    image: ghcr.io/bitsocialnet/bitsocial-cli:latest
     container_name: bitsocial
     restart: unless-stopped
     ports:
@@ -181,7 +181,7 @@ docker run -d \
   -p 6473:6473 \
   -v bitsocial-data:/data \
   -v bitsocial-logs:/logs \
-  ghcr.io/bitsocialhq/bitsocial-cli:latest
+  ghcr.io/bitsocialnet/bitsocial-cli:latest
 ```
 
 With a custom auth key:
@@ -196,7 +196,7 @@ docker run -d \
   -v bitsocial-data:/data \
   -v bitsocial-logs:/logs \
   -e PKC_RPC_AUTH_KEY=my-secret-key \
-  ghcr.io/bitsocialhq/bitsocial-cli:latest
+  ghcr.io/bitsocialnet/bitsocial-cli:latest
 ```
 
 ### Building the Docker image locally
@@ -341,7 +341,7 @@ EXAMPLES
   $ bitsocial challenge install ./my-local-challenge
 ```
 
-_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/challenge/install.ts)_
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/challenge/install.ts)_
 
 ## `bitsocial challenge list`
 
@@ -364,7 +364,7 @@ EXAMPLES
   $ bitsocial challenge list -q
 ```
 
-_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/challenge/list.ts)_
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/challenge/list.ts)_
 
 ## `bitsocial challenge remove NAME`
 
@@ -389,7 +389,7 @@ EXAMPLES
   $ bitsocial challenge remove @scope/my-challenge
 ```
 
-_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/challenge/remove.ts)_
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/challenge/remove.ts)_
 
 ## `bitsocial community create`
 
@@ -414,7 +414,7 @@ EXAMPLES
     $ bitsocial community create --title 'Hello Plebs' --description 'Welcome'
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/create.ts)_
 
 ## `bitsocial community delete ADDRESSES`
 
@@ -439,7 +439,7 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/delete.ts)_
 
 ## `bitsocial community edit ADDRESS`
 
@@ -491,7 +491,7 @@ EXAMPLES
     $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls=false
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/edit.ts)_
 
 ## `bitsocial community get ADDRESS`
 
@@ -516,7 +516,7 @@ EXAMPLES
   $ bitsocial community get 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/get.ts)_
 
 ## `bitsocial community list`
 
@@ -539,7 +539,7 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/list.ts)_
 
 ## `bitsocial community start ADDRESSES`
 
@@ -568,7 +568,7 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q)
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/start.ts)_
 
 ## `bitsocial community stop ADDRESSES`
 
@@ -593,7 +593,7 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/community/stop.ts)_
 
 ## `bitsocial daemon`
 
@@ -635,7 +635,7 @@ EXAMPLES
   $ bitsocial daemon --chainProviderUrls viem --chainProviderUrls https://mainnet.infura.io/v3/YOUR_KEY
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/daemon.ts)_
 
 ## `bitsocial help [COMMAND]`
 
@@ -691,7 +691,7 @@ EXAMPLES
   $ bitsocial logs --since 1h -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialhq/bitsocial-cli/blob/v0.19.39/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.38/src/cli/commands/logs.ts)_
 <!-- commandsstop -->
 
 ## Contribution

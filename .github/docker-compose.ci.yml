@@ -1,7 +1,7 @@
 # CI-only: full compose without sysctls (GitHub Actions doesn't allow them)
 services:
   bitsocial:
-    image: ${BITSOCIAL_IMAGE:-ghcr.io/bitsocialhq/bitsocial-cli:latest}
+    image: ${BITSOCIAL_IMAGE:-ghcr.io/bitsocialnet/bitsocial-cli:latest}
     container_name: bitsocial
     restart: unless-stopped
     stop_grace_period: 30s

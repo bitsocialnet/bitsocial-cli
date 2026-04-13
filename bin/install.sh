@@ -14,9 +14,9 @@ bitsocial_compressed_file_name="bitsocial_${suffix}.tar.gz"
 VERSION=${1:-latest}
 # Construct URI based on version
 if [ "$VERSION" = "latest" ]; then
-    bitsocial_uri="https://github.com/bitsocialhq/bitsocial-cli/releases/latest/download/${bitsocial_compressed_file_name}"
+    bitsocial_uri="https://github.com/bitsocialnet/bitsocial-cli/releases/latest/download/${bitsocial_compressed_file_name}"
 else
-    bitsocial_uri="https://github.com/bitsocialhq/bitsocial-cli/releases/download/v${VERSION}/${bitsocial_compressed_file_name}"
+    bitsocial_uri="https://github.com/bitsocialnet/bitsocial-cli/releases/download/v${VERSION}/${bitsocial_compressed_file_name}"
 fi
 echo "Downloading bitsocial-cli, version: ${VERSION}"
 curl --fail --location --progress-bar --output "$bitsocial_compressed_file_name" "$bitsocial_uri"
