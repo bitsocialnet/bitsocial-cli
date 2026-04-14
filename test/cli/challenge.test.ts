@@ -5,6 +5,7 @@ import fsPromise from "fs/promises";
 import fs from "fs";
 import path from "path";
 import dns from "node:dns";
+import { ensureNpmAvailable } from "../../src/challenge-packages/challenge-utils.js";
 dns.setDefaultResultOrder("ipv4first");
 
 // Helper to create a minimal challenge package directory
@@ -63,6 +64,12 @@ const runBitsocialChallenge = (
         });
     });
 };
+
+describe("npm resolution", () => {
+    it("ensureNpmAvailable resolves successfully", async () => {
+        await expect(ensureNpmAvailable()).resolves.toBeUndefined();
+    });
+});
 
 describe("bitsocial challenge install", () => {
     let tmpDir: string;

@@ -31,8 +31,12 @@ on:
 
 jobs:
   test-bitsocial-cli:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     timeout-minutes: 20
-    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -44,14 +48,19 @@ jobs:
           cache: 'npm'
 
       - name: Smoke test Docker deps stage
+        if: matrix.os == 'ubuntu-latest'
         run: docker build --target deps -t bitsocial-cli:deps-smoke .
 
       - run: npm ci
       - run: npm run build
       - run: npx oclif manifest
 
-      # disable hosts we shouldn't use
-      - run: sudo echo "255.255.255.255 cloudflare-ipfs.com" | sudo tee -a /etc/hosts
-      - run: sudo echo "255.255.255.255 pubsubprovider.xyz" | sudo tee -a /etc/hosts
+      # disable hosts we shouldn't use (Linux only)
+      - name: Block unwanted hosts
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo echo "255.255.255.255 cloudflare-ipfs.com" | sudo tee -a /etc/hosts
+          sudo echo "255.255.255.255 pubsubprovider.xyz" | sudo tee -a /etc/hosts
 
       - run: DEBUG="bitsocial*, plebbit*, oclif*" npm run test:cli
+        shell: bash

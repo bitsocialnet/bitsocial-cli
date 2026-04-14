@@ -1,7 +1,7 @@
 import path from "path";
 import fs from "fs/promises";
 import type { Dirent } from "fs";
-import { spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import defaults from "../common-utils/defaults.js";
 import { migrateDataDirectory } from "../common-utils/data-migration.js";
 
@@ -95,11 +95,46 @@ export async function listInstalledChallenges(dataPath?: string): Promise<Instal
     return results;
 }
 
-function getNpmCliPath(): string {
-    // npm-cli.js lives at a standard location relative to the Node binary:
+function getNpmCliPathRelative(nodeExecPath: string): string {
+    // npm-cli.js lives at a standard location relative to a Node binary:
     //   <node-dir>/../lib/node_modules/npm/bin/npm-cli.js
     // This holds for nvm, official installers, and distro packages.
-    return path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+    return path.join(path.dirname(nodeExecPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+}
+
+async function getNpmCliPath(): Promise<string> {
+    // 1. Try relative to our own Node binary (works for nvm / system Node)
+    const relativePath = getNpmCliPathRelative(process.execPath);
+    try {
+        await fs.access(relativePath);
+        return relativePath;
+    } catch {
+        // Not found relative to process.execPath (e.g. oclif-bundled Node without npm)
+    }
+
+    // 2. Fall back to the system npm found on PATH
+    try {
+        const cmd = process.platform === "win32" ? "where.exe" : "which";
+        const npmBin = execFileSync(cmd, ["npm"], { encoding: "utf8" }).trim().split("\n")[0].trim();
+        // npmBin is a symlink or script; resolve to the real path, then derive npm-cli.js
+        // For most installs: npm -> <prefix>/lib/node_modules/npm/bin/npm-cli.js
+        const realNpmBin = await fs.realpath(npmBin);
+        // If realpath leads directly to npm-cli.js, use it
+        if (realNpmBin.endsWith("npm-cli.js")) {
+            return realNpmBin;
+        }
+        // Otherwise, the system npm binary lives beside a Node that has npm installed —
+        // derive npm-cli.js relative to that Node
+        const systemNodeDir = path.dirname(realNpmBin);
+        const systemNpmCli = path.join(systemNodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+        await fs.access(systemNpmCli);
+        return systemNpmCli;
+    } catch {
+        // Could not locate npm on PATH either
+    }
+
+    // Return the original relative path so callers get the familiar error message
+    return relativePath;
 }
 
 function getNpmEnv(): NodeJS.ProcessEnv {
@@ -119,7 +154,7 @@ const npmErrorMessage =
     `Install Node.js ${process.version} from https://nodejs.org/ (npm is included with Node.js) and retry.`;
 
 export async function ensureNpmAvailable(): Promise<void> {
-    const npmCliPath = getNpmCliPath();
+    const npmCliPath = await getNpmCliPath();
     try {
         await fs.access(npmCliPath);
     } catch {
@@ -140,7 +175,7 @@ export async function ensureNpmAvailable(): Promise<void> {
 }
 
 export async function runNpmPack(packageSpec: string, destDir: string): Promise<string> {
-    const npmCliPath = getNpmCliPath();
+    const npmCliPath = await getNpmCliPath();
     return new Promise<string>((resolve, reject) => {
         const proc = spawn(process.execPath, [npmCliPath, "pack", packageSpec, "--pack-destination", destDir], {
             stdio: ["ignore", "pipe", "inherit"],
@@ -170,7 +205,7 @@ export async function runNpmPack(packageSpec: string, destDir: string): Promise<
 }
 
 export async function runNpmInstall(challengeDir: string): Promise<void> {
-    const npmCliPath = getNpmCliPath();
+    const npmCliPath = await getNpmCliPath();
     return new Promise<void>((resolve, reject) => {
         // Run npm through our own Node binary to guarantee ABI-compatible
         // native modules — npm's process.execPath and lifecycle scripts
