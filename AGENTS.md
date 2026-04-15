@@ -66,6 +66,14 @@ src/
 └── index.ts             # package entry point
 ```
 
+## Feature Implementation Workflow
+
+When the user gives a prompt to implement a feature:
+
+1. **MUST** create a GitHub issue for the feature before starting work (`gh issue create`).
+2. **MUST** keep the issue updated with the current plan and progress as work proceeds.
+3. **MUST** close the issue once the feature is fully implemented and verified.
+
 ## Core MUST Rules
 
 ### Environment Setup
