@@ -20,6 +20,15 @@ import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers } from "../../common-utils/resolvers.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
+
+/** Replace wildcard bind addresses with loopback for connectivity checks (macOS rejects connect to 0.0.0.0 with EINVAL) */
+function toConnectableHostname(hostname: string): string {
+    if (process.platform === "darwin") {
+        if (hostname === "0.0.0.0") return "127.0.0.1";
+        if (hostname === "::") return "::1";
+    }
+    return hostname;
+}
 import { EOL } from "node:os";
 import { formatWithOptions } from "node:util";
 import { createRequire } from "node:module";
@@ -248,9 +257,12 @@ export default class Daemon extends Command {
             if (mainProcessExited) return;
             const kuboApiPort = Number(kuboRpcEndpoint.port);
             if (kuboProcess || pendingKuboStart || usingDifferentProcessRpc) return; // already started, no need to intervene
-            const isKuboApiPortTaken = await tcpPortUsed.check(kuboApiPort, kuboRpcEndpoint.hostname);
+            const connectHostname = toConnectableHostname(kuboRpcEndpoint.hostname);
+            const isKuboApiPortTaken = await tcpPortUsed.check(kuboApiPort, connectHostname);
             if (isKuboApiPortTaken) {
-                const versionUrl = new URL("version", kuboRpcEndpoint);
+                const connectableEndpoint = new URL(kuboRpcEndpoint.toString());
+                connectableEndpoint.hostname = connectHostname;
+                const versionUrl = new URL("version", connectableEndpoint);
                 const controller = new AbortController();
                 const timer = setTimeout(() => controller.abort(), 2000);
                 let isHealthyKubo = false;
