@@ -190,8 +190,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
 
     it("logs --tail 1 completes within 10s", { timeout: 10_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["logs", "--tail", "1"],
-            { XDG_STATE_HOME: stateHome }
+            ["logs", "--tail", "1", "--logPath", logDir]
         );
         expect(result.exitCode).toBe(0);
         expect(result.stdout.length).toBeGreaterThan(0);
