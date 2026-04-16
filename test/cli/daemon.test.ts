@@ -503,6 +503,11 @@ describe(`bitsocial daemon (kubo daemon is started by another process on the sam
     });
 
     it(`bitsocial daemon restarts kubo even when port lingers briefly after external kubo dies`, async () => {
+        // Ensure previous test's daemon-managed kubo is fully shut down.
+        // On Windows there is no process-group kill, so kubo may outlive the daemon briefly.
+        await ensureKuboNodeStopped(extKuboRpcUrl.toString());
+        await waitForPortFree(extKuboPort, "127.0.0.1", 15000);
+
         // Restart external kubo for this test (previous test killed it)
         kuboDaemonProcess = await startKuboDaemon(extKuboPort);
 
@@ -551,6 +556,79 @@ describe(`bitsocial daemon (kubo daemon is started by another process on the sam
             expect(kuboRestarted).toBe(true);
         } finally {
             await stopPkcDaemon(pkcDaemonProcess);
+        }
+    });
+});
+
+describe("bitsocial daemon survives transient port occupation after its own kubo exits", () => {
+    const exitRpcPort = 9378;
+    const exitKuboPort = 50109;
+    const exitGatewayPort = 6563;
+    const exitRpcUrl = `ws://localhost:${exitRpcPort}`;
+    const exitKuboUrl = `http://0.0.0.0:${exitKuboPort}/api/v0`;
+    const exitKuboApiUrl = `http://localhost:${exitKuboPort}/api/v0`;
+    const exitGatewayUrl = `http://0.0.0.0:${exitGatewayPort}`;
+
+    it("daemon does not crash when kubo port is occupied right after kubo exits", { timeout: 90000 }, async () => {
+        await ensureKuboNodeStopped(exitKuboApiUrl);
+
+        let pkcDaemonProcess: ManagedChildProcess | undefined;
+        try {
+            pkcDaemonProcess = await startPkcDaemon(
+                ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", exitRpcUrl],
+                { KUBO_RPC_URL: exitKuboUrl, IPFS_GATEWAY_URL: exitGatewayUrl }
+            );
+
+            // Verify kubo is healthy
+            const kuboReady = await waitForKuboReady(exitKuboApiUrl, 45000);
+            expect(kuboReady).toBe(true);
+
+            // Shut down kubo via API and wait for it to actually stop
+            const shutdownRes = await fetch(`${exitKuboApiUrl}/shutdown`, { method: "POST" });
+            expect(shutdownRes.status).toBe(200);
+            await waitForCondition(async () => {
+                try {
+                    await fetch(`${exitKuboApiUrl}/bitswap/stat`, { method: "POST" });
+                    return false;
+                } catch {
+                    return true; // connection refused — kubo is down
+                }
+            }, 10000, 100);
+
+            // Immediately occupy the kubo API port with a dummy server.
+            // This triggers onKuboExit → keepKuboUp() which sees port-taken + not-healthy
+            // and throws. Without try/catch in onKuboExit, this crashes the daemon.
+            const portBlocker = await occupyPort(exitKuboPort, "127.0.0.1");
+
+            // Hold port for 8s — long enough for onKuboExit + at least one interval tick
+            await new Promise((resolve) => setTimeout(resolve, 8000));
+
+            // Daemon must still be alive — verify via WebSocket to its RPC
+            const rpcClient = new WebSocket(exitRpcUrl);
+            await waitForWebSocketOpen(rpcClient);
+            expect(rpcClient.readyState).toBe(1);
+            rpcClient.close();
+
+            // Release the port
+            await new Promise<void>((resolve) => portBlocker.close(() => resolve()));
+
+            // Daemon should recover and start a new kubo
+            const kuboRestarted = await waitForCondition(
+                async () => {
+                    try {
+                        const res = await fetch(`${exitKuboApiUrl}/bitswap/stat`, { method: "POST" });
+                        return res.ok;
+                    } catch {
+                        return false;
+                    }
+                },
+                30000,
+                500
+            );
+            expect(kuboRestarted).toBe(true);
+        } finally {
+            await stopPkcDaemon(pkcDaemonProcess);
+            await ensureKuboNodeStopped(exitKuboApiUrl);
         }
     });
 });

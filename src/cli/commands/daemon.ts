@@ -330,7 +330,11 @@ export default class Daemon extends Command {
                 if (!mainProcessExited) {
                     log(`Kubo node with pid (${currentProcess?.pid}) exited. Will attempt to restart it`);
                     kuboProcess = undefined;
-                    await keepKuboUp();
+                    try {
+                        await keepKuboUp();
+                    } catch (error) {
+                        log.trace(`keepKuboUp error after kubo exit (interval will retry): ${error instanceof Error ? error.message : String(error)}`);
+                    }
                 } else {
                     currentProcess.removeAllListeners();
                 }
@@ -494,6 +498,8 @@ export default class Daemon extends Command {
             try {
                 if (!pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken && !usingDifferentProcessRpc) await keepKuboUp();
                 else if (pkcOptionsFromFlag?.kuboRpcClientsOptions && !usingDifferentProcessRpc) await keepKuboUp();
+                // Retry if kubo died and onKuboExit's restart attempt failed (e.g. transient port conflict)
+                else if (!kuboProcess && !pendingKuboStart && !usingDifferentProcessRpc) await keepKuboUp();
             } catch (error) {
                 log.trace(`keepKuboUp error (will retry): ${error instanceof Error ? error.message : String(error)}`);
             }
