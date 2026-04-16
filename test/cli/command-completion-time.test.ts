@@ -4,11 +4,13 @@ import { directory as randomDirectory } from "tempy";
 import fsPromise from "fs/promises";
 import path from "path";
 import dns from "node:dns";
+import WebSocket from "ws";
 import {
     type ManagedChildProcess,
     stopPkcDaemon,
     startPkcDaemon,
     waitForCondition,
+    waitForWebSocketOpen,
     waitForPortFree
 } from "../helpers/daemon-helpers.js";
 dns.setDefaultResultOrder("ipv4first");
@@ -97,6 +99,18 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
             const files = await fsPromise.readdir(logDir);
             return files.some((f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".log"));
         }, 10000, 500);
+
+        // Wait for RPC WebSocket to accept connections
+        await waitForCondition(async () => {
+            try {
+                const ws = new WebSocket(rpcWsUrl);
+                await waitForWebSocketOpen(ws, 2000);
+                ws.close();
+                return true;
+            } catch {
+                return false;
+            }
+        }, 15000, 500);
     }, 120_000);
 
     afterAll(async () => {
@@ -112,7 +126,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "create", "--description", "test community", "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         communityAddress = result.stdout.trim();
         expect(communityAddress.length).toBeGreaterThan(0);
     });
@@ -121,7 +135,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "list", "-q", "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain(communityAddress);
     });
 
@@ -129,7 +143,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "list", "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain(communityAddress);
     });
 
@@ -137,7 +151,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "get", communityAddress, "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         const json = JSON.parse(result.stdout);
         expect(json).toHaveProperty("address");
     });
@@ -146,7 +160,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "edit", communityAddress, "--title", "new title", "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
@@ -154,7 +168,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
@@ -162,7 +176,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "start", communityAddress, "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
@@ -170,7 +184,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
@@ -180,7 +194,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
             undefined,
             30_000
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
@@ -188,7 +202,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["community", "list", "-q", "--pkcRpcUrl", rpcWsUrl]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).not.toContain(communityAddress);
     });
 
@@ -196,7 +210,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         const result = await runBitsocialCommand(
             ["logs", "--tail", "1", "--logPath", logDir]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.length).toBeGreaterThan(0);
     });
 });
@@ -219,7 +233,7 @@ describe("challenge commands complete within 10s", () => {
         const result = await runBitsocialCommand(
             ["challenge", "list", "--pkcOptions.dataPath", dataPath]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain("No challenge packages installed");
     });
 
@@ -227,7 +241,7 @@ describe("challenge commands complete within 10s", () => {
         const result = await runBitsocialCommand(
             ["challenge", "install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain("Installed challenge 'test-challenge@1.0.0'");
     });
 
@@ -235,7 +249,7 @@ describe("challenge commands complete within 10s", () => {
         const result = await runBitsocialCommand(
             ["challenge", "list", "--pkcOptions.dataPath", dataPath]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain("test-challenge");
     });
 
@@ -243,7 +257,7 @@ describe("challenge commands complete within 10s", () => {
         const result = await runBitsocialCommand(
             ["challenge", "remove", "test-challenge", "--pkcOptions.dataPath", dataPath]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain("Removed challenge 'test-challenge'");
     });
 
@@ -251,7 +265,7 @@ describe("challenge commands complete within 10s", () => {
         const result = await runBitsocialCommand(
             ["challenge", "list", "--pkcOptions.dataPath", dataPath]
         );
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain("No challenge packages installed");
     });
 });
