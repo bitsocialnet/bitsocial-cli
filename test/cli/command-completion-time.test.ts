@@ -101,10 +101,12 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
 
     afterAll(async () => {
         await stopPkcDaemon(daemonProcess);
-        await waitForPortFree(RPC_PORT);
-        await waitForPortFree(KUBO_API_PORT);
-        await waitForPortFree(GATEWAY_PORT);
-    });
+        await Promise.all([
+            waitForPortFree(RPC_PORT),
+            waitForPortFree(KUBO_API_PORT),
+            waitForPortFree(GATEWAY_PORT),
+        ]);
+    }, 60_000);
 
     it("community create completes within 10s", { timeout: 10_000 }, async () => {
         const result = await runBitsocialCommand(

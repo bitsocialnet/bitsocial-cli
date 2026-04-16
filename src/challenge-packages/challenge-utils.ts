@@ -1,4 +1,5 @@
 import path from "path";
+import { pathToFileURL } from "node:url";
 import fs from "fs/promises";
 import type { Dirent } from "fs";
 import { execFileSync, spawn } from "child_process";
@@ -279,7 +280,7 @@ export async function loadChallengesIntoPKC(dataPath?: string): Promise<string[]
             // Resolve the entry point
             const entryPoint = pkg.main || "index.js";
             const entryPath = path.resolve(challenge.path, entryPoint);
-            const imported = await import(entryPath);
+            const imported = await import(pathToFileURL(entryPath).href);
             const factory = imported.default || imported;
             (PKC.default as any).challenges[challenge.name] = factory;
             loadedNames.push(challenge.name);
