@@ -27,7 +27,8 @@ const gatewayUrl = `http://0.0.0.0:${GATEWAY_PORT}`;
 
 const runBitsocialChallenge = (
     args: string[],
-    env?: Record<string, string>
+    env?: Record<string, string>,
+    timeoutMs = 240_000
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> => {
     return new Promise((resolve, reject) => {
         const proc = spawn("node", ["./bin/run", "challenge", ...args], {
@@ -45,8 +46,8 @@ const runBitsocialChallenge = (
         });
         const timer = setTimeout(() => {
             proc.kill("SIGKILL");
-            reject(new Error("bitsocial challenge command timed out"));
-        }, 240000);
+            reject(new Error(`bitsocial challenge command timed out after ${timeoutMs}ms\nstdout: ${stdout}\nstderr: ${stderr}`));
+        }, timeoutMs);
         proc.on("close", (exitCode) => {
             clearTimeout(timer);
             resolve({ stdout, stderr, exitCode });
@@ -121,7 +122,7 @@ describe("@bitsocial/mintpass-challenge integration tests", { timeout: 720_000 }
         dataPath = randomDirectory();
 
         // Install the real @bitsocial/mintpass-challenge package from npm
-        const installResult = await runBitsocialChallenge(["install", "@bitsocial/mintpass-challenge", "--pkcOptions.dataPath", dataPath]);
+        const installResult = await runBitsocialChallenge(["install", "@bitsocial/mintpass-challenge", "--pkcOptions.dataPath", dataPath], undefined, 420_000);
         expect(installResult.exitCode).toBe(0);
         expect(installResult.stdout).toContain("Installed challenge '@bitsocial/mintpass-challenge");
 

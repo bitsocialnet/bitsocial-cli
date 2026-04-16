@@ -656,7 +656,7 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
         await ensureKuboNodeStopped(kuboApiUrl);
     });
 
-    it("daemon's own cleanup kills kubo after SIGTERM", { timeout: 60000 }, async () => {
+    it.skipIf(process.platform === "win32")("daemon's own cleanup kills kubo after SIGTERM", { timeout: 60000 }, async () => {
         let daemonProcess: ManagedChildProcess | undefined;
         try {
             daemonProcess = await startPkcDaemon(
@@ -687,7 +687,7 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
         }
     });
 
-    it("daemon's own cleanup kills kubo after double SIGTERM (impatient user)", { timeout: 60000 }, async () => {
+    it.skipIf(process.platform === "win32")("daemon's own cleanup kills kubo after double SIGTERM (impatient user)", { timeout: 60000 }, async () => {
         let daemonProcess: ManagedChildProcess | undefined;
         try {
             daemonProcess = await startPkcDaemon(
