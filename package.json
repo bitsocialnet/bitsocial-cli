@@ -1,5 +1,5 @@
 {
-    "name": "bitsocial-cli",
+    "name": "@bitsocial/bitsocial-cli",
     "version": "0.19.39",
     "description": "Command line interface to Bitsocial API",
     "types": "./dist/index.d.ts",
@@ -8,7 +8,7 @@
     "author": "Bitsocial Labs",
     "license": "GPL-3.0-or-later",
     "type": "module",
-    "private": true,
+    "publishConfig": { "access": "public" },
     "exports": null,
     "scripts": {
         "clean": "rm -rf tmp/",
@@ -56,6 +56,9 @@
             },
             "community": {
                 "description": "Access and manage your communities"
+            },
+            "update": {
+                "description": "Check for and install bitsocial CLI updates"
             }
         },
         "hooks": {

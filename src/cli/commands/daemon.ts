@@ -186,6 +186,20 @@ export default class Daemon extends Command {
     }
 
     async run() {
+        // Non-blocking update check — fire-and-forget, won't delay startup
+        import("../../update/npm-registry.js")
+            .then(({ fetchLatestVersion }) =>
+                fetchLatestVersion().then(async (latest: string) => {
+                    const { compareVersions } = await import("../../update/semver.js");
+                    if (compareVersions(latest, this.config.version) > 0) {
+                        this.log(
+                            `Update available: v${latest} (current: v${this.config.version}). Run 'bitsocial update install' to upgrade.`
+                        );
+                    }
+                })
+            )
+            .catch(() => {}); // silently ignore errors (offline, npm unavailable, etc.)
+
         process.env["DEBUG_COLORS"] = "1";
         process.env["DEBUG_HIDE_DATE"] = "1";
         const { flags } = await this.parse(Daemon);

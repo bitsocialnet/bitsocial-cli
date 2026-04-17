@@ -108,7 +108,7 @@ function getNpmCliPathRelative(nodeExecPath: string): string {
     return path.join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
 }
 
-async function getNpmCliPath(): Promise<string> {
+export async function getNpmCliPath(): Promise<string> {
     // 1. Try relative to our own Node binary (works for nvm / system Node)
     const relativePath = getNpmCliPathRelative(process.execPath);
     try {
@@ -145,7 +145,7 @@ async function getNpmCliPath(): Promise<string> {
     return relativePath;
 }
 
-function getNpmEnv(): NodeJS.ProcessEnv {
+export function getNpmEnv(): NodeJS.ProcessEnv {
     // Prepend our Node's directory to PATH so that npm subprocesses
     // (node-gyp, lifecycle scripts) also use the same Node binary
     const nodeDir = path.dirname(process.execPath);

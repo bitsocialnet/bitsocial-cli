@@ -32,27 +32,27 @@ Bitsocial is p2p and decentralized social media protocol built completely with I
 
 ## Install
 
-### For Linux/MacOS
+Requires [Node.js 22](https://nodejs.org/) or later.
 
 ```sh-session
-curl https://raw.githubusercontent.com/bitsocialnet/bitsocial-cli/master/bin/install.sh | sh
+npm install -g @bitsocial/bitsocial-cli
 ```
 
-#### If you want to install a specific bitsocial-cli version
+To install a specific version:
 
 ```sh-session
-curl https://raw.githubusercontent.com/bitsocialnet/bitsocial-cli/master/bin/install.sh | sh -s 0.14.4
+npm install -g @bitsocial/bitsocial-cli@0.19.39
 ```
 
-If you get `libfontconfig dependency error`, then you need to install libfontconfig by running `sudo apt install -y libfontconfig1 fontconfig libfontconfig1-dev libfontconfig`
+To update to the latest version:
 
-### For Windows
+```sh-session
+bitsocial update install
+```
 
-For Windows, You need to install [vc-redist](https://learn.microsoft.com/en-US/cpp/windows/latest-supported-vc-redist?view=msvc-170) first. After you install `vc-redist`, download the installer of [bitsocial](https://github.com/bitsocialnet/bitsocial-cli/releases/latest/download/bitsocial_installer_win32_x64.exe) and next your way to the end
+### Build from source (optional)
 
-### Build your Bitsocial executable manually (optional)
-
-In case the installation script is not working for you or you just want to build the source code directly. First, you need to have `NodeJS 22` and `npm` installed
+If you want to build from source directly:
 
 ```
 git clone https://github.com/bitsocialnet/bitsocial-cli

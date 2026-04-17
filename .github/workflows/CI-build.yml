@@ -1,4 +1,4 @@
-# build and create a release after successful CI
+# build, create a release, and publish to npm after successful CI
 name: CI build
 
 on:
@@ -12,25 +12,56 @@ on:
 jobs:
   on-success:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: write
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: master
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
 
       # build dist folder
       - run: npm ci
       - run: npm run build
 
+      - name: Download web UIs
+        run: npm run ci:download-web-uis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Git commit author
-        run: git config --local user.email "github-actions[bot]@users.noreply.github.com" && git config --local user.name "github-actions[bot]"
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Get current version
+        id: before
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Create Github Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release -- --ci
+        run: npm run release -- --ci || true
+
+      - name: Check if released
+        id: release
+        run: |
+          AFTER=$(node -p "require('./package.json').version")
+          if [ "${{ steps.before.outputs.version }}" != "$AFTER" ]; then
+            echo "Released v$AFTER"
+            echo "released=true" >> $GITHUB_OUTPUT
+          else
+            echo "No new version to release"
+            echo "released=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to npm
+        if: steps.release.outputs.released == 'true'
+        run: npx --yes npm@latest publish --access public --provenance
