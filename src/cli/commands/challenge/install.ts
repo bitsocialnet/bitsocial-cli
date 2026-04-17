@@ -42,6 +42,8 @@ export default class Install extends Command {
         const { args, flags } = await this.parse(Install);
         const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
 
+        this.log("Installing challenge package — this may take a few minutes...");
+
         // 1. Check npm is available
         await ensureNpmAvailable();
 
