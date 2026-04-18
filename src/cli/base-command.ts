@@ -33,7 +33,6 @@ export abstract class BaseCommand extends Command {
         const errors: Error[] = [];
         pkc.on("error", (err) => {
             errors.push(err);
-            console.error("Error from pkc instance", err);
         });
         await new Promise<void>((resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -44,6 +43,11 @@ export abstract class BaseCommand extends Command {
                 clearTimeout(timeout);
                 resolve();
             });
+        }).catch((err) => {
+            if (err && typeof err === "object" && "code" in err && err.code === "ERR_RPC_AUTH_REQUIRED") {
+                throw err;
+            }
+            throw new Error(`Could not connect to the daemon at ${pkcRpcUrl}. Is it running? Start it with: bitsocial daemon`);
         });
         return pkc;
     }

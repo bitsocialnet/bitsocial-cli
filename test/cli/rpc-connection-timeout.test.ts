@@ -50,7 +50,8 @@ describe("RPC connection timeout", () => {
         await vi.advanceTimersByTimeAsync(20000);
 
         expect(caughtError).toBeDefined();
-        expect(caughtError!.message).toMatch(/Timed out waiting for RPC server/);
+        expect(caughtError!.message).toMatch(/Could not connect to the daemon/);
+        expect(caughtError!.message).toContain("bitsocial daemon");
     });
 
     it("should resolve immediately and clear timeout when communitieschange is emitted", async () => {
@@ -114,5 +115,63 @@ describe("RPC connection timeout", () => {
 
         expect(caughtError).toBeDefined();
         expect(caughtError!.message).toMatch(/auth key is either missing or wrong/);
+    });
+
+    it("should show user-friendly message when a connection error is emitted before timeout", async () => {
+        const { default: PKCMock } = await import("@pkcprotocol/pkc-js");
+        const fakePkc = new EventEmitter();
+        vi.mocked(PKCMock).mockResolvedValue(fakePkc as any);
+
+        const { BaseCommand } = await import("../../src/cli/base-command.js");
+        class TestCommand extends BaseCommand {
+            async run() {}
+            connectToPkcRpc(url: string) {
+                return this._connectToPkcRpc(url);
+            }
+        }
+        const cmd = new TestCommand([], {} as any);
+
+        const connectPromise = cmd.connectToPkcRpc("ws://localhost:9138");
+        let caughtError: Error | undefined;
+        connectPromise.catch((err) => {
+            caughtError = err;
+        });
+
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Simulate a connection refused error
+        fakePkc.emit("error", new Error("connect ECONNREFUSED 127.0.0.1:9138"));
+
+        await vi.advanceTimersByTimeAsync(20000);
+
+        expect(caughtError).toBeDefined();
+        expect(caughtError!.message).toMatch(/Could not connect to the daemon at ws:\/\/localhost:9138/);
+        expect(caughtError!.message).toContain("bitsocial daemon");
+    });
+
+    it("should not dump errors to console.error when connection fails", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        const { default: PKCMock } = await import("@pkcprotocol/pkc-js");
+        const fakePkc = new EventEmitter();
+        vi.mocked(PKCMock).mockResolvedValue(fakePkc as any);
+
+        const { BaseCommand } = await import("../../src/cli/base-command.js");
+        class TestCommand extends BaseCommand {
+            async run() {}
+            connectToPkcRpc(url: string) {
+                return this._connectToPkcRpc(url);
+            }
+        }
+        const cmd = new TestCommand([], {} as any);
+
+        const connectPromise = cmd.connectToPkcRpc("ws://localhost:9138");
+        connectPromise.catch(() => {});
+
+        await vi.advanceTimersByTimeAsync(0);
+        fakePkc.emit("error", new Error("connect ECONNREFUSED 127.0.0.1:9138"));
+        await vi.advanceTimersByTimeAsync(20000);
+
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
     });
 });
