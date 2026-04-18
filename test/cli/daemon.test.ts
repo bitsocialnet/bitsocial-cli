@@ -920,6 +920,13 @@ describe("bitsocial daemon DEBUG env var", () => {
             expect(daemonProcess.capturedStdout).toContain("To view logs, run: bitsocial logs");
             expect(daemonProcess.capturedStdout).toContain("DEBUG");
 
+            // stdout should contain the printed PKC options
+            expect(daemonProcess.capturedStdout).toContain("PKC options:");
+            expect(daemonProcess.capturedStdout).toContain('"dataPath"');
+
+            // stdout should contain BSO resolver info
+            expect(daemonProcess.capturedStdout).toContain(".bso name resolvers:");
+
             // Should NOT contain "Debug logs is on" since no DEBUG was set
             expect(daemonProcess.capturedStderr).not.toContain("Debug logs is on");
         } finally {

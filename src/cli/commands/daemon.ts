@@ -257,6 +257,8 @@ export default class Daemon extends Command {
         defaultPkcOptions.kuboRpcClientsOptions = [kuboRpcEndpoint.toString()];
         const mergedPkcOptions = { ...defaultPkcOptions, ...pkcOptionsFromFlag };
         log("Merged pkc options that will be used for this node", mergedPkcOptions);
+        const { nameResolvers: _nr, ...printablePkcOptions } = mergedPkcOptions;
+        console.log("PKC options:", JSON.stringify(printablePkcOptions, null, 2));
 
         // Migrate data directory before creating PKC instance
         migrateDataDirectory(mergedPkcOptions.dataPath!);
@@ -271,6 +273,7 @@ export default class Daemon extends Command {
         // Create BSO name resolvers for .bso/.eth domain resolution
         const bsoResolvers = createBsoResolvers(flags.chainProviderUrls, mergedPkcOptions.dataPath);
         mergedPkcOptions.nameResolvers = [...(mergedPkcOptions.nameResolvers || []), ...bsoResolvers];
+        console.log(".bso name resolvers:", bsoResolvers.map((r) => r.provider).join(", "));
 
         let mainProcessExited = false;
         let pendingKuboStart: Promise<ChildProcessWithoutNullStreams> | undefined;
