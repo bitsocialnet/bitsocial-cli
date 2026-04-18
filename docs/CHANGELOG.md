@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.42 (2026-04-18)</small>
+
+* feat: show ASCII logo + wordmark banner on bare CLI and daemon start ([5be9873](https://github.com/bitsocialnet/bitsocial-cli/commit/5be9873)), closes [#1a4fd0](https://github.com/bitsocialnet/bitsocial-cli/issues/1a4fd0) [#e5e7eb](https://github.com/bitsocialnet/bitsocial-cli/issues/e5e7eb) [#19](https://github.com/bitsocialnet/bitsocial-cli/issues/19)
+
 ## <small>0.19.41 (2026-04-18)</small>
 
 * fix: delete postinstall script in Docker deps stage to prevent build failure ([0ea2eed](https://github.com/bitsocialnet/bitsocial-cli/commit/0ea2eed))
