@@ -1,5 +1,30 @@
 # Changelog
 
+## <small>0.19.40 (2026-04-16)</small>
+
+* fix: fall back to system npm when bundled Node lacks npm ([5761f43](https://github.com/bitsocialnet/bitsocial-cli/commit/5761f43))
+* fix: handle transient port-in-use errors in keepKuboUp interval ([45cdfc2](https://github.com/bitsocialnet/bitsocial-cli/commit/45cdfc2))
+* fix: handle transient port-in-use errors in onKuboExit and add fallback retry ([c941f7d](https://github.com/bitsocialnet/bitsocial-cli/commit/c941f7d))
+* fix: update org name from bitsocialhq to bitsocialnet across all references ([7ae75ed](https://github.com/bitsocialnet/bitsocial-cli/commit/7ae75ed))
+* fix(ci): add --loglevel verbose to npm install for diagnostics ([b46823b](https://github.com/bitsocialnet/bitsocial-cli/commit/b46823b))
+* fix(ci): add Python and MSVC build tools for Windows native modules ([37b5c2a](https://github.com/bitsocialnet/bitsocial-cli/commit/37b5c2a))
+* fix(ci): add verbose npm install diagnostics for Windows hang debugging ([441fb43](https://github.com/bitsocialnet/bitsocial-cli/commit/441fb43))
+* fix(ci): increase Windows test timeouts for community delete and mintpass install ([1c35d44](https://github.com/bitsocialnet/bitsocial-cli/commit/1c35d44))
+* fix(ci): normalize 0.0.0.0 to 127.0.0.1 for health checks on macOS ([4652547](https://github.com/bitsocialnet/bitsocial-cli/commit/4652547))
+* fix(ci): pass GITHUB_TOKEN and fix cross-platform log path in tests ([ddf5c27](https://github.com/bitsocialnet/bitsocial-cli/commit/ddf5c27))
+* fix(ci): pipe npm install output for diagnostics and fix Windows CRLF splits ([d46ecb4](https://github.com/bitsocialnet/bitsocial-cli/commit/d46ecb4))
+* fix(ci): remove --install-strategy=nested and --loglevel verbose from npm install ([ae74165](https://github.com/bitsocialnet/bitsocial-cli/commit/ae74165))
+* fix(ci): resolve Windows ESM import path and afterAll hook timeout ([1fdda91](https://github.com/bitsocialnet/bitsocial-cli/commit/1fdda91))
+* fix(ci): resolve Windows npm path and skip unsupported daemon cleanup test ([2ed32c7](https://github.com/bitsocialnet/bitsocial-cli/commit/2ed32c7))
+* fix(ci): skip mintpass-integration test on Windows and revert diagnostics ([e192b98](https://github.com/bitsocialnet/bitsocial-cli/commit/e192b98))
+* fix(ci): skip peer deps in Windows installer to avoid path length limit ([e3b3bd4](https://github.com/bitsocialnet/bitsocial-cli/commit/e3b3bd4))
+* fix(ci): skip Windows SIGTERM tests and add mintpass install diagnostics ([f1da6f1](https://github.com/bitsocialnet/bitsocial-cli/commit/f1da6f1))
+* fix(ci): use --logPath flag in logs test for cross-platform compatibility ([976d3eb](https://github.com/bitsocialnet/bitsocial-cli/commit/976d3eb))
+* fix(test): add RPC readiness check and diagnostic output for macOS CI ([44f5a00](https://github.com/bitsocialnet/bitsocial-cli/commit/44f5a00))
+* fix(test): poll for kubo shutdown instead of asserting immediate rejection ([b2e3d3b](https://github.com/bitsocialnet/bitsocial-cli/commit/b2e3d3b))
+* chore: upgrade @pkcprotocol/pkc-js to 0.0.16 ([6be87ef](https://github.com/bitsocialnet/bitsocial-cli/commit/6be87ef))
+* docs: require GitHub issue tracking for feature implementations ([025f50e](https://github.com/bitsocialnet/bitsocial-cli/commit/025f50e))
+
 ## <small>0.19.39 (2026-04-12)</small>
 
 * chore: upgrade @pkcprotocol/pkc-js to 0.0.15 ([02cdb46](https://github.com/bitsocialhq/bitsocial-cli/commit/02cdb46))
