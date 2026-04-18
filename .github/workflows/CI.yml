@@ -55,6 +55,15 @@ jobs:
       - run: npm run build
       - run: npx oclif manifest
 
+      - name: Verify global install from pack
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARBALL=$(npm pack)
+          npm install -g "./$TARBALL"
+          bitsocial --version
+
       # disable hosts we shouldn't use (Linux only)
       - name: Block unwanted hosts
         if: matrix.os == 'ubuntu-latest'
