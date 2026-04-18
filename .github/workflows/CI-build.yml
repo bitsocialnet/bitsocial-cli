@@ -17,10 +17,19 @@ jobs:
       contents: write
       id-token: write
     steps:
+      - name: Generate release token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           ref: master
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -33,8 +42,8 @@ jobs:
 
       - name: Set up Git commit author
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --local user.name "bitsocial-release-bot[bot]"
+          git config --local user.email "3419549+bitsocial-release-bot[bot]@users.noreply.github.com"
 
       - name: Get current version
         id: before
@@ -42,7 +51,7 @@ jobs:
 
       - name: Create Github Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: npm run release -- --ci
 
       - name: Check if released

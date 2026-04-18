@@ -668,7 +668,7 @@ _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v6.2.3
 
 ## `bitsocial logs`
 
-View the latest BitSocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output in real-time (like tail -f).
+View the latest Bitsocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output in real-time (like tail -f).
 
 ```
 USAGE
@@ -684,7 +684,7 @@ FLAGS
                          42m, 2h, 1d)
 
 DESCRIPTION
-  View the latest BitSocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output
+  View the latest Bitsocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output
   in real-time (like tail -f).
 
 EXAMPLES
