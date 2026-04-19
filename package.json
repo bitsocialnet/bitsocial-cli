@@ -111,7 +111,7 @@
         "wait-on": "6.0.1"
     },
     "dependencies": {
-        "@bitsocial/bso-resolver": "0.0.4",
+        "@bitsocial/bso-resolver": "0.0.5",
         "@multiformats/multiaddr": "13.0.1",
         "@oclif/core": "4.8.0",
         "@oclif/plugin-help": "6.2.36",
