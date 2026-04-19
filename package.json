@@ -93,7 +93,7 @@
         "@types/node": "22.19.13",
         "@types/prettier": "2.7.1",
         "@types/tcp-port-used": "1.0.4",
-        "@types/ws": "^8.18.1",
+        "@types/ws": "8.18.1",
         "commitizen": "4.2.5",
         "cz-conventional-changelog": "3.3.0",
         "eslint": "8.27.0",
@@ -111,7 +111,7 @@
         "wait-on": "6.0.1"
     },
     "dependencies": {
-        "@bitsocial/bso-resolver": "0.0.5",
+        "@bitsocial/bso-resolver": "0.0.6",
         "@multiformats/multiaddr": "13.0.1",
         "@oclif/core": "4.8.0",
         "@oclif/plugin-help": "6.2.36",
