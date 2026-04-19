@@ -344,7 +344,7 @@ EXAMPLES
   $ bitsocial challenge install ./my-local-challenge
 ```
 
-_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/challenge/install.ts)_
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/challenge/install.ts)_
 
 ## `bitsocial challenge list`
 
@@ -367,7 +367,7 @@ EXAMPLES
   $ bitsocial challenge list -q
 ```
 
-_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/challenge/list.ts)_
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/challenge/list.ts)_
 
 ## `bitsocial challenge remove NAME`
 
@@ -392,7 +392,7 @@ EXAMPLES
   $ bitsocial challenge remove @scope/my-challenge
 ```
 
-_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/challenge/remove.ts)_
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/challenge/remove.ts)_
 
 ## `bitsocial community create`
 
@@ -417,7 +417,7 @@ EXAMPLES
     $ bitsocial community create --title 'Hello Plebs' --description 'Welcome'
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/create.ts)_
 
 ## `bitsocial community delete ADDRESSES`
 
@@ -442,7 +442,7 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/delete.ts)_
 
 ## `bitsocial community edit ADDRESS`
 
@@ -450,13 +450,14 @@ Edit a community's properties. For a list of properties, visit https://github.co
 
 ```
 USAGE
-  $ bitsocial community edit ADDRESS --pkcRpcUrl <value>
+  $ bitsocial community edit ADDRESS --pkcRpcUrl <value> [-f <value>]
 
 ARGUMENTS
-  ADDRESS  Address of the community to edit
+  ADDRESS  Address of the community to edit. It could be the name domain, or a public key
 
 FLAGS
-  --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
+  -f, --jsonFile=<value>   Path to a JSON file containing edit options
+      --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Edit a community's properties. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
@@ -468,33 +469,38 @@ EXAMPLES
 
   Add the author address 'esteban.bso' as an admin on the community
 
-    $ bitsocial community edit mysub.bso '--roles["esteban.bso"].role' admin
+    $ bitsocial community edit mycommunity.bso '--roles["esteban.bso"].role' admin
 
   Add two challenges to the community. The first challenge will be a question and answer, and the second will be an
   image captcha
 
-    $ bitsocial community edit mysub.bso --settings.challenges[0].name question \
+    $ bitsocial community edit mycommunity.bso --settings.challenges[0].name question \
       --settings.challenges[0].options.question "what is the password?" --settings.challenges[0].options.answer \
       thepassword --settings.challenges[1].name captcha-canvas-v3
 
   Change the title and description
 
-    $ bitsocial community edit mysub.bso --title "This is the new title" --description "This is the new description"
+    $ bitsocial community edit mycommunity.bso --title "This is the new title" --description "This is the new \
+      description"
 
   Remove a role from a moderator/admin/owner
 
-    $ bitsocial community edit plebbit.bso --roles['rinse12.bso'] null
+    $ bitsocial community edit bitsocial.bso --roles['rinse12.bso'] null
 
   Enable settings.fetchThumbnailUrls to fetch the thumbnail of url submitted by authors
 
-    $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls
+    $ bitsocial community edit bitsocial.bso --settings.fetchThumbnailUrls
 
   disable settings.fetchThumbnailUrls
 
-    $ bitsocial community edit plebbit.bso --settings.fetchThumbnailUrls=false
+    $ bitsocial community edit bitsocial.bso --settings.fetchThumbnailUrls=false
+
+  Edit a community using options from a JSON file
+
+    $ bitsocial community edit bitsocial.bso --jsonFile ./edit-options.json
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/edit.ts)_
 
 ## `bitsocial community get [ADDRESS]`
 
@@ -525,7 +531,7 @@ EXAMPLES
   $ bitsocial community get --publicKey 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/get.ts)_
 
 ## `bitsocial community list`
 
@@ -548,7 +554,7 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/list.ts)_
 
 ## `bitsocial community start ADDRESSES`
 
@@ -577,7 +583,7 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q)
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/start.ts)_
 
 ## `bitsocial community stop ADDRESSES`
 
@@ -602,7 +608,7 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/stop.ts)_
 
 ## `bitsocial daemon`
 
@@ -643,7 +649,7 @@ EXAMPLES
   $ bitsocial daemon --chainProviderUrls https://mainnet.infura.io/v3/YOUR_KEY
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/daemon.ts)_
 
 ## `bitsocial help [COMMAND]`
 
@@ -700,7 +706,7 @@ EXAMPLES
   $ bitsocial logs --since 1h -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/logs.ts)_
 
 ## `bitsocial update check`
 
@@ -717,7 +723,7 @@ EXAMPLES
   $ bitsocial update check
 ```
 
-_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/update/check.ts)_
+_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/update/check.ts)_
 
 ## `bitsocial update install [VERSION]`
 
@@ -749,7 +755,7 @@ EXAMPLES
   $ bitsocial update install --no-restart-daemons
 ```
 
-_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/update/install.ts)_
+_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/update/install.ts)_
 
 ## `bitsocial update versions`
 
@@ -771,7 +777,7 @@ EXAMPLES
   $ bitsocial update versions --limit 5
 ```
 
-_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.44/src/cli/commands/update/versions.ts)_
+_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/update/versions.ts)_
 <!-- commandsstop -->
 
 ## Contribution

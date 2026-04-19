@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.45 (2026-04-19)</small>
+
+* feat: add --jsonFile (-f) flag to community edit for JSON-based edits ([8f27a15](https://github.com/bitsocialnet/bitsocial-cli/commit/8f27a15))
+* feat: report community status after daemon restart in update install ([6001517](https://github.com/bitsocialnet/bitsocial-cli/commit/6001517)), closes [#26](https://github.com/bitsocialnet/bitsocial-cli/issues/26)
+
 ## <small>0.19.44 (2026-04-19)</small>
 
 * fix: skip lifecycle scripts during challenge install to avoid husky failures ([9a99238](https://github.com/bitsocialnet/bitsocial-cli/commit/9a99238))
