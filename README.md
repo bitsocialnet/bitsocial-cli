@@ -19,7 +19,7 @@
 
 ## What is Bitsocial?
 
-Bitsocial is p2p and decentralized social media protocol built completely with IPFS/IPNS/pubsub. It doesn't use any central server, central database, public HTTP endpoint or DNS, it is pure peer to peer and fully content addressable. It will allow community owners to retain full ownership over their community. Whitepaper [here](https://github.com/plebbit/whitepaper/discussions/2)
+Bitsocial is p2p and decentralized social media protocol built completely with IPFS/IPNS/pubsub. It doesn't use any central server, central database, public HTTP endpoint or DNS, it is pure peer to peer and fully content addressable. It will allow community owners to retain full ownership over their community. Learn more [here](https://bitsocial.net).
 
 ## What is bitsocial-cli?
 
