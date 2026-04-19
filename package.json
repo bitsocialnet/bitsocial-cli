@@ -25,7 +25,8 @@
         "postinstall": "node bin/postinstall.js",
         "generate:readme": "oclif readme && sed -i 's@/src/commands/@/src/cli/commands/@g' README.md && sed -i 's@src/commands@src/cli/commands@g' README.md",
         "ci:download-web-uis": "node bin/postinstall.js",
-        "ci:daemon:test-before-release": "node --loader ts-node/esm ci-bin/run-daemon-before-release.ts"
+        "ci:daemon:test-before-release": "node --loader ts-node/esm ci-bin/run-daemon-before-release.ts",
+        "update-webuis": "node bin/update-webuis.js"
     },
     "files": [
         "/bin",
@@ -139,8 +140,8 @@
             "sha256OfHtmlZip": "14653b19e88868fda6fef26601f477947e44251cc52bd95d7d6fec158ae67b6f"
         },
         {
-            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.6.4",
-            "sha256OfHtmlZip": "b47685f868c868c6afe96e865897876fabac2ddf121a00d194cee36fdff9d348"
+            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.7.4",
+            "sha256OfHtmlZip": "c768bd40a6f9e6c3889d2e57df843e667594974c6f3048357e2b6148aeec3385"
         }
     ]
 }
