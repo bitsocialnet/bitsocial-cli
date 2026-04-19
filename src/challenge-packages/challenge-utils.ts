@@ -239,7 +239,7 @@ export async function runNpmInstall(challengeDir: string): Promise<void> {
             // will all use the same Node that's running bitsocial-cli.
             // Use piped stdio and forward explicitly so output is visible even
             // when the parent process has piped stdio (e.g. spawned by tests).
-            const args = [npmCliPath, "install", "--omit=dev", "--no-audit", "--no-fund"];
+            const args = [npmCliPath, "install", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund"];
             if (process.platform === "win32") {
                 args.push("--legacy-peer-deps");
             }

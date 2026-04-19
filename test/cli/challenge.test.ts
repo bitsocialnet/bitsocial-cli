@@ -171,6 +171,29 @@ describe("bitsocial challenge install", () => {
         expect(restoredPkg.devDependencies).toEqual({ "prettier": "*" });
     });
 
+    it("installs successfully when package has a prepare script (e.g. husky)", async () => {
+        const dataPath = randomDirectory();
+        const srcDir = path.join(randomDirectory(), "husky-challenge");
+        await fsPromise.mkdir(srcDir, { recursive: true });
+        await fsPromise.writeFile(
+            path.join(srcDir, "package.json"),
+            JSON.stringify({
+                name: "husky-challenge",
+                version: "1.0.0",
+                scripts: {
+                    prepare: "husky"
+                }
+            }, null, 2)
+        );
+        await fsPromise.writeFile(
+            path.join(srcDir, "index.js"),
+            `export default function() { return { type: 'text/plain', challenge: '1+1', getChallenge: async () => ({ challenge: '1+1', type: 'text/plain', verify: async (answer) => ({ success: answer === '2' }) }) }; };`
+        );
+
+        const result = await runBitsocialChallenge(["install", srcDir, "--pkcOptions.dataPath", dataPath]);
+        expect(result.exitCode, `install failed with stderr:\n${result.stderr}`).toBe(0);
+    });
+
     it("does not pass --legacy-peer-deps on non-Windows platforms", async () => {
         if (process.platform === "win32") return; // skip on Windows — flag is expected there
         const dataPath = randomDirectory();
