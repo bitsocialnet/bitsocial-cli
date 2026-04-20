@@ -37,6 +37,7 @@ export const currentSubProps: Partial<CommunityInstance> = {
         markdownVideoReplies: false
     },
     address: "12KWOsomething",
+    name: "original-community.bso",
     rules: ["Rule 1", "Rule 2"],
     settings: { challenges: [{ name: "captcha-canvas-v3" }], fetchThumbnailUrls: false, fetchThumbnailUrlsProxyUrl: undefined },
     roles: { "rinse12.bso": { role: "admin" }, "estebanabaroa.eth": { role: "admin" }, "plebeius.eth": { role: "moderator" } },

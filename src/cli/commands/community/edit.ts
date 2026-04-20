@@ -37,12 +37,9 @@ For modifying complex settings like challenges, consider using a web UI instead:
     };
 
     static override examples = [
-        // TODO update this to change the name instead
-        // Also are we testing modifying name properly?
-        // in theory user should not modify address, they should modify name
         {
-            description: "Change the address of the community to a new domain address",
-            command: "bitsocial community edit 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu --address newAddress.bso"
+            description: "Change the name of the community",
+            command: "bitsocial community edit 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu --name newName.bso"
         },
         {
             description: "Add the author address 'esteban.bso' as an admin on the community",

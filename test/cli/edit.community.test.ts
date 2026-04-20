@@ -38,7 +38,7 @@ describe("bitsocial community edit", () => {
 
     it(`Can pass a string value to a first level flag`, async () => {
         const { result } = await runEditCommand(
-            'community edit plebbit.bso --title "new Title" --address newAddress.bso --description "new Description" --pubsubTopic "new Pubsub topic"'
+            'community edit plebbit.bso --title "new Title" --name newName.bso --description "new Description" --pubsubTopic "new Pubsub topic"'
         );
         expect(result.error).toBeUndefined();
         expect(editFake.calledOnce).toBe(true);
@@ -46,7 +46,7 @@ describe("bitsocial community edit", () => {
         expect(parsedArgs.title).toBe("new Title");
         expect(parsedArgs.description).toBe("new Description");
         expect(parsedArgs.pubsubTopic).toBe("new Pubsub topic");
-        expect(parsedArgs.address).toBe("newAddress.bso");
+        expect(parsedArgs.name).toBe("newName.bso");
     });
 
     it(`Can set a string value to a nested prop`, async () => {
