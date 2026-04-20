@@ -182,33 +182,75 @@ describe("bitsocial community edit", () => {
         expect(mergedRules[1]).toBe("2. Second rule text");
     });
 
-    it(`Can set null as a value to a nested flag`, async () => {
+    it(`Converts null to undefined for a nested role flag`, async () => {
         const { result } = await runEditCommand("community edit plebbit.bso --roles['rinse12.bso'] null");
         expect(result.error).toBeUndefined();
         expect(editFake.calledOnce).toBe(true);
         const mergedEditOptions = <CommunityEditOptions>editFake.args[0][0];
 
-        expect(mergedEditOptions.roles!["rinse12.bso"]).toBeNull();
-        expect(mergedEditOptions.roles!["estebanabaroa.bso"]).toEqual(currentSubProps.roles!["estebanabaroa.bso"]);
+        expect(mergedEditOptions.roles!["rinse12.bso"]).toBeUndefined();
+        // Other roles should be preserved
+        expect(mergedEditOptions.roles!["estebanabaroa.eth"]).toEqual(currentSubProps.roles!["estebanabaroa.eth"]);
+        expect(mergedEditOptions.roles!["plebeius.eth"]).toEqual(currentSubProps.roles!["plebeius.eth"]);
     });
 
-    it(`Can set null as a value to a flag`, async () => {
-        const { result } = await runEditCommand("community edit plebbit.bso --nullField] null");
+    it(`Converts null to undefined for a top-level flag`, async () => {
+        const { result } = await runEditCommand("community edit plebbit.bso --description null");
         expect(result.error).toBeUndefined();
         expect(editFake.calledOnce).toBe(true);
         const mergedEditOptions = <CommunityEditOptions>editFake.args[0][0];
 
-        const nullField = (mergedEditOptions as Record<string, unknown>)["nullField"];
-        expect(nullField).toBeNull();
+        expect(mergedEditOptions.description).toBeUndefined();
     });
 
-    it("Can set a null to a whole object", async () => {
+    it("Converts null to undefined for a whole nested object", async () => {
         const { result } = await runEditCommand("community edit plebbit.bso --settings null");
         expect(result.error).toBeUndefined();
         expect(editFake.calledOnce).toBe(true);
         const mergedEditOptions = <CommunityEditOptions>editFake.args[0][0];
 
-        expect(mergedEditOptions.settings).toBeNull();
+        expect(mergedEditOptions.settings).toBeUndefined();
+    });
+
+    it("Handles mixed null and non-null roles (remove .eth, add .bso)", async () => {
+        const { result } = await runEditCommand(
+            `community edit plebbit.bso --roles['estebanabaroa.eth'] null --roles['estebanabaroa.bso'].role admin`
+        );
+        expect(result.error).toBeUndefined();
+        expect(editFake.calledOnce).toBe(true);
+        const mergedEditOptions = <CommunityEditOptions>editFake.args[0][0];
+
+        // .eth role should be removed (undefined)
+        expect(mergedEditOptions.roles!["estebanabaroa.eth"]).toBeUndefined();
+        // .bso role should be added
+        expect(mergedEditOptions.roles!["estebanabaroa.bso"]).toEqual({ role: "admin" });
+        // Other roles untouched
+        expect(mergedEditOptions.roles!["rinse12.bso"]).toEqual(currentSubProps.roles!["rinse12.bso"]);
+        expect(mergedEditOptions.roles!["plebeius.eth"]).toEqual(currentSubProps.roles!["plebeius.eth"]);
+    });
+
+    it("Converts null to undefined for roles in a JSON file", async () => {
+        const jsonPath = tempFile({ extension: "json" });
+        await fsPromises.writeFile(
+            jsonPath,
+            JSON.stringify({
+                roles: {
+                    "rinse12.bso": null,
+                    "estebanabaroa.eth": null,
+                    "newmod.bso": { role: "moderator" }
+                }
+            })
+        );
+        const { result } = await runEditCommand(`community edit plebbit.bso --jsonFile ${jsonPath}`);
+        expect(result.error).toBeUndefined();
+        expect(editFake.calledOnce).toBe(true);
+        const mergedEditOptions = <CommunityEditOptions>editFake.args[0][0];
+
+        expect(mergedEditOptions.roles!["rinse12.bso"]).toBeUndefined();
+        expect(mergedEditOptions.roles!["estebanabaroa.eth"]).toBeUndefined();
+        expect(mergedEditOptions.roles!["newmod.bso"]).toEqual({ role: "moderator" });
+        // Untouched role preserved
+        expect(mergedEditOptions.roles!["plebeius.eth"]).toEqual(currentSubProps.roles!["plebeius.eth"]);
     });
 
     // --jsonFile flag

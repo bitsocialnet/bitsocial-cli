@@ -91,6 +91,22 @@ export async function parseMultiAddrIpfsGatewayToUrl(ipfsGatewaymultiAddrString:
     return new URL(`http://${parsed.host}:${parsed.port}`);
 }
 
+/** Recursively replaces all `null` values with `undefined`.
+ * Used before calling community.edit() since pkc-js expects `undefined` for removal,
+ * but JSON/CLI input produces `null`. */
+export function replaceNullWithUndefined(obj: any): any {
+    if (obj === null) return undefined;
+    if (Array.isArray(obj)) return obj.map(replaceNullWithUndefined);
+    if (typeof obj === "object" && obj.constructor === Object) {
+        const result: Record<string, any> = {};
+        for (const [key, value] of Object.entries(obj)) {
+            result[key] = replaceNullWithUndefined(value);
+        }
+        return result;
+    }
+    return obj;
+}
+
 /**
  * Custom merge function that implements CLI-specific merge behavior.
  * This matches the expected behavior from the test suite.

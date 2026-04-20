@@ -2,7 +2,7 @@
 import DataObjectParser from "dataobject-parser";
 import { Args, Flags } from "@oclif/core";
 import { BaseCommand } from "../../base-command.js";
-import { PKCLogger, mergeDeep, parseJsoncFile } from "../../../util.js";
+import { PKCLogger, mergeDeep, parseJsoncFile, replaceNullWithUndefined } from "../../../util.js";
 import * as remeda from "remeda";
 
 export default class Edit extends BaseCommand {
@@ -110,7 +110,7 @@ export default class Edit extends BaseCommand {
             // CLI flag edits use concat semantics (arrays extend with new values).
             const finalMergedState = mergeDeep(mergedState, editOptions, flags.jsonFile ? "replace" : "concat");
             log("Internal community state after merge:", finalMergedState);
-            await community.edit(finalMergedState);
+            await community.edit(replaceNullWithUndefined(finalMergedState));
             this.log(community.address);
         } catch (e) {
             const error = e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e));

@@ -39,7 +39,7 @@ export const currentSubProps: Partial<CommunityInstance> = {
     address: "12KWOsomething",
     rules: ["Rule 1", "Rule 2"],
     settings: { challenges: [{ name: "captcha-canvas-v3" }], fetchThumbnailUrls: false, fetchThumbnailUrlsProxyUrl: undefined },
-    roles: { "rinse12.bso": { role: "admin" } },
+    roles: { "rinse12.bso": { role: "admin" }, "estebanabaroa.eth": { role: "admin" }, "plebeius.eth": { role: "moderator" } },
     createdAt: 12345678,
     started: true,
     updatedAt: 123456
