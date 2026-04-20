@@ -6,7 +6,19 @@ import { PKCLogger, mergeDeep, parseJsoncFile, replaceNullWithUndefined } from "
 import * as remeda from "remeda";
 
 export default class Edit extends BaseCommand {
-    static override description = "Edit a community's properties. For a list of properties, visit https://github.com/pkcprotocol/pkc-js";
+    static override description = `Edit a community's properties. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
+
+Merge behavior with CLI flags:
+  - Objects are merged with the community's current state (new keys are added, existing keys are overwritten).
+  - Arrays are extended: new values are prepended to the existing array.
+  - Setting a value to null removes it (e.g. --roles['mod.bso'] null).
+
+Merge behavior with --jsonFile:
+  - Objects are merged the same way as CLI flags.
+  - Arrays are replaced entirely (RFC 7396 JSON Merge Patch semantics).
+  - When both --jsonFile and CLI flags are provided, CLI flags take priority.
+
+For modifying complex settings like challenges, consider using a web UI instead: https://bitsocial.net/apps`;
 
     static override args = {
         address: Args.string({
