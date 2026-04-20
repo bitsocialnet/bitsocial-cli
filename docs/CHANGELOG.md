@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.48 (2026-04-20)</small>
+
+* refactor: remove community status polling from update install ([c63e29c](https://github.com/bitsocialnet/bitsocial-cli/commit/c63e29c))
+
 ## <small>0.19.47 (2026-04-20)</small>
 
 * feat: add --concurrency flag to community start ([6886105](https://github.com/bitsocialnet/bitsocial-cli/commit/6886105))
