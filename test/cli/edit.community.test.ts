@@ -257,7 +257,7 @@ describe("bitsocial community edit", () => {
         await fsPromises.writeFile(jsonPath, "not valid json {{{");
         const { result } = await runEditCommand(`community edit plebbit.bso --jsonFile ${jsonPath}`);
         expect(result.error).toBeDefined();
-        expect(result.error?.message).toContain("Invalid JSON");
+        expect(result.error?.message).toContain("Invalid JSONC");
     });
 
     it("Errors when JSON file contains an array instead of object", async () => {
@@ -284,6 +284,54 @@ describe("bitsocial community edit", () => {
         expect(editFake.calledOnce).toBe(true);
         const parsedArgs = <CommunityEditOptions>editFake.args[0][0];
         expect(parsedArgs.title).toBe("Short Flag Title");
+    });
+
+    // JSONC (JSON with comments) support
+
+    it("Can edit using a JSONC file with single-line comments", async () => {
+        const jsoncPath = tempFile({ extension: "jsonc" });
+        const jsoncContent = `{
+  // This is a comment
+  "title": "JSONC Title",
+  "description": "JSONC Desc"
+}`;
+        await fsPromises.writeFile(jsoncPath, jsoncContent);
+        const { result } = await runEditCommand(`community edit plebbit.bso --jsonFile ${jsoncPath}`);
+        expect(result.error).toBeUndefined();
+        expect(editFake.calledOnce).toBe(true);
+        const parsedArgs = <CommunityEditOptions>editFake.args[0][0];
+        expect(parsedArgs.title).toBe("JSONC Title");
+        expect(parsedArgs.description).toBe("JSONC Desc");
+    });
+
+    it("Can edit using a JSONC file with multi-line comments", async () => {
+        const jsoncPath = tempFile({ extension: "jsonc" });
+        const jsoncContent = `{
+  /* Multi-line
+     comment */
+  "title": "Multi Comment Title"
+}`;
+        await fsPromises.writeFile(jsoncPath, jsoncContent);
+        const { result } = await runEditCommand(`community edit plebbit.bso --jsonFile ${jsoncPath}`);
+        expect(result.error).toBeUndefined();
+        expect(editFake.calledOnce).toBe(true);
+        const parsedArgs = <CommunityEditOptions>editFake.args[0][0];
+        expect(parsedArgs.title).toBe("Multi Comment Title");
+    });
+
+    it("Can edit using a JSONC file with trailing commas after comment stripping", async () => {
+        const jsoncPath = tempFile({ extension: "jsonc" });
+        const jsoncContent = `{
+  "title": "Trailing Comma Title", // inline comment
+  "description": "Trailing Comma Desc"
+}`;
+        await fsPromises.writeFile(jsoncPath, jsoncContent);
+        const { result } = await runEditCommand(`community edit plebbit.bso --jsonFile ${jsoncPath}`);
+        expect(result.error).toBeUndefined();
+        expect(editFake.calledOnce).toBe(true);
+        const parsedArgs = <CommunityEditOptions>editFake.args[0][0];
+        expect(parsedArgs.title).toBe("Trailing Comma Title");
+        expect(parsedArgs.description).toBe("Trailing Comma Desc");
     });
 
 });

@@ -2,6 +2,7 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import * as fsPromises from "fs/promises";
+import stripJsonComments from "strip-json-comments";
 import PKCLogger from "@pkcprotocol/pkc-logger";
 export { PKCLogger };
 
@@ -173,4 +174,22 @@ export function mergeDeep(target: any, source: any): any {
 
     // If not both objects/arrays, source takes precedence
     return source;
+}
+
+export async function parseJsoncFile(filePath: string): Promise<Record<string, unknown>> {
+    const fileContent = await fsPromises.readFile(filePath, "utf-8");
+    const stripped = stripJsonComments(fileContent);
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(stripped);
+    } catch (e) {
+        if (e instanceof SyntaxError) {
+            throw new Error(`Invalid JSONC in file ${filePath}: ${e.message}`);
+        }
+        throw e;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("JSONC file must contain a JSON object (not an array, null, string, or number)");
+    }
+    return parsed as Record<string, unknown>;
 }

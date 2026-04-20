@@ -1,9 +1,8 @@
 //@ts-expect-error
 import DataObjectParser from "dataobject-parser";
 import { Args, Flags } from "@oclif/core";
-import fs from "fs";
 import { BaseCommand } from "../../base-command.js";
-import { PKCLogger, mergeDeep } from "../../../util.js";
+import { PKCLogger, mergeDeep, parseJsoncFile } from "../../../util.js";
 import * as remeda from "remeda";
 
 export default class Edit extends BaseCommand {
@@ -21,7 +20,7 @@ export default class Edit extends BaseCommand {
         jsonFile: Flags.file({
             char: "f",
             exists: true,
-            description: "Path to a JSON file containing edit options"
+            description: "Path to a JSON/JSONC file containing edit options (supports comments)"
         })
     };
 
@@ -59,7 +58,7 @@ export default class Edit extends BaseCommand {
             command: "bitsocial community edit bitsocial.bso --settings.fetchThumbnailUrls=false"
         },
         {
-            description: "Edit a community using options from a JSON file",
+            description: "Edit a community using options from a JSON/JSONC file",
             command: "bitsocial community edit bitsocial.bso --jsonFile ./edit-options.json"
         }
     ];
@@ -74,20 +73,15 @@ export default class Edit extends BaseCommand {
         const cliEditOptions = DataObjectParser.transpose(remeda.omit(flags, ["pkcRpcUrl", "jsonFile"]))["_data"];
         log("CLI edit options parsed:", cliEditOptions);
 
-        // Parse JSON file if provided
+        // Parse JSONC file if provided
         let jsonFileOptions: Record<string, unknown> = {};
         if (flags.jsonFile) {
             try {
-                const fileContent = await fs.promises.readFile(flags.jsonFile, "utf-8");
-                const parsed = JSON.parse(fileContent);
-                if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-                    this.error("JSON file must contain a JSON object (not an array, null, string, or number)");
-                }
-                jsonFileOptions = parsed;
-                log("JSON file options parsed:", jsonFileOptions);
+                jsonFileOptions = await parseJsoncFile(flags.jsonFile);
+                log("JSONC file options parsed:", jsonFileOptions);
             } catch (e) {
-                if (e instanceof SyntaxError) {
-                    this.error(`Invalid JSON in file ${flags.jsonFile}: ${e.message}`);
+                if (e instanceof Error) {
+                    this.error(e.message);
                 }
                 throw e;
             }

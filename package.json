@@ -125,6 +125,7 @@
         "exit-hook": "4.0.0",
         "express": "4.19.2",
         "kubo": "0.40.1",
+        "strip-json-comments": "5.0.3",
         "tcp-port-used": "1.0.2",
         "tslib": "2.6.2",
         "typescript": "5.9.3"
