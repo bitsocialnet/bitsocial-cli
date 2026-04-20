@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.47 (2026-04-20)</small>
+
+* feat: add --concurrency flag to community start ([6886105](https://github.com/bitsocialnet/bitsocial-cli/commit/6886105))
+* feat: fast update install when only dist/ changed ([56f6011](https://github.com/bitsocialnet/bitsocial-cli/commit/56f6011))
+* feat: wait for all communities to start after update install ([805aee1](https://github.com/bitsocialnet/bitsocial-cli/commit/805aee1))
+* chore: update @pkcprotocol/pkc-js from 0.0.17 to 0.0.19 ([918d720](https://github.com/bitsocialnet/bitsocial-cli/commit/918d720))
+* fix: use name instead of address in community edit example and test ([4ea3aac](https://github.com/bitsocialnet/bitsocial-cli/commit/4ea3aac))
+* docs: improve community edit help with merge behavior and web UI link ([54382f2](https://github.com/bitsocialnet/bitsocial-cli/commit/54382f2))
+
 ## <small>0.19.46 (2026-04-20)</small>
 
 * fix: convert null to undefined in community edit before calling pkc-js ([71c4127](https://github.com/bitsocialnet/bitsocial-cli/commit/71c4127))
