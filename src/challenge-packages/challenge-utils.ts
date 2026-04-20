@@ -186,12 +186,16 @@ export async function runNpmPack(packageSpec: string, destDir: string): Promise<
     const npmCliPath = await getNpmCliPath();
     return new Promise<string>((resolve, reject) => {
         const proc = spawn(process.execPath, [npmCliPath, "pack", packageSpec, "--pack-destination", destDir], {
-            stdio: ["ignore", "pipe", "inherit"],
+            stdio: ["ignore", "pipe", "pipe"],
             env: getNpmEnv()
         });
         let stdout = "";
+        let stderr = "";
         proc.stdout.on("data", (data: Buffer) => {
             stdout += data.toString();
+        });
+        proc.stderr.on("data", (data: Buffer) => {
+            stderr += data.toString();
         });
         proc.on("error", (err) => {
             reject(new Error(`Failed to run npm pack: ${err.message}`));
@@ -206,7 +210,7 @@ export async function runNpmPack(packageSpec: string, destDir: string): Promise<
                 }
                 resolve(path.join(destDir, filename));
             } else {
-                reject(new Error(`npm pack exited with code ${code}`));
+                reject(new Error(`npm pack exited with code ${code}: ${stderr.trim()}`));
             }
         });
     });

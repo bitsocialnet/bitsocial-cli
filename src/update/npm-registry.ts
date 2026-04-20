@@ -59,14 +59,16 @@ export async function installGlobal(version: string): Promise<void> {
                 env: getNpmEnv()
             }
         );
-        proc.stdout?.pipe(process.stdout);
-        proc.stderr?.pipe(process.stderr);
+        let stderr = "";
+        proc.stderr?.on("data", (data: Buffer) => {
+            stderr += data.toString();
+        });
         proc.on("error", (err) => {
             reject(new Error(`Failed to run npm install: ${err.message}`));
         });
         proc.on("close", (code) => {
             if (code === 0) resolve();
-            else reject(new Error(`npm install -g exited with code ${code}`));
+            else reject(new Error(`npm install -g exited with code ${code}: ${stderr.trim()}`));
         });
     });
 }
