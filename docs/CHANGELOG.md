@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.46 (2026-04-20)</small>
+
+* fix: convert null to undefined in community edit before calling pkc-js ([71c4127](https://github.com/bitsocialnet/bitsocial-cli/commit/71c4127))
+* fix: use RFC 7396 array replace semantics for JSON file edits in community edit ([0a37084](https://github.com/bitsocialnet/bitsocial-cli/commit/0a37084))
+* fix: wait for non-empty communities before reporting status after daemon restart ([2e68bd5](https://github.com/bitsocialnet/bitsocial-cli/commit/2e68bd5))
+* feat: add --stdout and --stderr flags to bitsocial logs command ([211e85e](https://github.com/bitsocialnet/bitsocial-cli/commit/211e85e)), closes [#29](https://github.com/bitsocialnet/bitsocial-cli/issues/29)
+* feat: add JSONC support to community create and edit commands ([914e466](https://github.com/bitsocialnet/bitsocial-cli/commit/914e466))
+* feat: follow mode switches to new log file after daemon restart ([94ccfa9](https://github.com/bitsocialnet/bitsocial-cli/commit/94ccfa9)), closes [#31](https://github.com/bitsocialnet/bitsocial-cli/issues/31)
+
 ## <small>0.19.45 (2026-04-19)</small>
 
 * feat: add --jsonFile (-f) flag to community edit for JSON-based edits ([8f27a15](https://github.com/bitsocialnet/bitsocial-cli/commit/8f27a15))

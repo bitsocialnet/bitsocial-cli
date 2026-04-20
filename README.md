@@ -344,7 +344,7 @@ EXAMPLES
   $ bitsocial challenge install ./my-local-challenge
 ```
 
-_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/challenge/install.ts)_
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/challenge/install.ts)_
 
 ## `bitsocial challenge list`
 
@@ -367,7 +367,7 @@ EXAMPLES
   $ bitsocial challenge list -q
 ```
 
-_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/challenge/list.ts)_
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/challenge/list.ts)_
 
 ## `bitsocial challenge remove NAME`
 
@@ -392,7 +392,7 @@ EXAMPLES
   $ bitsocial challenge remove @scope/my-challenge
 ```
 
-_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/challenge/remove.ts)_
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/challenge/remove.ts)_
 
 ## `bitsocial community create`
 
@@ -400,12 +400,13 @@ Create a community with specific properties. A newly created community will be s
 
 ```
 USAGE
-  $ bitsocial community create --pkcRpcUrl <value> [--privateKeyPath <value>]
+  $ bitsocial community create --pkcRpcUrl <value> [--privateKeyPath <value>] [-f <value>]
 
 FLAGS
-  --pkcRpcUrl=<value>       (required) [default: ws://localhost:9138/] URL to PKC RPC
-  --privateKeyPath=<value>  Private key (PEM) of the community signer that will be used to determine address (if address
-                            is not a domain). If it's not provided then PKC will generate a private key
+  -f, --jsonFile=<value>        Path to a JSON/JSONC file containing create options (supports comments)
+      --pkcRpcUrl=<value>       (required) [default: ws://localhost:9138/] URL to PKC RPC
+      --privateKeyPath=<value>  Private key (PEM) of the community signer that will be used to determine address (if
+                                address is not a domain). If it's not provided then PKC will generate a private key
 
 DESCRIPTION
   Create a community with specific properties. A newly created community will be started after creation and be able to
@@ -415,9 +416,13 @@ EXAMPLES
   Create a community with title 'Hello Plebs' and description 'Welcome'
 
     $ bitsocial community create --title 'Hello Plebs' --description 'Welcome'
+
+  Create a community using options from a JSON/JSONC file
+
+    $ bitsocial community create --jsonFile ./create-options.json
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/create.ts)_
 
 ## `bitsocial community delete ADDRESSES`
 
@@ -442,7 +447,7 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/delete.ts)_
 
 ## `bitsocial community edit ADDRESS`
 
@@ -456,7 +461,7 @@ ARGUMENTS
   ADDRESS  Address of the community to edit. It could be the name domain, or a public key
 
 FLAGS
-  -f, --jsonFile=<value>   Path to a JSON file containing edit options
+  -f, --jsonFile=<value>   Path to a JSON/JSONC file containing edit options (supports comments)
       --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
@@ -495,12 +500,12 @@ EXAMPLES
 
     $ bitsocial community edit bitsocial.bso --settings.fetchThumbnailUrls=false
 
-  Edit a community using options from a JSON file
+  Edit a community using options from a JSON/JSONC file
 
     $ bitsocial community edit bitsocial.bso --jsonFile ./edit-options.json
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/edit.ts)_
 
 ## `bitsocial community get [ADDRESS]`
 
@@ -531,7 +536,7 @@ EXAMPLES
   $ bitsocial community get --publicKey 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/get.ts)_
 
 ## `bitsocial community list`
 
@@ -554,7 +559,7 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/list.ts)_
 
 ## `bitsocial community start ADDRESSES`
 
@@ -583,7 +588,7 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q)
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/start.ts)_
 
 ## `bitsocial community stop ADDRESSES`
 
@@ -608,7 +613,7 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/community/stop.ts)_
 
 ## `bitsocial daemon`
 
@@ -649,7 +654,7 @@ EXAMPLES
   $ bitsocial daemon --chainProviderUrls https://mainnet.infura.io/v3/YOUR_KEY
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/daemon.ts)_
 
 ## `bitsocial help [COMMAND]`
 
@@ -677,7 +682,8 @@ View the latest BitSocial daemon log file. By default dumps the full log and exi
 
 ```
 USAGE
-  $ bitsocial logs [-f] [-n <value>] [--since <value>] [--until <value>] [--logPath <value>]
+  $ bitsocial logs [-f] [-n <value>] [--since <value>] [--until <value>] [--logPath <value>] [--stdout |
+    --stderr]
 
 FLAGS
   -f, --follow           Follow log output in real-time (like tail -f)
@@ -685,6 +691,8 @@ FLAGS
       --logPath=<value>  Specify the directory containing log files
       --since=<value>    Show logs since timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
                          42m, 2h, 1d)
+      --stderr           Show only stderr log entries (output of pkc-logger library)
+      --stdout           Show only stdout log entries
       --until=<value>    Show logs before timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
                          42m, 2h, 1d)
 
@@ -704,9 +712,15 @@ EXAMPLES
   $ bitsocial logs --since 2026-01-02T13:23:37Z --until 2026-01-02T14:00:00Z
 
   $ bitsocial logs --since 1h -f
+
+  $ bitsocial logs --stdout
+
+  $ bitsocial logs --stderr
+
+  $ bitsocial logs --stdout -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/logs.ts)_
 
 ## `bitsocial update check`
 
@@ -723,7 +737,7 @@ EXAMPLES
   $ bitsocial update check
 ```
 
-_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/update/check.ts)_
+_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/update/check.ts)_
 
 ## `bitsocial update install [VERSION]`
 
@@ -755,7 +769,7 @@ EXAMPLES
   $ bitsocial update install --no-restart-daemons
 ```
 
-_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/update/install.ts)_
+_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/update/install.ts)_
 
 ## `bitsocial update versions`
 
@@ -777,7 +791,7 @@ EXAMPLES
   $ bitsocial update versions --limit 5
 ```
 
-_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.45/src/cli/commands/update/versions.ts)_
+_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.46/src/cli/commands/update/versions.ts)_
 <!-- commandsstop -->
 
 ## Contribution
