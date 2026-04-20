@@ -185,27 +185,49 @@ export default class Install extends Command {
     }
 
     private async _reportCommunityStatus(pkcRpcUrl: string): Promise<void> {
+        const POLL_INTERVAL_MS = 2000;
+        const TIMEOUT_MS = 120_000;
         let pkc: PKCInstance | undefined;
         try {
             pkc = await this._connectToRpc(pkcRpcUrl);
-            const communities: string[] = pkc.communities;
-            if (communities.length === 0) return;
+            const communityAddresses: string[] = pkc.communities;
+            if (communityAddresses.length === 0) return;
 
-            const statuses = await Promise.all(
-                communities.map(async (address: string) => {
-                    const community = await pkc!.createCommunity({ address });
-                    return community.started as boolean;
-                })
+            // Create community objects once — they are RPC proxies whose
+            // .started property reflects live daemon state
+            const communities = await Promise.all(
+                communityAddresses.map((address: string) => pkc!.createCommunity({ address }))
             );
-            const startedCount = statuses.filter(Boolean).length;
             const total = communities.length;
+            const deadline = Date.now() + TIMEOUT_MS;
+            let lastReportedCount = -1;
 
-            if (startedCount === total) {
-                this.log(`  ${startedCount} ${startedCount === 1 ? "community" : "communities"} started.`);
-            } else if (startedCount > 0) {
-                this.log(`  ${startedCount} of ${total} communities started (remaining still loading).`);
-            } else {
-                this.log(`  ${total} ${total === 1 ? "community" : "communities"} in data path (still loading). Check with: bitsocial community list`);
+            while (true) {
+                const startedCount = communities.filter((c: any) => c.started === true).length;
+
+                if (startedCount === total) {
+                    this.log(`  All ${total} ${total === 1 ? "community" : "communities"} started.`);
+                    return;
+                }
+
+                // Only print a progress update when the count changes
+                if (startedCount !== lastReportedCount) {
+                    if (startedCount > 0) {
+                        this.log(`  ${startedCount} of ${total} communities started...`);
+                    }
+                    lastReportedCount = startedCount;
+                }
+
+                if (Date.now() >= deadline) {
+                    if (startedCount > 0) {
+                        this.log(`  ${startedCount} of ${total} communities started (remaining still loading).`);
+                    } else {
+                        this.log(`  ${total} ${total === 1 ? "community" : "communities"} in data path (still loading). Check with: bitsocial community list`);
+                    }
+                    return;
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
             }
         } catch {
             this.warn("Could not check community status.");
