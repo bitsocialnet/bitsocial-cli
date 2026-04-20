@@ -5,14 +5,6 @@ import { fetchLatestVersion, installGlobal } from "../../../update/npm-registry.
 import { fastInstallGlobal } from "../../../update/fast-update.js";
 import { compareVersions } from "../../../update/semver.js";
 import { getAliveDaemonStates, type DaemonState } from "../../../common-utils/daemon-state.js";
-import PKC from "@pkcprotocol/pkc-js";
-type PKCInstance = Awaited<ReturnType<typeof PKC>>;
-type PKCConnectOverride = (pkcRpcUrl: string) => Promise<PKCInstance>;
-
-const getPKCConnectOverride = (): PKCConnectOverride | undefined => {
-    const globalWithOverride = globalThis as { __PKC_RPC_CONNECT_OVERRIDE?: PKCConnectOverride };
-    return globalWithOverride.__PKC_RPC_CONNECT_OVERRIDE;
-};
 
 export default class Install extends Command {
     static override description = "Install a specific version of bitsocial from npm";
@@ -165,89 +157,12 @@ export default class Install extends Command {
             const started = await tcpPortUsed.waitUntilUsed(port, 500, 30000).then(() => true).catch(() => false);
             if (started) {
                 this.log(`  Daemon started (port ${port}).`);
-                await this._reportCommunityStatus(d.pkcRpcUrl);
             } else {
                 this.warn(`  Daemon may not have started — port ${port} not responding after 30s. Check logs with: bitsocial logs`);
             }
         }
-    }
 
-    private async _connectToRpc(pkcRpcUrl: string): Promise<PKCInstance> {
-        const connectOverride = getPKCConnectOverride();
-        if (connectOverride) {
-            return connectOverride(pkcRpcUrl);
-        }
-        const pkc = await PKC({ pkcRpcClientsOptions: [pkcRpcUrl] });
-        const errors: Error[] = [];
-        pkc.on("error", (err: Error) => {
-            errors.push(err);
-        });
-        await new Promise<void>((resolve) => {
-            const timeout = setTimeout(() => {
-                pkc.removeListener("communitieschange", handler);
-                resolve();
-            }, 20000);
-            const handler = () => {
-                if (pkc.communities.length > 0) {
-                    pkc.removeListener("communitieschange", handler);
-                    clearTimeout(timeout);
-                    resolve();
-                }
-            };
-            pkc.on("communitieschange", handler);
-        });
-        return pkc;
-    }
-
-    private async _reportCommunityStatus(pkcRpcUrl: string): Promise<void> {
-        const POLL_INTERVAL_MS = 2000;
-        const TIMEOUT_MS = 120_000;
-        let pkc: PKCInstance | undefined;
-        try {
-            pkc = await this._connectToRpc(pkcRpcUrl);
-            const communityAddresses: string[] = pkc.communities;
-            if (communityAddresses.length === 0) return;
-
-            // Create community objects once — they are RPC proxies whose
-            // .started property reflects live daemon state
-            const communities = await Promise.all(
-                communityAddresses.map((address: string) => pkc!.createCommunity({ address }))
-            );
-            const total = communities.length;
-            const deadline = Date.now() + TIMEOUT_MS;
-            let lastReportedCount = -1;
-
-            while (true) {
-                const startedCount = communities.filter((c: any) => c.started === true).length;
-
-                if (startedCount === total) {
-                    this.log(`  All ${total} ${total === 1 ? "community" : "communities"} started.`);
-                    return;
-                }
-
-                // Only print a progress update when the count changes
-                if (startedCount !== lastReportedCount) {
-                    if (startedCount > 0) {
-                        this.log(`  ${startedCount} of ${total} communities started...`);
-                    }
-                    lastReportedCount = startedCount;
-                }
-
-                if (Date.now() >= deadline) {
-                    if (startedCount > 0) {
-                        this.log(`  ${startedCount} of ${total} communities started (remaining still loading).`);
-                    } else {
-                        this.log(`  ${total} ${total === 1 ? "community" : "communities"} in data path (still loading). Check with: bitsocial community list`);
-                    }
-                    return;
-                }
-
-                await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-            }
-        } catch {
-            this.warn("Could not check community status.");
-        } finally {
-            if (pkc) await pkc.destroy().catch(() => {});
-        }
+        this.log("Check community status with: bitsocial community list");
+        this.log("Check logs with: bitsocial logs");
     }
 }
