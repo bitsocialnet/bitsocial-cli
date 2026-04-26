@@ -142,8 +142,8 @@
             "sha256OfHtmlZip": "14653b19e88868fda6fef26601f477947e44251cc52bd95d7d6fec158ae67b6f"
         },
         {
-            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.7.4",
-            "sha256OfHtmlZip": "c768bd40a6f9e6c3889d2e57df843e667594974c6f3048357e2b6148aeec3385"
+            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.8.0",
+            "sha256OfHtmlZip": "8954fd1965ab386d41ea17858f0b3436b3534eaf8a751936c47061b36314ef8b"
         }
     ]
 }
