@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.51 (2026-04-26)</small>
+
+* build(deps): upgrade 5chan ([7e14300](https://github.com/bitsocialnet/bitsocial-cli/commit/7e14300))
+
 ## <small>0.19.50 (2026-04-24)</small>
 
 * chore(deps): upgrade pkc-js to 0.0.20 and kubo to 0.41.0 ([c5dd9d7](https://github.com/bitsocialnet/bitsocial-cli/commit/c5dd9d7))
