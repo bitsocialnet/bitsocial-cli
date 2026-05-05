@@ -20,6 +20,7 @@ import { loadChallengesIntoPKC } from "../../challenge-packages/challenge-utils.
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
 import { pruneStaleStates, writeDaemonState, deleteDaemonState } from "../../common-utils/daemon-state.js";
+import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-utils/daemon-file-logger.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
 
@@ -45,6 +46,44 @@ const defaultPkcOptions: InputPKCOptions = {
     dataPath: defaults.PKC_DATA_PATH,
     httpRoutersOptions: defaults.HTTP_TRACKERS
 };
+
+export interface KeepKuboUpTickDeps {
+    pkcRpcUrl: URL;
+    tcpPortUsedCheck: (port: number, host: string) => Promise<boolean>;
+    pkcOptionsFromFlag: { kuboRpcClientsOptions?: unknown } | undefined;
+    usingDifferentProcessRpc: boolean;
+    hasKuboProcess: boolean;
+    hasPendingKuboStart: boolean;
+    keepKuboUp: () => Promise<void>;
+    createOrConnectRpc: () => Promise<void>;
+    onError: (message: string) => void;
+}
+
+/**
+ * Runs one tick of the keepKuboUp interval. Exported so it can be unit-tested.
+ *
+ * Both `tcpPortUsedCheck` and the downstream `keepKuboUp`/`createOrConnectRpc` calls
+ * are wrapped in try/catch — a transient ETIMEDOUT from the port check (or any other
+ * error from this tick) must not propagate to the setInterval callback, which would
+ * become an unhandledRejection (issue #37 bug 3).
+ */
+export async function runKeepKuboUpTick(deps: KeepKuboUpTickDeps): Promise<void> {
+    let isRpcPortTaken = false;
+    try {
+        isRpcPortTaken = await deps.tcpPortUsedCheck(Number(deps.pkcRpcUrl.port), deps.pkcRpcUrl.hostname);
+        if (!deps.pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken && !deps.usingDifferentProcessRpc) await deps.keepKuboUp();
+        else if (deps.pkcOptionsFromFlag?.kuboRpcClientsOptions && !deps.usingDifferentProcessRpc) await deps.keepKuboUp();
+        // Retry if kubo died and onKuboExit's restart attempt failed (e.g. transient port conflict)
+        else if (!deps.hasKuboProcess && !deps.hasPendingKuboStart && !deps.usingDifferentProcessRpc) await deps.keepKuboUp();
+    } catch (error) {
+        deps.onError(`keepKuboUp tick error (will retry): ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+        await deps.createOrConnectRpc();
+    } catch (error) {
+        deps.onError(`createOrConnectRpc tick error (will retry): ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
 
 export default class Daemon extends Command {
     static override description = `Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
@@ -115,23 +154,12 @@ export default class Daemon extends Command {
     private async _pipeDebugLogsToLogFile(
         logPath: string,
         Logger: PKCLoggerType
-    ): Promise<{ logFilePath: string; stdoutWrite: typeof process.stdout.write }> {
+    ): Promise<{ logFilePath: string; stdoutWrite: typeof process.stdout.write; fileLogger: DaemonFileLogger }> {
         const { logFilePath, deletedLogFile, logfilesCapacity } = await this._getNewLogfileByEvacuatingOldLogsIfNeeded(logPath);
 
-        const logFile = fs.createWriteStream(logFilePath, { flags: "a" });
+        const fileLogger = createDaemonFileLogger({ logFilePath });
         const stdoutWrite = process.stdout.write.bind(process.stdout);
         const stderrWrite = process.stderr.write.bind(process.stderr);
-
-        const isLogFileOverLimit = () => logFile.bytesWritten > 20000000; // 20mb
-
-        const writeTimestampedLine = (text: string, stream: "stdout" | "stderr") => {
-            if (isLogFileOverLimit()) return;
-            if (!text || text.trim().length === 0) return;
-            const timestamp = `[${new Date().toISOString()}] [${stream}] `;
-            const lines = text.split("\n");
-            const timestamped = lines.map((line, i) => (i === 0 ? timestamp + line : line)).join("\n");
-            logFile.write(timestamped);
-        };
 
         // Redirect debug library output directly to the log file
         // instead of stderr, so only real errors appear in the terminal
@@ -142,7 +170,11 @@ export default class Daemon extends Command {
         debugModule.inspectOpts.colors = true;
         debugModule.inspectOpts.hideDate = true;
         debugModule.log = (...args: any[]) => {
-            writeTimestampedLine(formatWithOptions({ depth: Logger.inspectOpts?.depth || 10, colors: true }, ...args).trimStart() + EOL, "stderr");
+            const text = formatWithOptions({ depth: Logger.inspectOpts?.depth || 10, colors: true }, ...args).trimStart() + EOL;
+            const wrote = fileLogger.writeTimestampedLine(text, "stderr");
+            // If the file logger could not accept the write (closed / pending buffer full),
+            // fall back to original stderr so debug output is never silently lost
+            if (!wrote) stderrWrite(text);
         };
 
         const asString = (data: string | Uint8Array) => (typeof data === "string" ? data : Buffer.from(data).toString());
@@ -150,16 +182,20 @@ export default class Daemon extends Command {
         process.stdout.write = (...args) => {
             //@ts-expect-error
             const res = stdoutWrite(...args);
-            writeTimestampedLine(asString(args[0]), "stdout");
+            fileLogger.writeTimestampedLine(asString(args[0]), "stdout");
             return res;
         };
 
         process.stderr.write = (...args) => {
-            // Only write stderr to the log file, not to the terminal.
-            // Debug output goes to stderr; we want it in logs only.
-            // Real errors are caught by uncaughtException/unhandledRejection handlers
-            // which use console.error -> stderr.write -> this override -> log file.
-            writeTimestampedLine(asString(args[0]).trimStart(), "stderr");
+            // Debug output goes to stderr; route it to the log file.
+            // If the file logger is unavailable (closed, errored), fall back to original stderr
+            // so output is never silently swallowed.
+            const text = asString(args[0]);
+            const wrote = fileLogger.writeTimestampedLine(text.trimStart(), "stderr");
+            if (!wrote) {
+                //@ts-expect-error
+                return stderrWrite(...args);
+            }
             return true;
         };
 
@@ -184,9 +220,13 @@ export default class Daemon extends Command {
             console.error(err);
         });
 
-        process.on("exit", () => logFile.close());
+        process.on("exit", () => {
+            // close() returns a promise but exit handlers must be synchronous.
+            // Best-effort: trigger the close; the underlying writeStream flushes on process exit.
+            fileLogger.close().catch(() => {});
+        });
 
-        return { logFilePath, stdoutWrite };
+        return { logFilePath, stdoutWrite, fileLogger };
     }
 
     async run() {
@@ -532,16 +572,17 @@ export default class Daemon extends Command {
 
             keepKuboUpInterval = setInterval(async () => {
                 if (mainProcessExited) return;
-                const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), pkcRpcUrl.hostname);
-                try {
-                    if (!pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken && !usingDifferentProcessRpc) await keepKuboUp();
-                    else if (pkcOptionsFromFlag?.kuboRpcClientsOptions && !usingDifferentProcessRpc) await keepKuboUp();
-                    // Retry if kubo died and onKuboExit's restart attempt failed (e.g. transient port conflict)
-                    else if (!kuboProcess && !pendingKuboStart && !usingDifferentProcessRpc) await keepKuboUp();
-                } catch (error) {
-                    log.trace(`keepKuboUp error (will retry): ${error instanceof Error ? error.message : String(error)}`);
-                }
-                await createOrConnectRpc();
+                await runKeepKuboUpTick({
+                    pkcRpcUrl,
+                    tcpPortUsedCheck: (port, host) => tcpPortUsed.check(port, host),
+                    pkcOptionsFromFlag,
+                    usingDifferentProcessRpc,
+                    hasKuboProcess: !!kuboProcess,
+                    hasPendingKuboStart: !!pendingKuboStart,
+                    keepKuboUp,
+                    createOrConnectRpc,
+                    onError: (msg) => log.trace(msg)
+                });
             }, 5000);
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
