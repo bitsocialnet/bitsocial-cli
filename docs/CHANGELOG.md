@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.52 (2026-05-05)</small>
+
+* ci: pin npm to 11.13.0 in CI workflows and Dockerfile ([2772399](https://github.com/bitsocialnet/bitsocial-cli/commit/2772399))
+* ci: use corepack to pin npm 11.13.0, avoid self-upgrade race ([eb2ddb2](https://github.com/bitsocialnet/bitsocial-cli/commit/eb2ddb2))
+* chore(deps): upgrade pkc-js to 0.0.25, bso-resolver to 0.0.8, 5chan to v0.8.3 ([6ba84ac](https://github.com/bitsocialnet/bitsocial-cli/commit/6ba84ac))
+* fix(daemon): rotate log file at cap and recover from tcpPortUsed ETIMEDOUT ([bea711c](https://github.com/bitsocialnet/bitsocial-cli/commit/bea711c)), closes [#37](https://github.com/bitsocialnet/bitsocial-cli/issues/37)
+
 ## <small>0.19.51 (2026-04-26)</small>
 
 * build(deps): upgrade 5chan ([7e14300](https://github.com/bitsocialnet/bitsocial-cli/commit/7e14300))
