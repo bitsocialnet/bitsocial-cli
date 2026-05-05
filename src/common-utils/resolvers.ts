@@ -9,7 +9,7 @@ export const DEFAULT_PROVIDERS = [
     "https://eth-pokt.nodies.app"
 ];
 
-export function createBsoResolvers(providers?: string[], dataPath?: string): BsoResolver[] {
+export function createBsoResolvers(providers?: string[]): BsoResolver[] {
     const resolverProviders = providers && providers.length > 0 ? providers : DEFAULT_PROVIDERS;
-    return resolverProviders.map((provider) => new BsoResolver({ key: `bso-${provider}`, provider, dataPath }));
+    return resolverProviders.map((provider) => new BsoResolver({ key: `bso-${provider}`, provider }));
 }

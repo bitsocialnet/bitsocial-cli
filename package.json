@@ -93,6 +93,7 @@
         "@types/express": "4.17.21",
         "@types/node": "22.19.13",
         "@types/prettier": "2.7.1",
+        "@types/sinon": "17.0.4",
         "@types/tcp-port-used": "1.0.4",
         "@types/ws": "8.18.1",
         "commitizen": "4.2.5",
@@ -112,13 +113,13 @@
         "wait-on": "6.0.1"
     },
     "dependencies": {
-        "@bitsocial/bso-resolver": "0.0.6",
+        "@bitsocial/bso-resolver": "0.0.8",
         "@multiformats/multiaddr": "13.0.1",
         "@oclif/core": "4.8.0",
         "@oclif/plugin-help": "6.2.36",
         "@oclif/plugin-not-found": "3.2.73",
         "@oclif/table": "0.5.1",
-        "@pkcprotocol/pkc-js": "0.0.20",
+        "@pkcprotocol/pkc-js": "0.0.25",
         "dataobject-parser": "1.2.22",
         "decompress": "4.2.1",
         "env-paths": "2.2.1",
@@ -142,8 +143,8 @@
             "sha256OfHtmlZip": "14653b19e88868fda6fef26601f477947e44251cc52bd95d7d6fec158ae67b6f"
         },
         {
-            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.8.0",
-            "sha256OfHtmlZip": "8954fd1965ab386d41ea17858f0b3436b3534eaf8a751936c47061b36314ef8b"
+            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.8.3",
+            "sha256OfHtmlZip": "37081cf4511ca3bd553955500ec62227355ef925a46b81dc8cebc265362cf77f"
         }
     ]
 }

@@ -318,7 +318,7 @@ export default class Daemon extends Command {
             });
 
             // Create BSO name resolvers for .bso/.eth domain resolution
-            const bsoResolvers = createBsoResolvers(flags.chainProviderUrls, mergedPkcOptions.dataPath);
+            const bsoResolvers = createBsoResolvers(flags.chainProviderUrls);
             mergedPkcOptions.nameResolvers = [...(mergedPkcOptions.nameResolvers || []), ...bsoResolvers];
 
 

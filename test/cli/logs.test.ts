@@ -434,17 +434,19 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
             });
 
             let stdout = "";
-            proc.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+            let appended = false;
+            proc.stdout.on("data", (data: Buffer) => {
+                stdout += data.toString();
+                // Only append after initial line has been observed, so CLI startup time doesn't matter
+                if (!appended && stdout.includes("initial line")) {
+                    appended = true;
+                    fsPromise.appendFile(file1, buildLogLine(new Date("2026-05-01T00:01:00.000Z"), "APPENDED_LINE") + "\n");
+                }
+            });
 
-            // Append to same file after a short delay
-            setTimeout(async () => {
-                await fsPromise.appendFile(file1, buildLogLine(new Date("2026-05-01T00:01:00.000Z"), "APPENDED_LINE") + "\n");
-            }, 500);
-
-            // Wait for the appended data to be picked up, then kill
             const timer = setTimeout(() => {
                 proc.kill("SIGINT");
-            }, 2000);
+            }, 8000);
 
             proc.on("close", () => {
                 clearTimeout(timer);
