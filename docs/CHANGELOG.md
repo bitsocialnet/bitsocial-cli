@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.53 (2026-05-07)</small>
+
+* chore(deps): upgrade pkc-js to 0.0.28 ([56f6f85](https://github.com/bitsocialnet/bitsocial-cli/commit/56f6f85))
+
 ## <small>0.19.52 (2026-05-05)</small>
 
 * ci: pin npm to 11.13.0 in CI workflows and Dockerfile ([2772399](https://github.com/bitsocialnet/bitsocial-cli/commit/2772399))
