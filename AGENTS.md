@@ -29,14 +29,15 @@ If something behaves unexpectedly (a test fails for unclear reasons, a build bre
 
 Quick lookup — find your situation, follow the required actions:
 
-| Situation                  | Do this                                                       |
-| -------------------------- | ------------------------------------------------------------- |
-| First time / fresh clone   | `nvm use` → `npm ci` → `npm run build`                       |
-| Changed any `.ts` file     | `npm run build && npm run build:test`                         |
-| Running tests              | `npm run test:cli`                                            |
-| Added feature or fixed bug | Write a test → build → run tests                             |
-| Installing a dependency    | `nvm use` first, then `npm install ...`                       |
-| Before committing          | Build passes, all tests pass                                  |
+| Situation                     | Do this                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| First time / fresh clone      | `nvm use` → `npm ci` → `npm run build`                       |
+| Changed any `.ts` file        | `npm run build && npm run build:test`                         |
+| Running tests                 | `npm run test:cli`                                            |
+| Added feature or fixed bug    | Write a test → build → run tests                             |
+| Installing a dependency       | `nvm use` first, then `npm install ...`                       |
+| Routine node/community config | Perform the requested live operation → verify → summarize; no GitHub issue unless explicitly requested |
+| Before committing             | Build passes, all tests pass                                  |
 
 ## Stack
 
@@ -66,13 +67,19 @@ src/
 └── index.ts             # package entry point
 ```
 
-## Feature Implementation Workflow
+## GitHub Issues
 
-When the user gives a prompt to implement a feature:
+When the user gives a prompt to implement a feature or bug fix in this repository's codebase:
 
 1. **MUST** create a GitHub issue for the feature before starting work (`gh issue create`).
 2. **MUST** keep the issue updated with the current plan and progress as work proceeds.
 3. **MUST** ask the user whether to close the issue after the feature is fully implemented and verified — do not close it automatically or via `Closes #N` in commit messages.
+
+Routine live operations are not repository feature work:
+
+- **MUST NOT** create GitHub issues for routine live-node operations, community/board configuration changes, data updates, support tasks, or private infrastructure administration unless the user explicitly asks for one.
+- **MUST** ask before creating any public GitHub artifact when a task could be interpreted as either repository work or live operations.
+- **MUST NOT** include private infrastructure details, secrets, API keys, or user-specific operational data in GitHub issues, comments, PRs, or commit messages.
 
 ## Core MUST Rules
 
