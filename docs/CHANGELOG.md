@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.56 (2026-05-17)</small>
+
+* chore(deps): upgrade pkc-js to 0.0.33, 5chan to v0.8.5 ([9322247](https://github.com/bitsocialnet/bitsocial-cli/commit/9322247))
+
 ## <small>0.19.55 (2026-05-07)</small>
 
 * chore(deps): upgrade pkc-js to 0.0.30 ([c8be9d1](https://github.com/bitsocialnet/bitsocial-cli/commit/c8be9d1))
