@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.59 (2026-05-20)</small>
+
+* test(kubo): pre-init repos with ephemeral swarm so parallel tests don't collide on 4001 ([4342f68](https://github.com/bitsocialnet/bitsocial-cli/commit/4342f68)), closes [#44](https://github.com/bitsocialnet/bitsocial-cli/issues/44)
+* fix(ipfs): expose kubo swarm port so nodes are browser-dialable ([83d6c2d](https://github.com/bitsocialnet/bitsocial-cli/commit/83d6c2d)), closes [#44](https://github.com/bitsocialnet/bitsocial-cli/issues/44)
+
 ## <small>0.19.58 (2026-05-20)</small>
 
 * fix(logs): drop stale-stat gate, read directly from position ([844eaac](https://github.com/bitsocialnet/bitsocial-cli/commit/844eaac)), closes [#41](https://github.com/bitsocialnet/bitsocial-cli/issues/41)
