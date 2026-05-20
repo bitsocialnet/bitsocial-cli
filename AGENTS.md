@@ -72,7 +72,7 @@ When the user gives a prompt to implement a feature:
 
 1. **MUST** create a GitHub issue for the feature before starting work (`gh issue create`).
 2. **MUST** keep the issue updated with the current plan and progress as work proceeds.
-3. **MUST** ask the user whether to close the issue after the feature is fully implemented and verified — do not close it automatically or via `Closes #N` in commit messages.
+3. **SHOULD** use `Closes #N` / `Fixes #N` in the PR description or commit message when the change clearly resolves the issue — the user reviews the PR before merging, so auto-close on merge is fine. **MUST NOT** run `gh issue close` directly without asking.
 
 ## Core MUST Rules
 
