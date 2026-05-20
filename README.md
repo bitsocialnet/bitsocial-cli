@@ -68,7 +68,7 @@ After running the last command you should be able to run commands directly again
 
 ## Docker
 
-You can run bitsocial-cli as a Docker container. The container runs the daemon and exposes the RPC + web UI on port 9138, the Kubo IPFS API on port 50019, and the IPFS Gateway on port 6473.
+You can run bitsocial-cli as a Docker container. The container runs the daemon and exposes the RPC + web UI on port 9138, the Kubo IPFS API on port 50019, the IPFS Gateway on port 6473, and the Kubo Swarm on port 4001 (TCP + UDP) so the node is dialable by other libp2p peers (including browser pure-p2p clients).
 
 Once your container is running, you can use one of the bundled web UIs to browse the Bitsocial network and manage your communities -- no CLI commands needed. The web UIs provide a full-featured interface for creating communities, moderating, and browsing content entirely through your browser. All the Web UIs are interopable so you can post and read from whichever you like and you can see your own content on each client.
 
@@ -150,9 +150,11 @@ services:
     container_name: bitsocial
     restart: unless-stopped
     ports:
-      - "9138:9138"    # PKC RPC + Web UI
-      - "50019:50019"  # Kubo IPFS API
-      - "6473:6473"    # IPFS Gateway
+      - "9138:9138"      # PKC RPC + Web UI
+      - "50019:50019"    # Kubo IPFS API
+      - "6473:6473"      # IPFS Gateway
+      - "4001:4001"      # Kubo Swarm (TCP)
+      - "4001:4001/udp"  # Kubo Swarm (QUIC + WebTransport + WebRTC-direct)
     volumes:
       - bitsocial-data:/data
       - bitsocial-logs:/logs
@@ -179,6 +181,8 @@ docker run -d \
   -p 9138:9138 \
   -p 50019:50019 \
   -p 6473:6473 \
+  -p 4001:4001 \
+  -p 4001:4001/udp \
   -v bitsocial-data:/data \
   -v bitsocial-logs:/logs \
   ghcr.io/bitsocialnet/bitsocial-cli:latest
@@ -193,6 +197,8 @@ docker run -d \
   -p 9138:9138 \
   -p 50019:50019 \
   -p 6473:6473 \
+  -p 4001:4001 \
+  -p 4001:4001/udp \
   -v bitsocial-data:/data \
   -v bitsocial-logs:/logs \
   -e PKC_RPC_AUTH_KEY=my-secret-key \
@@ -203,7 +209,7 @@ docker run -d \
 
 ```sh-session
 docker build -t bitsocial-cli .
-docker run -p 9138:9138 -p 50019:50019 -p 6473:6473 bitsocial-cli
+docker run -p 9138:9138 -p 50019:50019 -p 6473:6473 -p 4001:4001 -p 4001:4001/udp bitsocial-cli
 ```
 
 ## Usage
