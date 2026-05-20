@@ -254,8 +254,6 @@ export default class Logs extends Command {
                     }
                 }
 
-                // Switch watchers
-                fs.unwatchFile(currentLogFile, readNewData);
                 currentLogFile = newestFile;
                 pendingBuffer = "";
 
@@ -279,26 +277,34 @@ export default class Logs extends Command {
 
                 const newStat = await fsPromise.stat(currentLogFile);
                 position = newStat.size;
-                fs.watchFile(currentLogFile, { interval: 300 }, readNewData);
             } catch {
                 // Directory listing failed or file disappeared — retry next cycle
             }
         };
 
-        fs.watchFile(currentLogFile, { interval: 300 }, readNewData);
+        // Userspace polling instead of fs.watchFile — libuv's uv_fs_poll_t doesn't
+        // reliably notify on cross-process appends on Windows (see nodejs/node#36888).
+        let polling = true;
+        let pollTimer: NodeJS.Timeout | null = null;
+        const pollLoop = async () => {
+            if (!polling) return;
+            try {
+                await readNewData();
+            } finally {
+                if (polling) pollTimer = setTimeout(pollLoop, 300);
+            }
+        };
+        pollTimer = setTimeout(pollLoop, 300);
         const newFileCheckInterval = setInterval(checkForNewLogFile, 3000);
 
-        // Keep the process alive and clean up on exit
-        process.on("SIGINT", () => {
+        const shutdown = () => {
+            polling = false;
+            if (pollTimer) clearTimeout(pollTimer);
             clearInterval(newFileCheckInterval);
-            fs.unwatchFile(currentLogFile, readNewData);
             process.exit(0);
-        });
-        process.on("SIGTERM", () => {
-            clearInterval(newFileCheckInterval);
-            fs.unwatchFile(currentLogFile, readNewData);
-            process.exit(0);
-        });
+        };
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
 
         // Keep process alive
         await new Promise(() => {});
