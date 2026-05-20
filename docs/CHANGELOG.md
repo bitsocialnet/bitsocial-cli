@@ -1,5 +1,13 @@
 # Changelog
 
+## <small>0.19.58 (2026-05-20)</small>
+
+* fix(logs): drop stale-stat gate, read directly from position ([844eaac](https://github.com/bitsocialnet/bitsocial-cli/commit/844eaac)), closes [#41](https://github.com/bitsocialnet/bitsocial-cli/issues/41)
+* fix(logs): use userspace polling for -f follow mode ([76213c3](https://github.com/bitsocialnet/bitsocial-cli/commit/76213c3)), closes [#40](https://github.com/bitsocialnet/bitsocial-cli/issues/40)
+* chore(deps): upgrade pkc-js to 0.0.35 ([b01faab](https://github.com/bitsocialnet/bitsocial-cli/commit/b01faab))
+* chore(README.md): update link ([0d5daa4](https://github.com/bitsocialnet/bitsocial-cli/commit/0d5daa4))
+* ci(docker): build from the release tag instead of the pre-release SHA ([a254167](https://github.com/bitsocialnet/bitsocial-cli/commit/a254167)), closes [#38](https://github.com/bitsocialnet/bitsocial-cli/issues/38)
+
 ## <small>0.19.57 (2026-05-17)</small>
 
 * chore(daemon): label uncaughtException/unhandledRejection log output ([f984cdc](https://github.com/bitsocialnet/bitsocial-cli/commit/f984cdc))
