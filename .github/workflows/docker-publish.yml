@@ -1,26 +1,36 @@
 name: Docker Publish
 
 on:
-  workflow_run:
-    workflows:
-      - "CI build"
-    types:
-      - "completed"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and publish (e.g. v0.19.57)"
+        required: true
 
 jobs:
   docker-test:
     name: Build and test Docker image
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
+      - name: Resolve release tag
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.ref.outputs.tag }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -114,22 +124,26 @@ jobs:
     name: Push Docker image
     needs:
       - docker-test
-    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.docker-test.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
+      - name: Resolve release tag
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Get latest release tag
-        id: previoustag
-        uses: WyriHaximus/github-action-get-previous-tag@v2
+          ref: ${{ steps.ref.outputs.tag }}
 
       - name: Docker meta
         id: meta
@@ -137,9 +151,9 @@ jobs:
         with:
           images: ghcr.io/bitsocialnet/bitsocial-cli
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.previoustag.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.previoustag.outputs.tag }}
-            type=semver,pattern={{major}},value=${{ steps.previoustag.outputs.tag }}
+            type=semver,pattern={{version}},value=${{ steps.ref.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ref.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.ref.outputs.tag }}
             type=raw,value=latest
 
       - name: Set up QEMU
