@@ -75,30 +75,36 @@ export async function mergeCliDefaultsIntoIpfsConfig(log: any, ipfsConfigPath: s
 // use this custom function instead of spawnSync for better logging
 // also spawnSync might have been causing crash on start on windows
 
-function _spawnAsync(log: any, ...args: any[]) {
+// Listens on 'close' (not 'exit') so all stderr 'data' events have been delivered
+// before we read errorMessage — otherwise on macOS a fast-exiting child can deliver
+// its exit signal before its stderr drains, producing a rejection with an empty
+// message and breaking the "configuration file already exists" suppression upstream.
+export function _gatherChildOutput(log: any, child: ChildProcessWithoutNullStreams): Promise<null> {
     return new Promise((resolve, reject) => {
-        //@ts-ignore
-        const spawedProcess: ChildProcessWithoutNullStreams = spawn(...args);
         let errorMessage = "";
-        spawedProcess.on("exit", (exitCode, signal) => {
-            if (exitCode === 0) resolve(null);
-            else {
-                const error = new Error(errorMessage);
-                Object.assign(error, { exitCode, pid: spawedProcess.pid, signal });
-                reject(error);
-            }
+        child.on("close", (exitCode, signal) => {
+            if (exitCode === 0) return resolve(null);
+            const error = new Error(errorMessage);
+            Object.assign(error, { exitCode, pid: child.pid, signal });
+            reject(error);
         });
-        spawedProcess.stderr.on("data", (data) => {
+        child.stderr.on("data", (data) => {
             log.trace(data.toString());
             errorMessage += data.toString();
         });
-        spawedProcess.stdin.on("data", (data) => log.trace(data.toString()));
-        spawedProcess.stdout.on("data", (data) => log.trace(data.toString()));
-        spawedProcess.on("error", (data) => {
+        child.stdin.on("data", (data) => log.trace(data.toString()));
+        child.stdout.on("data", (data) => log.trace(data.toString()));
+        child.on("error", (data) => {
             errorMessage += data.toString();
             log.error(data.toString());
         });
     });
+}
+
+function _spawnAsync(log: any, ...args: any[]) {
+    //@ts-ignore
+    const child: ChildProcessWithoutNullStreams = spawn(...args);
+    return _gatherChildOutput(log, child);
 }
 
 type MultiaddrComponent = { name: string; value?: string };
