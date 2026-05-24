@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.62 (2026-05-24)</small>
+
+* test(daemon-server): bind blocker to 0.0.0.0 so EADDRINUSE fires on macOS/Windows ([0d90f0f](https://github.com/bitsocialnet/bitsocial-cli/commit/0d90f0f))
+* test(daemon-server): blocker must use Node's default listen host to match the daemon ([333ece2](https://github.com/bitsocialnet/bitsocial-cli/commit/333ece2))
+* docs: scope github issue guidance for live ops ([6531340](https://github.com/bitsocialnet/bitsocial-cli/commit/6531340))
+* docs(readme): fix interoperable typo ([00c25ab](https://github.com/bitsocialnet/bitsocial-cli/commit/00c25ab))
+* Update README.md ([8168f62](https://github.com/bitsocialnet/bitsocial-cli/commit/8168f62))
+* fix(daemon-server): await express listen() so port is bound before startup completes ([6a2f9da](https://github.com/bitsocialnet/bitsocial-cli/commit/6a2f9da))
+
 ## <small>0.19.61 (2026-05-23)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.37 ([b3aaa57](https://github.com/bitsocialnet/bitsocial-cli/commit/b3aaa57)), closes [#50](https://github.com/bitsocialnet/bitsocial-cli/issues/50)
