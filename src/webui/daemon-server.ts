@@ -46,7 +46,23 @@ export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, pkcOpt
     // Start pkc-js RPC
     const log = PKCLogger("bitsocial-cli:daemon:startDaemonServer");
     const webuiExpressApp = express();
-    const httpServer = webuiExpressApp.listen(Number(rpcUrl.port));
+    // Wait for bind to actually complete before returning. Calling express.listen() without
+    // awaiting 'listening' lets startup proceed before the port is accepting connections,
+    // and without an 'error' handler a bind failure becomes an uncaughtException that kills
+    // the daemon *after* it has already logged "Communities in data path" — see issue #42.
+    const httpServer = await new Promise<import("http").Server>((resolve, reject) => {
+        const server = webuiExpressApp.listen(Number(rpcUrl.port));
+        const onListening = () => {
+            server.off("error", onError);
+            resolve(server);
+        };
+        const onError = (err: Error) => {
+            server.off("listening", onListening);
+            reject(err);
+        };
+        server.once("listening", onListening);
+        server.once("error", onError);
+    });
     log("HTTP server is running on", "0.0.0.0" + ":" + rpcUrl.port);
     const rpcAuthKey = await _generateRpcAuthKeyIfNotExisting(pkcOptions.dataPath!);
     const PKCRpc = await import("@pkcprotocol/pkc-js/rpc");
