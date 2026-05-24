@@ -83,7 +83,7 @@ docker exec bitsocial bitsocial community list
 | Path | Description |
 |---|---|
 | `/data/bitsocial` | Bitsocial data directory |
-| `/data/bitsocial/subplebbits` | Community SQLite databases |
+| `/data/bitsocial/communities` | Community SQLite databases |
 | `/data/bitsocial/.bitsocial-cli.ipfs` | Kubo IPFS repository |
 | `/logs/bitsocial` | Log files |
 
@@ -107,7 +107,7 @@ docker compose logs -f
 The output will include lines like:
 
 ```
-plebbit rpc: listening on ws://localhost:9138/<auth-key> (secret auth key for remote connections)
+pkc rpc: listening on ws://localhost:9138/<auth-key> (secret auth key for remote connections)
 WebUI (seedit - Similar to old reddit UI): http://<your-ip>:9138/<auth-key>/seedit (secret auth key for remote connections)
 ```
 
@@ -232,18 +232,18 @@ In Bash (or powershell if you're on Windows), run `bitsocial daemon` to able to 
 $ bitsocial daemon
 IPFS API listening on: http://localhost:5001/api/v0
 IPFS Gateway listening on: http://localhost:6473
-plebbit rpc: listening on ws://localhost:9138 (local connections only)
-plebbit rpc: listening on ws://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL (secret auth key for remote connections)
+pkc rpc: listening on ws://localhost:9138 (local connections only)
+pkc rpc: listening on ws://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL (secret auth key for remote connections)
 Bitsocial data path: /root/.local/share/bitsocial
-Communities in data path:  [ 'pleblore.bso' ]
-WebUI (plebones - A bare bones UI client): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/plebones (local connections only)
-WebUI (plebones - A bare bones UI client): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/plebones (secret auth key for remote connections)
+Communities in data path:  [ 'anime-and-manga.bso' ]
+WebUI (5chan - Imageboard-style UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/5chan (local connections only)
+WebUI (5chan - Imageboard-style UI): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/5chan (secret auth key for remote connections)
 WebUI (seedit - Similar to old reddit UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit (local connections only)
 WebUI (seedit - Similar to old reddit UI): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit (secret auth key for remote connections)
 
 ```
 
-Once `bitsocial daemon` is running, you can create and manage your communities through the web interfaces, either seedit or plebones. All the interfaces are interopable. If you're a power user and prefer CLI, then you can take a look at the commands below.
+Once `bitsocial daemon` is running, you can create and manage your communities through the web interfaces, either seedit or 5chan. All the interfaces are interoperable. If you're a power user and prefer CLI, then you can take a look at the commands below.
 
 If you need to view detailed protocol or IPFS logs for debugging, you can use `bitsocial logs`. For example, `bitsocial logs --tail 50` shows the last 50 lines, or `bitsocial logs --since 1h` shows logs from the past hour.
 
@@ -265,7 +265,7 @@ Address                                              Started
  censorship-watch.bso                                 true
  health-nutrition-science.bso                         true
  movies-tv-anime.bso                                  true
- pleblore.bso                                         true
+ anime-and-manga.bso                                  true
  politically-incorrect.bso                            true
  reddit-screenshots.bso                               false
  videos-livestreams-podcasts.bso                      false
@@ -413,9 +413,9 @@ DESCRIPTION
   receive publications. For a list of properties, visit https://github.com/pkcprotocol/pkc-js
 
 EXAMPLES
-  Create a community with title 'Hello Plebs' and description 'Welcome'
+  Create a community with title 'Hello World' and description 'Welcome'
 
-    $ bitsocial community create --title 'Hello Plebs' --description 'Welcome'
+    $ bitsocial community create --title 'Hello World' --description 'Welcome'
 
   Create a community using options from a JSON/JSONC file
 
@@ -442,7 +442,7 @@ DESCRIPTION
   Delete a community permanently.
 
 EXAMPLES
-  $ bitsocial community delete plebbit.bso
+  $ bitsocial community delete anime-and-manga.bso
 
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
@@ -539,7 +539,7 @@ DESCRIPTION
   Fetch a local or remote community, and print its json in the terminal
 
 EXAMPLES
-  $ bitsocial community get plebmusic.bso
+  $ bitsocial community get anime-and-manga.bso
 
   $ bitsocial community get 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 
@@ -592,7 +592,7 @@ DESCRIPTION
   Start a community
 
 EXAMPLES
-  $ bitsocial community start plebbit.bso
+  $ bitsocial community start anime-and-manga.bso
 
   $ bitsocial community start 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 
@@ -625,7 +625,7 @@ DESCRIPTION
   Stop a community. The community will not publish or receive any publications until it is started again.
 
 EXAMPLES
-  $ bitsocial community stop plebbit.bso
+  $ bitsocial community stop anime-and-manga.bso
 
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
