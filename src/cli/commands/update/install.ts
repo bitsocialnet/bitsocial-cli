@@ -130,6 +130,7 @@ export default class Install extends Command {
         // Restart daemons with the new binary
         if (aliveDaemons.length > 0 && flags["restart-daemons"]) {
             await this._restartDaemons(aliveDaemons);
+            this.log("To see the daemon logs run `bitsocial logs --stdout`");
         }
     }
 
