@@ -650,7 +650,7 @@ describe("bitsocial daemon survives transient port occupation after its own kubo
 
 describe(`bitsocial daemon --pkcRpcUrl`, async () => {
     it(`A bitsocial daemon should be change where to listen URL`, async () => {
-        const rpcUrl = new URL("ws://localhost:11138");
+        const rpcUrl = new URL("ws://localhost:9148");
         let firstRpcProcess: ManagedChildProcess | undefined;
         try {
             firstRpcProcess = await startPkcDaemon(
@@ -667,7 +667,7 @@ describe(`bitsocial daemon --pkcRpcUrl`, async () => {
 describe(`bitsocial daemon PKC_RPC_AUTH_KEY env var`, async () => {
     it(`daemon uses PKC_RPC_AUTH_KEY when set`, async () => {
         const customAuthKey = "my-test-auth-key-1234567890";
-        const rpcUrl = new URL("ws://localhost:19138");
+        const rpcUrl = new URL("ws://localhost:9158");
         let daemonProcess: ManagedChildProcess | undefined;
         try {
             daemonProcess = await startPkcDaemon(
@@ -683,7 +683,7 @@ describe(`bitsocial daemon PKC_RPC_AUTH_KEY env var`, async () => {
 
 describe(`bitsocial daemon KUBO_RPC_URL env var`, async () => {
     it(`daemon uses KUBO_RPC_URL env var to configure kubo bind address`, async () => {
-        const rpcUrl = new URL("ws://localhost:29138");
+        const rpcUrl = new URL("ws://localhost:9168");
         const testKuboPort = 50179;
         let daemonProcess: ManagedChildProcess | undefined;
         try {
@@ -702,7 +702,7 @@ describe(`bitsocial daemon KUBO_RPC_URL env var`, async () => {
 
 describe(`bitsocial daemon webui`, async () => {
     let daemonProcess: ManagedChildProcess;
-    const rpcUrl = new URL("ws://localhost:39138");
+    const rpcUrl = new URL("ws://localhost:9178");
 
     beforeAll(async () => {
         daemonProcess = await startPkcDaemon(
@@ -732,7 +732,7 @@ describe(`bitsocial daemon webui`, async () => {
 });
 
 describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown call)", async () => {
-    const rpcUrl = new URL("ws://localhost:49138");
+    const rpcUrl = new URL("ws://localhost:9188");
     const kuboApiUrl = "http://127.0.0.1:50029/api/v0";
     const gatewayUrl = "http://127.0.0.1:6483";
 
@@ -823,7 +823,7 @@ describe("bitsocial daemon DEBUG env var", () => {
     afterEach(cleanupKubo);
 
     it("DEBUG=* does not leak debug output to stderr", { timeout: 60000 }, async () => {
-        const rpcUrl = new URL("ws://localhost:59338");
+        const rpcUrl = new URL("ws://localhost:9198");
         const logPath = randomDirectory();
         let daemonProcess: ManagedChildProcess | undefined;
         try {
@@ -850,7 +850,7 @@ describe("bitsocial daemon DEBUG env var", () => {
     });
 
     it("daemon without DEBUG shows tip messages in stdout", { timeout: 60000 }, async () => {
-        const rpcUrl = new URL("ws://localhost:59339");
+        const rpcUrl = new URL("ws://localhost:9208");
         let daemonProcess: ManagedChildProcess | undefined;
         try {
             daemonProcess = await startPkcDaemonCapturingStderr(
