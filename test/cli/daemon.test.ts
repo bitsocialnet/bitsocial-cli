@@ -715,11 +715,13 @@ describe(`bitsocial daemon webui`, async () => {
         await stopPkcDaemon(daemonProcess);
     });
 
-    it(`5chan webui does not contain the hash redirect script`, async () => {
+    it(`5chan webui does not contain the root hash redirect script`, async () => {
         const res = await fetch(`http://localhost:${rpcUrl.port}/5chan`);
         expect(res.status).toBe(200);
         const html = await res.text();
-        expect(html).not.toMatch(/Redirect non-hash URLs/);
+        expect(html).not.toMatch(
+            /window\.location\.replace\(["']\/#["']\s*\+\s*window\.location\.pathname\s*\+\s*window\.location\.search\)/
+        );
     });
 
     it(`POST /api/challenges/reload returns 200 for local connections`, async () => {
