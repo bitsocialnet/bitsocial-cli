@@ -81,6 +81,10 @@ Routine live operations are not repository feature work:
 - **MUST** ask before creating any public GitHub artifact when a task could be interpreted as either repository work or live operations.
 - **MUST NOT** include private infrastructure details, secrets, API keys, or user-specific operational data in GitHub issues, comments, PRs, or commit messages.
 
+## AI Context Tools
+
+For very large non-source artifacts such as CI logs, debug traces, generated JSON, or massive command output, agents may optionally use `chopratejas/headroom` or a similar local compression tool as a navigation aid, but must verify conclusions against the original uncompressed artifact before editing code or making final claims.
+
 ## Core MUST Rules
 
 ### Environment Setup
