@@ -237,7 +237,8 @@ export default class Daemon extends Command {
     }
 
     async run() {
-        printBanner();
+        // Daemon output is often viewed through Docker/systemd logs where stdout is not a TTY.
+        printBanner({ forceColor: true });
         // Non-blocking update check — fire-and-forget, won't delay startup
         import("../../update/npm-registry.js")
             .then(({ fetchLatestVersion }) =>
@@ -481,10 +482,6 @@ export default class Daemon extends Command {
                 }
             };
 
-            // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
-            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
-            await createOrConnectRpc();
-
             let keepKuboUpInterval: NodeJS.Timeout | undefined;
             const { asyncExitHook } = await import("exit-hook");
             const killKuboProcessGroup = (pid: number, signal: NodeJS.Signals) => {
@@ -579,6 +576,10 @@ export default class Daemon extends Command {
                     killKuboProcessGroup(kuboProcess.pid, "SIGKILL");
                 }
             });
+
+            // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
+            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
+            await createOrConnectRpc();
 
             keepKuboUpInterval = setInterval(async () => {
                 if (mainProcessExited) return;

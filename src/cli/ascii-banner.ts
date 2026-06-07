@@ -5,8 +5,8 @@
 //
 // COLORS is the paint map. Each character corresponds 1:1 to the character
 // at the same position in SHAPE:
-//   B = blue   (#1a4fd0) — the sphere
-//   S = silver (#e5e7eb) — the rings and the "Bitsocial" text
+//   B = blue accent — the sphere
+//   S = default foreground — the rings and the "Bitsocial" text
 //   . = no color (pass the glyph through as-is; use this for spaces)
 //
 // To retouch the art, find a glyph in SHAPE, then flip the character at the
@@ -15,7 +15,8 @@
 //
 // Both grids MUST have the same number of rows. Each row in COLORS must be at
 // least as wide as the corresponding SHAPE row (extra chars are ignored).
-// Palette sourced from bitsocialnet/bitsocial-web/about/tailwind.config.ts.
+// Use the terminal's default foreground for the wordmark/rings so the banner
+// stays readable on both light and dark terminal themes.
 
 const SHAPE = [
     "                ⢀⣴⣿⣿⣦⡀                                                                                       ",
@@ -59,36 +60,51 @@ const COLORS = [
     "................SSSSSS......................................................................................."
 ];
 
-const BLUE = "\x1b[38;2;26;79;208m";
-const SILVER = "\x1b[38;2;229;231;235m";
-const RESET = "\x1b[0m";
+const BLUE = "\x1b[94m";
+const DEFAULT_FOREGROUND = "\x1b[39m";
 
 function paint(shape: string, colors: string): string {
     let out = "";
-    let current = ".";
+    let blueActive = false;
     for (let i = 0; i < shape.length; i++) {
         const glyph = shape[i]!;
         const want = colors[i] ?? ".";
-        if (want !== current) {
-            if (current !== ".") out += RESET;
-            if (want === "B") out += BLUE;
-            else if (want === "S") out += SILVER;
-            current = want;
+        const wantBlue = want === "B";
+        if (wantBlue !== blueActive) {
+            out += wantBlue ? BLUE : DEFAULT_FOREGROUND;
+            blueActive = wantBlue;
         }
         out += glyph;
     }
-    if (current !== ".") out += RESET;
+    if (blueActive) out += DEFAULT_FOREGROUND;
     return out;
 }
 
-function supportsColor(): boolean {
-    if (process.env["NO_COLOR"]) return false;
-    if (process.env["FORCE_COLOR"]) return true;
-    return Boolean(process.stdout.isTTY);
+interface RenderBannerOptions {
+    env?: Record<string, string | undefined>;
+    forceColor?: boolean;
+    stdoutIsTTY?: boolean;
 }
 
-export function printBanner(): void {
-    const useColor = supportsColor();
+function envForcesColor(value: string | undefined): boolean {
+    if (value === undefined) return false;
+    return value !== "0" && value.toLowerCase() !== "false";
+}
+
+function supportsColor(options: RenderBannerOptions = {}): boolean {
+    const env = options.env ?? process.env;
+    if (env["NO_COLOR"] !== undefined) return false;
+    if (options.forceColor) return true;
+    if (env["FORCE_COLOR"] !== undefined) return envForcesColor(env["FORCE_COLOR"]);
+    return Boolean(options.stdoutIsTTY ?? process.stdout.isTTY);
+}
+
+export function renderBanner(options: RenderBannerOptions = {}): string {
+    const useColor = supportsColor(options);
     const lines = SHAPE.map((row, i) => (useColor ? paint(row, COLORS[i] ?? "") : row));
-    process.stdout.write(lines.join("\n") + "\n\n");
+    return lines.join("\n") + "\n\n";
+}
+
+export function printBanner(options: RenderBannerOptions = {}): void {
+    process.stdout.write(renderBanner(options));
 }
