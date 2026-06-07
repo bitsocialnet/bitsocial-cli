@@ -127,7 +127,7 @@ describe.skipIf(process.platform === "win32")("@bitsocial/mintpass-challenge int
         // Install the real @bitsocial/mintpass-challenge package from npm
         const installResult = await runBitsocialChallenge(["install", "@bitsocial/mintpass-challenge", "--pkcOptions.dataPath", dataPath], undefined, 420_000);
         expect(installResult.exitCode).toBe(0);
-        expect(installResult.stdout).toContain("Installed challenge '@bitsocial/mintpass-challenge");
+        expect(installResult.stdout).toContain("added @bitsocial/mintpass-challenge");
 
         // Start daemon — it handles kubo, RPC, and webui internally
         daemonProcess = await startPkcDaemon(["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", rpcWsUrl], {
@@ -172,7 +172,8 @@ describe.skipIf(process.platform === "win32")("@bitsocial/mintpass-challenge int
         expect(reloadRes.status).toBe(200);
         const reloadBody = (await reloadRes.json()) as { ok: boolean; challenges: string[] };
         expect(reloadBody.ok).toBe(true);
-        expect(reloadBody.challenges).toContain("@bitsocial/mintpass-challenge");
+        // Entries are name@version strings; the installed version follows npm's latest
+        expect(reloadBody.challenges.some((c) => c.startsWith("@bitsocial/mintpass-challenge@"))).toBe(true);
     });
 
     it("publish without wallet fails with wallet-not-defined error", { timeout: 120_000 }, async () => {

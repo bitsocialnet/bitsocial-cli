@@ -2,10 +2,12 @@ import { Args, Flags, Command } from "@oclif/core";
 import fs from "fs/promises";
 import path from "path";
 import defaults from "../../../common-utils/defaults.js";
-import { getChallengesDir, challengeNameToDir } from "../../../challenge-packages/challenge-utils.js";
+import { getChallengesDir, challengeNameToDir, readChallengePackageJson } from "../../../challenge-packages/challenge-utils.js";
 
 export default class Remove extends Command {
     static override description = "Remove an installed challenge package";
+
+    static override aliases = ["challenge:uninstall", "challenge:rm", "challenge:un"];
 
     static override args = {
         name: Args.string({
@@ -40,6 +42,15 @@ export default class Remove extends Command {
             this.error(`Challenge "${args.name}" is not installed.`);
         }
 
+        // Read the installed version for the success message (best-effort)
+        let version = "";
+        try {
+            const pkg = await readChallengePackageJson(challengeDir);
+            if (pkg.version) version = `@${pkg.version}`;
+        } catch {
+            // unreadable package.json — report the name only
+        }
+
         // Remove the challenge directory
         await fs.rm(challengeDir, { recursive: true, force: true });
 
@@ -56,7 +67,7 @@ export default class Remove extends Command {
             }
         }
 
-        this.log(`Removed challenge '${args.name}'`);
+        this.log(`removed ${args.name}${version}`);
 
         // Best-effort reload via daemon
         try {

@@ -1,11 +1,13 @@
 import { Flags, Command } from "@oclif/core";
 import { EOL } from "os";
-import { printTable } from "@oclif/table";
+import path from "path";
 import defaults from "../../../common-utils/defaults.js";
-import { listInstalledChallenges } from "../../../challenge-packages/challenge-utils.js";
+import { getChallengesDir, listInstalledChallenges, formatChallengeNameVersion } from "../../../challenge-packages/challenge-utils.js";
 
 export default class List extends Command {
     static override description = "List installed challenge packages";
+
+    static override aliases = ["challenge:ls"];
 
     static override flags = {
         quiet: Flags.boolean({ char: "q", summary: "Only display challenge names" }),
@@ -21,7 +23,8 @@ export default class List extends Command {
         const { flags } = await this.parse(List);
         const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
 
-        const challenges = await listInstalledChallenges(dataPath);
+        // Sort alphabetically like npm ls (readdir order is filesystem-dependent)
+        const challenges = (await listInstalledChallenges(dataPath)).sort((a, b) => a.name.localeCompare(b.name));
 
         if (challenges.length === 0) {
             this.log("No challenge packages installed.");
@@ -31,12 +34,11 @@ export default class List extends Command {
         if (flags.quiet) {
             this.log(challenges.map((c) => c.name).join(EOL));
         } else {
-            printTable({
-                data: challenges.map((c) => ({
-                    name: c.name,
-                    version: c.version,
-                    description: c.description
-                }))
+            // npm-ls-style tree: challenges dir header, then name@version entries
+            this.log(path.resolve(getChallengesDir(dataPath)));
+            challenges.forEach((c, i) => {
+                const branch = i === challenges.length - 1 ? "└── " : "├── ";
+                this.log(`${branch}${formatChallengeNameVersion(c)}`);
             });
         }
     }

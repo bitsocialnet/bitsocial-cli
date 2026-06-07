@@ -242,7 +242,7 @@ describe("challenge commands complete within 10s", () => {
             ["challenge", "install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
-        expect(result.stdout).toContain("Installed challenge 'test-challenge@1.0.0'");
+        expect(result.stdout).toContain("added test-challenge@1.0.0 in");
     });
 
     it("challenge list (after install) completes within 10s", { timeout: 10_000 }, async () => {
@@ -258,7 +258,7 @@ describe("challenge commands complete within 10s", () => {
             ["challenge", "remove", "test-challenge", "--pkcOptions.dataPath", dataPath]
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
-        expect(result.stdout).toContain("Removed challenge 'test-challenge'");
+        expect(result.stdout).toContain("removed test-challenge@1.0.0");
     });
 
     it("challenge list (after remove) completes within 10s", { timeout: 10_000 }, async () => {

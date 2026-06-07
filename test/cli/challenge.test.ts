@@ -89,7 +89,7 @@ describe("bitsocial challenge install", () => {
         const dataPath = randomDirectory();
         const result = await runBitsocialChallenge(["install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]);
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("Installed challenge 'test-challenge@1.0.0'");
+        expect(result.stdout).toContain("added test-challenge@1.0.0 in");
 
         // Verify directory structure
         const challengeDir = path.join(dataPath, "challenges", "test-challenge");
@@ -101,15 +101,53 @@ describe("bitsocial challenge install", () => {
         expect(pkg.name).toBe("test-challenge");
     });
 
-    it("errors when already installed", async () => {
+    it("reinstall replaces an existing installation (idempotent, like npm)", async () => {
         const dataPath = randomDirectory();
+        const srcDir = path.join(randomDirectory(), "reinstall-challenge");
+        await createMinimalChallengeDir(srcDir, "reinstall-challenge", { version: "1.0.0" });
+
         // Install once
-        await runBitsocialChallenge(["install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]);
-        // Try again
-        const result = await runBitsocialChallenge(["install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]);
-        expect(result.exitCode).not.toBe(0);
-        const combined = `${result.stdout}\n${result.stderr}`;
-        expect(combined).toContain("already installed");
+        const first = await runBitsocialChallenge(["install", srcDir, "--pkcOptions.dataPath", dataPath]);
+        expect(first.exitCode).toBe(0);
+        expect(first.stdout).toContain("added reinstall-challenge@1.0.0 in");
+
+        // Bump the version and install again — must replace, not error
+        const pkgPath = path.join(srcDir, "package.json");
+        const pkg = JSON.parse(await fsPromise.readFile(pkgPath, "utf-8"));
+        pkg.version = "1.1.0";
+        await fsPromise.writeFile(pkgPath, JSON.stringify(pkg, null, 2));
+
+        const second = await runBitsocialChallenge(["install", srcDir, "--pkcOptions.dataPath", dataPath]);
+        expect(second.exitCode, `reinstall failed with stderr:\n${second.stderr}`).toBe(0);
+        expect(second.stdout).toContain("changed reinstall-challenge@1.1.0 in");
+
+        // Installed package.json must reflect the new version
+        const installedPkg = JSON.parse(
+            await fsPromise.readFile(path.join(dataPath, "challenges", "reinstall-challenge", "package.json"), "utf-8")
+        );
+        expect(installedPkg.version).toBe("1.1.0");
+    });
+
+    it("reinstall with the same version still replaces the content", async () => {
+        const dataPath = randomDirectory();
+        const srcDir = path.join(randomDirectory(), "same-version-challenge");
+        await createMinimalChallengeDir(srcDir, "same-version-challenge", { version: "1.0.0" });
+
+        const first = await runBitsocialChallenge(["install", srcDir, "--pkcOptions.dataPath", dataPath]);
+        expect(first.exitCode).toBe(0);
+
+        // Change index.js content without bumping the version (e.g. local/git installs)
+        const newIndexContent = `export default function() { return { type: 'text/plain', challenge: '2+2', getChallenge: async () => ({ challenge: '2+2', type: 'text/plain', verify: async (answer) => ({ success: answer === '4' }) }) }; };\n`;
+        await fsPromise.writeFile(path.join(srcDir, "index.js"), newIndexContent);
+
+        const second = await runBitsocialChallenge(["install", srcDir, "--pkcOptions.dataPath", dataPath]);
+        expect(second.exitCode, `reinstall failed with stderr:\n${second.stderr}`).toBe(0);
+        expect(second.stdout).toContain("changed same-version-challenge@1.0.0 in");
+
+        const installedIndex = await fsPromise.readFile(
+            path.join(dataPath, "challenges", "same-version-challenge", "index.js"), "utf-8"
+        );
+        expect(installedIndex).toBe(newIndexContent);
     });
 
     it("installs successfully when devDependencies have unresolvable versions", async () => {
@@ -232,7 +270,7 @@ describe("bitsocial challenge install (scoped package)", () => {
         const dataPath = randomDirectory();
         const result = await runBitsocialChallenge(["install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]);
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("Installed challenge '@test-scope/my-challenge@2.0.0'");
+        expect(result.stdout).toContain("added @test-scope/my-challenge@2.0.0 in");
 
         // Verify nested directory structure @scope/name
         const challengeDir = path.join(dataPath, "challenges", "@test-scope", "my-challenge");
@@ -249,7 +287,7 @@ describe("bitsocial challenge list", () => {
         expect(result.stdout).toContain("No challenge packages installed");
     });
 
-    it("shows installed challenges in table", async () => {
+    it("shows installed challenges as an npm-ls-style tree", async () => {
         const dataPath = randomDirectory();
         // Manually create a challenge dir
         const challengeDir = path.join(dataPath, "challenges", "test-challenge");
@@ -260,8 +298,33 @@ describe("bitsocial challenge list", () => {
 
         const result = await runBitsocialChallenge(["list", "--pkcOptions.dataPath", dataPath]);
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("test-challenge");
-        expect(result.stdout).toContain("1.0.0");
+        // Header line is the challenges dir, entries are name@version
+        expect(result.stdout).toContain(path.join(dataPath, "challenges"));
+        expect(result.stdout).toContain("└── test-challenge@1.0.0");
+    });
+
+    it("sorts tree entries alphabetically with ├──/└── branches", async () => {
+        const dataPath = randomDirectory();
+        await createMinimalChallengeDir(path.join(dataPath, "challenges", "test-challenge"), "test-challenge", {
+            version: "1.0.0"
+        });
+        await createMinimalChallengeDir(
+            path.join(dataPath, "challenges", "@test-scope", "my-challenge"),
+            "@test-scope/my-challenge",
+            { version: "2.0.0" }
+        );
+
+        const result = await runBitsocialChallenge(["list", "--pkcOptions.dataPath", dataPath]);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("├── @test-scope/my-challenge@2.0.0");
+        expect(result.stdout).toContain("└── test-challenge@1.0.0");
+    });
+
+    it("works via the ls alias", async () => {
+        const dataPath = randomDirectory();
+        const result = await runBitsocialChallenge(["ls", "--pkcOptions.dataPath", dataPath]);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No challenge packages installed");
     });
 
     it("shows names only with -q", async () => {
@@ -286,7 +349,7 @@ describe("bitsocial challenge remove", () => {
 
         const result = await runBitsocialChallenge(["remove", "test-challenge", "--pkcOptions.dataPath", dataPath]);
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("Removed challenge 'test-challenge'");
+        expect(result.stdout).toContain("removed test-challenge@1.0.0");
 
         // Verify it's gone
         await expect(fsPromise.access(challengeDir)).rejects.toThrow();
@@ -304,7 +367,7 @@ describe("bitsocial challenge remove", () => {
             dataPath
         ]);
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("Removed challenge '@test-scope/my-challenge'");
+        expect(result.stdout).toContain("removed @test-scope/my-challenge@1.0.0");
 
         // Verify both the challenge dir and scope dir are gone
         const scopeDir = path.join(dataPath, "challenges", "@test-scope");
@@ -317,5 +380,16 @@ describe("bitsocial challenge remove", () => {
         expect(result.exitCode).not.toBe(0);
         const combined = `${result.stdout}\n${result.stderr}`;
         expect(combined).toContain("not installed");
+    });
+
+    it("works via the uninstall alias", async () => {
+        const dataPath = randomDirectory();
+        const challengeDir = path.join(dataPath, "challenges", "test-challenge");
+        await createMinimalChallengeDir(challengeDir, "test-challenge", { version: "1.0.0" });
+
+        const result = await runBitsocialChallenge(["uninstall", "test-challenge", "--pkcOptions.dataPath", dataPath]);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("removed test-challenge@1.0.0");
+        await expect(fsPromise.access(challengeDir)).rejects.toThrow();
     });
 });
