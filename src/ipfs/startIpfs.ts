@@ -210,54 +210,55 @@ export async function startKuboNode(
     dataPath: string,
     onSpawn?: (process: ChildProcessWithoutNullStreams) => void
 ): Promise<ChildProcessWithoutNullStreams> {
-    return new Promise(async (resolve, reject) => {
-        const log = PKCLogger("bitsocial-cli:ipfs:startKuboNode");
-        const ipfsDataPath = process.env["IPFS_PATH"] || path.join(dataPath, ".bitsocial-cli.ipfs");
-        await fs.promises.mkdir(ipfsDataPath, { recursive: true });
-        const ipfsConfigPath = path.join(ipfsDataPath, "config");
+    // Preparation phase runs as plain awaits so any failure rejects the returned promise.
+    // It must NOT live inside the new Promise() executor below: an async executor swallows
+    // throws as unhandledRejections and the promise never settles, which wedges the daemon's
+    // pendingKuboStart tracking and hangs its shutdown (issue #70).
+    const log = PKCLogger("bitsocial-cli:ipfs:startKuboNode");
+    const ipfsDataPath = process.env["IPFS_PATH"] || path.join(dataPath, ".bitsocial-cli.ipfs");
+    await fs.promises.mkdir(ipfsDataPath, { recursive: true });
+    const ipfsConfigPath = path.join(ipfsDataPath, "config");
 
-        const kuboExePath = await getKuboExePath();
-        const kuboVersion = await getKuboVersion();
-        log(`Using Kubo version: ${kuboVersion}`);
-        log(`IpfsDataPath (${ipfsDataPath}), kuboExePath (${kuboExePath})`, "kubo ipfs config file", path.join(ipfsDataPath, "config"));
-        log("If you would like to change kubo config, please edit the config file at", path.join(ipfsDataPath, "config"));
+    const kuboExePath = await getKuboExePath();
+    const kuboVersion = await getKuboVersion();
+    log(`Using Kubo version: ${kuboVersion}`);
+    log(`IpfsDataPath (${ipfsDataPath}), kuboExePath (${kuboExePath})`, "kubo ipfs config file", path.join(ipfsDataPath, "config"));
+    log("If you would like to change kubo config, please edit the config file at", path.join(ipfsDataPath, "config"));
 
-        const env = { IPFS_PATH: ipfsDataPath, DEBUG_COLORS: "1" };
+    const env = { IPFS_PATH: ipfsDataPath, DEBUG_COLORS: "1" };
 
-        let configJustInitialized = false;
-        try {
-            await _spawnAsync(log, kuboExePath, ["init"], { env, hideWindows: true });
-            configJustInitialized = true;
-        } catch (e) {
-            const error = <Error>e;
-            if (!error?.message?.includes("ipfs configuration file already exists!")) throw new Error("Failed to call ipfs init" + error);
-        }
-        if (configJustInitialized) {
-            await _spawnAsync(log, kuboExePath, ["config", "profile", "apply", `server`], {
-                env,
-                hideWindows: true
-            });
-            log("Called 'ipfs config profile apply server' successfully");
-            await mergeCliDefaultsIntoIpfsConfig(log, ipfsConfigPath, apiUrl, gatewayUrl);
-        } else {
-            log("IPFS config already exists; skipping config overrides to preserve user changes.");
-        }
+    let configJustInitialized = false;
+    try {
+        await _spawnAsync(log, kuboExePath, ["init"], { env, hideWindows: true });
+        configJustInitialized = true;
+    } catch (e) {
+        const error = <Error>e;
+        if (!error?.message?.includes("ipfs configuration file already exists!")) throw new Error("Failed to call ipfs init" + error);
+    }
+    if (configJustInitialized) {
+        await _spawnAsync(log, kuboExePath, ["config", "profile", "apply", `server`], {
+            env,
+            hideWindows: true
+        });
+        log("Called 'ipfs config profile apply server' successfully");
+        await mergeCliDefaultsIntoIpfsConfig(log, ipfsConfigPath, apiUrl, gatewayUrl);
+    } else {
+        log("IPFS config already exists; skipping config overrides to preserve user changes.");
+    }
 
-        try {
-            await _spawnAsync(log, kuboExePath, ["repo", "migrate"], { env, hideWindows: true });
-            log("Ensured IPFS repository is migrated to the latest supported version.");
-        } catch (migrationError) {
-            log.error("Failed to run IPFS repo migrations automatically", migrationError);
-            throw migrationError;
-        }
+    try {
+        await _spawnAsync(log, kuboExePath, ["repo", "migrate"], { env, hideWindows: true });
+        log("Ensured IPFS repository is migrated to the latest supported version.");
+    } catch (migrationError) {
+        log.error("Failed to run IPFS repo migrations automatically", migrationError);
+        throw migrationError;
+    }
 
-        try {
-            await ensureIpfsPortsAreAvailable(log, ipfsConfigPath, apiUrl, gatewayUrl);
-        } catch (error) {
-            reject(error instanceof Error ? error : new Error(String(error)));
-            return;
-        }
+    await ensureIpfsPortsAreAvailable(log, ipfsConfigPath, apiUrl, gatewayUrl);
 
+    // Spawn phase: the promise only wraps the event-driven wait for kubo's "Daemon is ready",
+    // so every settle path goes through resolve/reject.
+    return new Promise((resolve, reject) => {
         const daemonArgs = ["--enable-namesys-pubsub", "--migrate"];
 
         const kuboProcess: ChildProcessWithoutNullStreams = spawn(kuboExePath, ["daemon", ...daemonArgs], {
