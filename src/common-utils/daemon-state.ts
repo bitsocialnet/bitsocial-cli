@@ -8,6 +8,14 @@ const execFileAsync = promisify(execFile);
 
 const DAEMON_STATES_DIR = path.join(defaults.PKC_DATA_PATH, ".daemon_states");
 
+/**
+ * Maximum time a daemon is allowed to shut down its kubo + RPC server during its
+ * async exit hook. The `update install --restart-daemons` orchestrator must wait at
+ * least this long for a stopped daemon's PID to disappear before giving up — otherwise
+ * a slow-but-valid shutdown (within the daemon's own contract) aborts the update midway.
+ */
+export const DAEMON_SHUTDOWN_TIMEOUT_MS = 120000;
+
 export interface DaemonState {
     pid: number;
     startedAt: string;

@@ -4,7 +4,7 @@ import tcpPortUsed from "tcp-port-used";
 import { fetchLatestVersion, installGlobal } from "../../../update/npm-registry.js";
 import { fastInstallGlobal } from "../../../update/fast-update.js";
 import { compareVersions } from "../../../update/semver.js";
-import { getAliveDaemonStates, type DaemonState } from "../../../common-utils/daemon-state.js";
+import { getAliveDaemonStates, DAEMON_SHUTDOWN_TIMEOUT_MS, type DaemonState } from "../../../common-utils/daemon-state.js";
 
 export default class Install extends Command {
     static override description = "Install a specific version of bitsocial from npm";
@@ -73,9 +73,12 @@ export default class Install extends Command {
             // the PID to disappear guarantees the kubo port is free before we restart.
             for (const d of aliveDaemons) {
                 this.log(`Waiting for daemon (PID ${d.pid}) to exit...`);
-                const exited = await this._waitForProcessExit(d.pid, 60000);
+                const exited = await this._waitForProcessExit(d.pid, DAEMON_SHUTDOWN_TIMEOUT_MS);
                 if (!exited) {
-                    this.error(`Daemon (PID ${d.pid}) did not shut down within 60 seconds.`, { exit: 1 });
+                    this.error(
+                        `Daemon (PID ${d.pid}) did not shut down within ${DAEMON_SHUTDOWN_TIMEOUT_MS / 1000} seconds.`,
+                        { exit: 1 }
+                    );
                 }
             }
             this.log("All daemons stopped.");

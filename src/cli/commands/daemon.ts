@@ -19,7 +19,7 @@ import { printBanner } from "../ascii-banner.js";
 import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
-import { pruneStaleStates, writeDaemonState, deleteDaemonState } from "../../common-utils/daemon-state.js";
+import { pruneStaleStates, writeDaemonState, deleteDaemonState, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
 import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-utils/daemon-file-logger.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
@@ -621,7 +621,7 @@ export default class Daemon extends Command {
 
                     await kuboKillPromise;
                 },
-                { wait: 120000 } // could take two minutes to shut down
+                { wait: DAEMON_SHUTDOWN_TIMEOUT_MS } // could take two minutes to shut down
             );
 
             // Emergency cleanup: if the process force-exits (e.g. double Ctrl+C),
