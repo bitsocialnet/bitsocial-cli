@@ -305,12 +305,16 @@ export async function verifyNativeModuleAbi(challengeDir: string): Promise<void>
     }
 }
 
-export async function loadChallengesIntoPKC(dataPath?: string): Promise<string[]> {
+export function formatChallengeNameVersion(challenge: Pick<InstalledChallenge, "name" | "version">): string {
+    return challenge.version && challenge.version !== "unknown" ? `${challenge.name}@${challenge.version}` : challenge.name;
+}
+
+export async function loadChallengesIntoPKC(dataPath?: string): Promise<InstalledChallenge[]> {
     const challenges = await listInstalledChallenges(dataPath);
     if (challenges.length === 0) return [];
 
     const PKC = await import("@pkcprotocol/pkc-js");
-    const loadedNames: string[] = [];
+    const loaded: InstalledChallenge[] = [];
 
     for (const challenge of challenges) {
         try {
@@ -321,11 +325,11 @@ export async function loadChallengesIntoPKC(dataPath?: string): Promise<string[]
             const imported = await import(pathToFileURL(entryPath).href);
             const factory = imported.default || imported;
             (PKC.default as any).challenges[challenge.name] = factory;
-            loadedNames.push(challenge.name);
+            loaded.push(challenge);
         } catch (err) {
             console.error(`Failed to load challenge "${challenge.name}":`, err);
         }
     }
 
-    return loadedNames;
+    return loaded;
 }

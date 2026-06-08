@@ -7,7 +7,7 @@ import fs from "fs/promises";
 import { PKCLogger } from "../util.js";
 import { randomBytes } from "crypto";
 import express from "express";
-import { loadChallengesIntoPKC } from "../challenge-packages/challenge-utils.js";
+import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../challenge-packages/challenge-utils.js";
 
 const rootHashRedirectScriptPattern =
     /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?window\.location\.replace\(["']\/#["']\s*\+\s*window\.location\.pathname\s*\+\s*window\.location\.search\);(?:(?!<\/script>)[\s\S])*?<\/script>/;
@@ -164,7 +164,7 @@ export async function startDaemonServer(
     // Challenge reload endpoints
     const handleChallengeReload = async (_req: express.Request, res: express.Response) => {
         try {
-            const loadedNames = await loadChallengesIntoPKC(pkcOptions.dataPath);
+            const loadedChallenges = await loadChallengesIntoPKC(pkcOptions.dataPath);
             // Notify all connected RPC clients about the updated challenges
             const onSettingsChange = (rpcServer as any)._onSettingsChange;
             if (onSettingsChange) {
@@ -177,7 +177,7 @@ export async function startDaemonServer(
                     }
                 }
             }
-            res.json({ ok: true, challenges: loadedNames });
+            res.json({ ok: true, challenges: loadedChallenges.map(formatChallengeNameVersion) });
         } catch (err) {
             log.error("Failed to reload challenges", err);
             res.status(500).json({ ok: false, error: String(err) });

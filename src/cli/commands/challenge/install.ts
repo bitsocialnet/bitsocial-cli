@@ -16,6 +16,8 @@ import {
 export default class Install extends Command {
     static override description = "Install a challenge package (npm package name, git URL, tarball URL, or local path)";
 
+    static override aliases = ["challenge:i", "challenge:add"];
+
     static override args = {
         package: Args.string({
             description: "Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)",
@@ -39,10 +41,9 @@ export default class Install extends Command {
     ];
 
     async run(): Promise<void> {
+        const startTime = Date.now();
         const { args, flags } = await this.parse(Install);
         const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
-
-        this.log("Installing challenge package — this may take a few minutes...");
 
         // 1. Check npm is available
         await ensureNpmAvailable();
@@ -87,7 +88,18 @@ export default class Install extends Command {
             // 5. Read package info
             const pkg = await readChallengePackageJson(pkgDir);
 
-            // 6. Check not already installed
+            // 6. Run npm install in the temp dir, so a failed install never
+            //    touches an existing working installation of the same package
+            process.stderr.write(`[challenge-install] starting npm install in ${pkgDir}\n`);
+            await runNpmInstall(pkgDir);
+            process.stderr.write("[challenge-install] npm install completed\n");
+
+            // 7. Verify native modules are ABI-compatible (still in the temp dir,
+            //    so failure needs no rollback — the temp dir is cleaned up below)
+            await verifyNativeModuleAbi(pkgDir);
+
+            // 8. Swap the verified package into the challenges dir, replacing any
+            //    existing installation (idempotent, like npm install)
             const challengesDir = await ensureChallengesDir(dataPath);
             const destDir = challengeNameToDir(challengesDir, pkg.name);
             let alreadyExists = true;
@@ -96,53 +108,38 @@ export default class Install extends Command {
             } catch {
                 alreadyExists = false;
             }
-            if (alreadyExists) {
-                this.error(`Challenge "${pkg.name}" is already installed. Remove it first with: bitsocial challenge remove ${pkg.name}`);
-            }
 
-            // 7. Move to challenges dir
+            // Move any existing install aside (same filesystem — tmpDir lives under
+            // dataPath) so it can be restored if the final rename fails
+            const backupDir = path.join(tmpDir, "previous-install");
+            if (alreadyExists) await fs.rename(destDir, backupDir);
+
             if (pkg.name.startsWith("@")) {
                 // Ensure scope dir exists for scoped packages
                 const scopeDir = path.dirname(destDir);
                 await fs.mkdir(scopeDir, { recursive: true });
             }
-            await fs.rename(pkgDir, destDir);
-
-            // 8. Run npm install
-            process.stderr.write(`[challenge-install] starting npm install in ${destDir}\n`);
-            await runNpmInstall(destDir);
-            process.stderr.write("[challenge-install] npm install completed\n");
-
-            // 9. Verify native modules are ABI-compatible
             try {
-                await verifyNativeModuleAbi(destDir);
+                await fs.rename(pkgDir, destDir);
             } catch (err) {
-                // Roll back the installation on ABI mismatch
-                await fs.rm(destDir, { recursive: true, force: true });
-                if (pkg.name.startsWith("@")) {
-                    const scopeDir = path.dirname(destDir);
-                    try {
-                        const entries = await fs.readdir(scopeDir);
-                        if (entries.length === 0) await fs.rmdir(scopeDir);
-                    } catch {
-                        // ignore
-                    }
-                }
-                this.error(err instanceof Error ? err.message : String(err));
+                // Restore the previous installation before surfacing the error
+                if (alreadyExists) await fs.rename(backupDir, destDir);
+                throw err;
             }
 
-            // 10. Print success
+            // 9. Print success (npm-style)
             const version = pkg.version ? `@${pkg.version}` : "";
-            this.log(`Installed challenge '${pkg.name}${version}'`);
+            const elapsedSeconds = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+            this.log(`${alreadyExists ? "changed" : "added"} ${pkg.name}${version} in ${elapsedSeconds}s`);
 
-            // 11. Best-effort reload via daemon
+            // 10. Best-effort reload via daemon
             try {
                 await fetch("http://localhost:9138/api/challenges/reload", { method: "POST" });
             } catch {
                 // daemon not running, that's fine
             }
         } finally {
-            // 12. Clean up temp dir
+            // 11. Clean up temp dir (includes the previous-install backup, if any)
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
     }

@@ -16,7 +16,7 @@ import {
 import type { PKCLoggerType } from "../../util.js";
 import { startDaemonServer } from "../../webui/daemon-server.js";
 import { printBanner } from "../ascii-banner.js";
-import { loadChallengesIntoPKC } from "../../challenge-packages/challenge-utils.js";
+import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
 import { pruneStaleStates, writeDaemonState, deleteDaemonState } from "../../common-utils/daemon-state.js";
@@ -488,7 +488,8 @@ export default class Daemon extends Command {
 
                 // Load installed challenge packages before starting the RPC server
                 const loadedChallenges = await loadChallengesIntoPKC(mergedPkcOptions.dataPath);
-                if (loadedChallenges.length > 0) console.log(`Loaded challenge packages: ${loadedChallenges.join(", ")}`);
+                if (loadedChallenges.length > 0)
+                    console.log(`Loaded challenge packages: ${loadedChallenges.map(formatChallengeNameVersion).join(", ")}`);
 
                 daemonServer = await startDaemonServer(pkcRpcUrl, ipfsGatewayEndpoint, mergedPkcOptions, {
                     allowPrivateKeyExport: flags.allowPrivateKeyExport

@@ -165,7 +165,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
 
         const installResult = await runBitsocialChallenge(["install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]);
         expect(installResult.exitCode).toBe(0);
-        expect(installResult.stdout).toContain("Installed challenge 'test-challenge@1.0.0'");
+        expect(installResult.stdout).toContain("added test-challenge@1.0.0 in");
 
         // Start daemon — it handles kubo, RPC, and webui internally
         daemonProcess = await startPkcDaemon(
@@ -221,7 +221,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
         });
 
         it("daemon loads installed challenge on startup", () => {
-            expect(daemonProcess?.capturedStdout).toContain("Loaded challenge packages: test-challenge");
+            expect(daemonProcess?.capturedStdout).toContain("Loaded challenge packages: test-challenge@1.0.0");
         });
 
         it("correct answer passes challenge verification", { timeout: 120_000 }, async () => {
@@ -309,14 +309,14 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
             // Install while daemon is running
             const installResult = await runBitsocialChallenge(["install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]);
             expect(installResult.exitCode).toBe(0);
-            expect(installResult.stdout).toContain("Installed challenge 'test-challenge-v2@1.0.0'");
+            expect(installResult.stdout).toContain("added test-challenge-v2@1.0.0 in");
 
             // Trigger reload
             const reloadRes = await fetch(`http://localhost:${RPC_PORT}/api/challenges/reload`, { method: "POST" });
             expect(reloadRes.status).toBe(200);
             const reloadBody = (await reloadRes.json()) as { ok: boolean; challenges: string[] };
             expect(reloadBody.ok).toBe(true);
-            expect(reloadBody.challenges).toContain("test-challenge-v2");
+            expect(reloadBody.challenges).toContain("test-challenge-v2@1.0.0");
 
             // Create a community using the hot-reloaded challenge
             const sub = await pkc.createCommunity();
