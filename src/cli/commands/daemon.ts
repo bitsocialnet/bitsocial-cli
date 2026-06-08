@@ -345,12 +345,25 @@ export default class Daemon extends Command {
             let pendingKuboStart: Promise<ChildProcessWithoutNullStreams> | undefined;
             // Kubo Node may fail randomly, we need to set a listener so when it exits because of an error we restart it
             let kuboProcess: ChildProcessWithoutNullStreams | undefined;
-            const keepKuboUp = async () => {
+            // Every kubo we've spawned that hasn't exited yet. Exit cleanup kills all of these,
+            // so a kubo that slipped out of kuboProcess tracking still dies with the daemon (issue #70)
+            const liveKuboPids = new Set<number>();
+            const keepKuboUpOnce = async () => {
                 if (mainProcessExited) return;
                 const kuboApiPort = Number(kuboRpcEndpoint.port);
                 if (kuboProcess || pendingKuboStart) return; // already started, no need to intervene
                 const connectHostname = toConnectableHostname(kuboRpcEndpoint.hostname);
                 const isKuboApiPortTaken = await tcpPortUsed.check(kuboApiPort, connectHostname);
+                // Test hook: widens the window between the re-entrancy guard above and the pendingKuboStart
+                // assignment below, so tests can deterministically reproduce concurrent keepKuboUp entries
+                // (issue #70, see test/cli/daemon-kubo-restart-race.test.ts)
+                const portCheckDelayRaw = process.env["PKC_CLI_TEST_KEEPKUBOUP_PORTCHECK_DELAY_MS"];
+                const portCheckDelay = portCheckDelayRaw ? Number(portCheckDelayRaw) : 0;
+                if (Number.isFinite(portCheckDelay) && portCheckDelay > 0)
+                    await new Promise((resolve) => setTimeout(resolve, portCheckDelay));
+                // Re-check after the awaits above: the daemon may have begun shutting down, or another
+                // kubo may have been adopted in the meantime — spawning now would race it (issue #70)
+                if (mainProcessExited || kuboProcess || pendingKuboStart) return;
                 if (isKuboApiPortTaken) {
                     const connectableEndpoint = new URL(kuboRpcEndpoint.toString());
                     connectableEndpoint.hostname = connectHostname;
@@ -378,19 +391,27 @@ export default class Daemon extends Command {
                         }:${kuboApiPort} (configured as ${kuboRpcEndpoint.toString()}) is already in use.`
                     );
                 }
+                let spawnedProcess: ChildProcessWithoutNullStreams | undefined;
                 const startPromise = startKuboNode(kuboRpcEndpoint, ipfsGatewayEndpoint, mergedPkcOptions.dataPath!, (process) => {
+                    spawnedProcess = process;
                     kuboProcess = process;
+                    if (process.pid) {
+                        const pid = process.pid;
+                        liveKuboPids.add(pid);
+                        process.once("exit", () => liveKuboPids.delete(pid));
+                    }
                 });
                 pendingKuboStart = startPromise;
                 let startedProcess: ChildProcessWithoutNullStreams | undefined;
                 try {
                     startedProcess = await startPromise;
                 } catch (error) {
-                    pendingKuboStart = undefined;
-                    if (!mainProcessExited) kuboProcess = undefined;
+                    // Only clear state this attempt owns — it may track another attempt's healthy kubo (issue #70)
+                    if (pendingKuboStart === startPromise) pendingKuboStart = undefined;
+                    if (!mainProcessExited && spawnedProcess && kuboProcess === spawnedProcess) kuboProcess = undefined;
                     throw error;
                 }
-                pendingKuboStart = undefined;
+                if (pendingKuboStart === startPromise) pendingKuboStart = undefined;
                 if (mainProcessExited) {
                     if (startedProcess?.pid && !startedProcess.killed) {
                         // Race condition: Kubo finished starting after mainProcessExited.
@@ -409,7 +430,7 @@ export default class Daemon extends Command {
                             /* best effort */
                         }
                     }
-                    kuboProcess = undefined;
+                    if (kuboProcess === startedProcess) kuboProcess = undefined;
                     return;
                 }
                 kuboProcess = startedProcess;
@@ -421,7 +442,7 @@ export default class Daemon extends Command {
                     // Restart Kubo process because it failed
                     if (!mainProcessExited) {
                         log(`Kubo node with pid (${currentProcess?.pid}) exited. Will attempt to restart it`);
-                        kuboProcess = undefined;
+                        if (kuboProcess === currentProcess) kuboProcess = undefined;
                         try {
                             await keepKuboUp();
                         } catch (error) {
@@ -434,6 +455,20 @@ export default class Daemon extends Command {
                     }
                 };
                 currentProcess.once("exit", onKuboExit);
+            };
+
+            // Single-flight wrapper: keepKuboUp is invoked from independent places (the kubo exit
+            // handler and the watchdog interval). Concurrent callers must share one attempt —
+            // otherwise both can pass keepKuboUpOnce's re-entrancy guard during its awaits and
+            // spawn two kubo processes whose failure handling corrupts shared state (issue #70)
+            let keepKuboUpInFlight: Promise<void> | undefined;
+            const keepKuboUp = () => {
+                if (!keepKuboUpInFlight) {
+                    keepKuboUpInFlight = keepKuboUpOnce().finally(() => {
+                        keepKuboUpInFlight = undefined;
+                    });
+                }
+                return keepKuboUpInFlight;
             };
 
             let startedOwnRpc = false;
@@ -502,13 +537,19 @@ export default class Daemon extends Command {
             };
 
             const killKuboProcess = async () => {
-                if (pendingKuboStart) {
-                    try {
-                        await pendingKuboStart;
-                    } catch {
-                        /* ignore */
-                    }
-                }
+                // Wait (bounded) for any in-flight start attempt so we kill the kubo it may still
+                // spawn. Both promises settle on all failure paths (issue #70), but a spawned kubo
+                // that wedges before "Daemon is ready" without exiting keeps them pending — the
+                // bound ensures shutdown still reaches the SIGINT/SIGKILL flow below, which kills
+                // it via kuboProcess (set in onSpawn) or the liveKuboPids sweep (PR #71 review).
+                const inFlightStarts = [keepKuboUpInFlight, pendingKuboStart]
+                    .filter((promise) => promise !== undefined)
+                    .map((promise) => promise.catch(() => {}));
+                if (inFlightStarts.length > 0)
+                    await Promise.race([
+                        Promise.all(inFlightStarts),
+                        new Promise<void>((resolve) => setTimeout(resolve, 15_000).unref())
+                    ]);
                 if (kuboProcess?.pid && !kuboProcess.killed) {
                     const pid = kuboProcess.pid;
                     log("Attempting to kill kubo process with pid", pid);
@@ -535,6 +576,10 @@ export default class Daemon extends Command {
                         kuboProcess = undefined;
                     }
                 }
+                // Defense in depth: SIGKILL any spawned kubo that slipped out of kuboProcess
+                // tracking (e.g. via a state race) so nothing outlives the daemon (issue #70)
+                for (const pid of liveKuboPids) killKuboProcessGroup(pid, "SIGKILL");
+                liveKuboPids.clear();
             };
 
             asyncExitHook(
@@ -569,13 +614,60 @@ export default class Daemon extends Command {
             );
 
             // Emergency cleanup: if the process force-exits (e.g. double Ctrl+C),
-            // synchronously SIGKILL kubo's process group. This is a no-op if
-            // killKuboProcess() already ran (it sets kuboProcess = undefined).
+            // synchronously SIGKILL every live kubo's process group. This is a no-op if
+            // killKuboProcess() already ran (it clears kuboProcess and liveKuboPids).
             process.on("exit", () => {
                 if (kuboProcess?.pid) {
                     killKuboProcessGroup(kuboProcess.pid, "SIGKILL");
                 }
+                for (const pid of liveKuboPids) killKuboProcessGroup(pid, "SIGKILL");
             });
+
+            // Persistent signal guard (issue #70): exit-hook registers its SIGINT/SIGTERM handlers
+            // with process.once, so its listener vanishes from the listener list the moment a
+            // signal is dispatched. signal-exit (loaded by @pkcprotocol/proper-lock-file and other
+            // dependencies) re-raises the signal when every remaining listener is its own — which
+            // would kill the process while the async exit hook above is still shutting kubo down.
+            // A persistent non-signal-exit listener keeps that heuristic from ever firing.
+            // A repeated signal force-quits immediately (impatient Ctrl+C): process.exit triggers
+            // the emergency "exit" handler above, which SIGKILLs every live kubo.
+            let terminationSignalCount = 0;
+            for (const signal of ["SIGINT", "SIGTERM"] as const) {
+                process.on(signal, () => {
+                    terminationSignalCount++;
+                    if (terminationSignalCount >= 2) {
+                        log(`Received ${signal} again during shutdown, force-quitting`);
+                        process.exit(signal === "SIGINT" ? 130 : 143);
+                    }
+                });
+            }
+
+            // Test hook (issue #70): simulates a dependency registering a signal-exit handler
+            // AFTER the asyncExitHook above — what @pkcprotocol/proper-lock-file (and the
+            // signal-exit copies under ink/restore-cursor) do at module load. signal-exit
+            // re-raises the signal when every remaining listener belongs to the signal-exit
+            // family (`if (listeners.length === count) { ... process.kill(process.pid, s) }`),
+            // which kills the daemon while the async exit hook is still cleaning up kubo —
+            // exit-hook registers with process.once, so its listener is already gone by then.
+            if (process.env["PKC_CLI_TEST_SIMULATE_LATE_SIGNAL_EXIT"]) {
+                for (const signal of ["SIGINT", "SIGTERM"] as const) {
+                    // Real signal-exit copies only count each other as "family" (via a shared
+                    // global marker); any other listener makes them defer. Identify family by
+                    // source: signal-exit's dispatcher carries the "an exit is coming" comment.
+                    const isSignalExitFamily = (listener: NodeJS.SignalsListener) =>
+                        String(listener).includes("an exit is coming");
+                    const reRaiser = () => {
+                        const onlyFamilyLeft = process
+                            .listeners(signal)
+                            .every((listener) => listener === reRaiser || isSignalExitFamily(listener));
+                        if (onlyFamilyLeft) {
+                            process.removeListener(signal, reRaiser);
+                            process.kill(process.pid, signal);
+                        }
+                    };
+                    process.on(signal, reRaiser);
+                }
+            }
 
             // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();

@@ -393,11 +393,13 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
         const previousDelay = process.env["PKC_CLI_TEST_IPFS_READY_DELAY_MS"];
         process.env["PKC_CLI_TEST_IPFS_READY_DELAY_MS"] = "5000";
 
+        // Explicit logPath so the daemon's DEBUG log files can be dumped if the test fails (issue #70)
+        const cleanupLogDir = randomDirectory();
         let daemonProcess: ManagedChildProcess | undefined;
         try {
             await ensureKuboNodeStopped(cleanupKuboApiUrl);
             daemonProcess = await startPkcDaemon(
-                ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", cleanupRpcUrl],
+                ["--logPath", cleanupLogDir, "--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", cleanupRpcUrl],
                 { KUBO_RPC_URL: cleanupKuboUrl, IPFS_GATEWAY_URL: cleanupGatewayUrl }
             );
             expect(typeof daemonProcess.pid).toBe("number");
@@ -431,6 +433,21 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
                     return true;
                 }
             }, 10000, 500);
+            if (!kuboStoppedAfterKill) {
+                // Diagnostics for the flaky-on-CI failure (issue #70): the daemon's DEBUG output is
+                // redirected to its log files (not stderr), so dump those — they show which kubo
+                // pids were spawned, restarted and killed. Without this the CI log only contains
+                // the bare assertion.
+                const tail = (text: string | undefined, lines: number) => (text ?? "").split("\n").slice(-lines).join("\n");
+                console.log(`[restart-cleanup diagnostics] kubo still responding on ${cleanupKuboApiUrl} after daemon exit`);
+                console.log(`[restart-cleanup diagnostics] daemon exitCode=${daemonProcess.exitCode} signalCode=${daemonProcess.signalCode}`);
+                console.log(`[restart-cleanup diagnostics] daemon stdout tail:\n${tail(daemonProcess.capturedStdout, 40)}`);
+                console.log(`[restart-cleanup diagnostics] daemon stderr tail:\n${tail(daemonProcess.capturedStderr, 60)}`);
+                for (const logFile of await fsPromise.readdir(cleanupLogDir).catch(() => [] as string[])) {
+                    const content = await fsPromise.readFile(path.join(cleanupLogDir, logFile), "utf-8").catch(() => "");
+                    console.log(`[restart-cleanup diagnostics] log file ${logFile} tail:\n${tail(content, 250)}`);
+                }
+            }
             expect(kuboStoppedAfterKill).toBe(true);
         } finally {
             if (daemonProcess) await stopPkcDaemon(daemonProcess);
