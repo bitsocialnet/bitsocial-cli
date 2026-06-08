@@ -65,15 +65,17 @@ export default class Install extends Command {
                 }
             }
 
-            // Wait for all daemon ports to be free
+            // Wait for each daemon process to fully exit — NOT just for its RPC port to free.
+            // The daemon releases its RPC port (daemonServer.destroy()) before it finishes killing
+            // its kubo child, so a port-only wait lets us restart while the old kubo still holds the
+            // IPFS API port; the new daemon then dies on startup with "IPFS API port already in use"
+            // (issue #70). The daemon's exit hook kills kubo before the process exits, so waiting for
+            // the PID to disappear guarantees the kubo port is free before we restart.
             for (const d of aliveDaemons) {
-                const url = new URL(d.pkcRpcUrl);
-                const port = Number(url.port);
-                const host = url.hostname;
-                this.log(`Waiting for port ${port} to be free...`);
-                const freed = await tcpPortUsed.waitUntilFree(port, 500, 30000).then(() => true).catch(() => false);
-                if (!freed) {
-                    this.error(`Daemon (PID ${d.pid}) did not shut down within 30 seconds on port ${port}.`, { exit: 1 });
+                this.log(`Waiting for daemon (PID ${d.pid}) to exit...`);
+                const exited = await this._waitForProcessExit(d.pid, 60000);
+                if (!exited) {
+                    this.error(`Daemon (PID ${d.pid}) did not shut down within 60 seconds.`, { exit: 1 });
                 }
             }
             this.log("All daemons stopped.");
@@ -132,6 +134,30 @@ export default class Install extends Command {
             await this._restartDaemons(aliveDaemons);
             this.log("To see the daemon logs run `bitsocial logs --stdout`");
         }
+    }
+
+    /**
+     * Poll until the given PID no longer exists (signal 0 throws ESRCH), or the timeout elapses.
+     * Returns true if the process exited, false on timeout. EPERM means the process is still alive
+     * but owned by another user, so we keep waiting.
+     */
+    private async _waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            try {
+                process.kill(pid, 0);
+            } catch (e) {
+                if ((e as NodeJS.ErrnoException).code === "ESRCH") return true; // no such process — it exited
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        // Final check so a process that exits in the last interval isn't reported as a timeout
+        try {
+            process.kill(pid, 0);
+        } catch (e) {
+            if ((e as NodeJS.ErrnoException).code === "ESRCH") return true;
+        }
+        return false;
     }
 
     private async _restartDaemons(daemons: DaemonState[]): Promise<void> {
