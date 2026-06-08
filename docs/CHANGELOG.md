@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.66 (2026-06-08)</small>
+
+* fix(daemon-state): detect PID reuse so stale state files aren't treated as live daemons (#66) ([fe3609e](https://github.com/bitsocialnet/bitsocial-cli/commit/fe3609e)), closes [#66](https://github.com/bitsocialnet/bitsocial-cli/issues/66)
+* fix(daemon): bound the shutdown wait on in-flight kubo starts (PR #71 review) ([10905a9](https://github.com/bitsocialnet/bitsocial-cli/commit/10905a9)), closes [#71](https://github.com/bitsocialnet/bitsocial-cli/issues/71)
+* fix(daemon): eliminate kubo restart races that orphan kubo or hang shutdown (issue #70) ([6b61044](https://github.com/bitsocialnet/bitsocial-cli/commit/6b61044)), closes [#70](https://github.com/bitsocialnet/bitsocial-cli/issues/70)
+* fix(daemon): guard shutdown against signal-exit re-raising SIGTERM mid-cleanup (issue #70) ([36ac0f4](https://github.com/bitsocialnet/bitsocial-cli/commit/36ac0f4)), closes [#70](https://github.com/bitsocialnet/bitsocial-cli/issues/70)
+* test(daemon): dump daemon log files when restart-cleanup test fails on CI (issue #70) ([61a0594](https://github.com/bitsocialnet/bitsocial-cli/commit/61a0594)), closes [#70](https://github.com/bitsocialnet/bitsocial-cli/issues/70)
+* feat(challenge): npm-style commands — idempotent install, npm-like output and aliases (#68) ([6af6148](https://github.com/bitsocialnet/bitsocial-cli/commit/6af6148)), closes [#68](https://github.com/bitsocialnet/bitsocial-cli/issues/68)
+
 ## <small>0.19.65 (2026-06-07)</small>
 
 * fix(banner): improve terminal contrast ([203e44c](https://github.com/bitsocialnet/bitsocial-cli/commit/203e44c))

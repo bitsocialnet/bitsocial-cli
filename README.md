@@ -298,9 +298,15 @@ $ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 ## Commands
 
 <!-- commands -->
+* [`bitsocial challenge add PACKAGE`](#bitsocial-challenge-add-package)
+* [`bitsocial challenge i PACKAGE`](#bitsocial-challenge-i-package)
 * [`bitsocial challenge install PACKAGE`](#bitsocial-challenge-install-package)
 * [`bitsocial challenge list`](#bitsocial-challenge-list)
+* [`bitsocial challenge ls`](#bitsocial-challenge-ls)
 * [`bitsocial challenge remove NAME`](#bitsocial-challenge-remove-name)
+* [`bitsocial challenge rm NAME`](#bitsocial-challenge-rm-name)
+* [`bitsocial challenge un NAME`](#bitsocial-challenge-un-name)
+* [`bitsocial challenge uninstall NAME`](#bitsocial-challenge-uninstall-name)
 * [`bitsocial community create`](#bitsocial-community-create)
 * [`bitsocial community delete ADDRESSES`](#bitsocial-community-delete-addresses)
 * [`bitsocial community edit ADDRESS`](#bitsocial-community-edit-address)
@@ -315,6 +321,72 @@ $ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 * [`bitsocial update check`](#bitsocial-update-check)
 * [`bitsocial update install [VERSION]`](#bitsocial-update-install-version)
 * [`bitsocial update versions`](#bitsocial-update-versions)
+
+## `bitsocial challenge add PACKAGE`
+
+Install a challenge package (npm package name, git URL, tarball URL, or local path)
+
+```
+USAGE
+  $ bitsocial challenge add PACKAGE [--pkcOptions.dataPath <value>]
+
+ARGUMENTS
+  PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path to install the challenge into
+
+DESCRIPTION
+  Install a challenge package (npm package name, git URL, tarball URL, or local path)
+
+ALIASES
+  $ bitsocial challenge i
+  $ bitsocial challenge add
+
+EXAMPLES
+  $ bitsocial challenge install @bitsocial/mintpass-challenge
+
+  $ bitsocial challenge install @bitsocial/mintpass-challenge@1.0.0
+
+  $ bitsocial challenge install github:user/repo
+
+  $ bitsocial challenge install https://example.com/my-challenge-1.0.0.tar.gz
+
+  $ bitsocial challenge install ./my-local-challenge
+```
+
+## `bitsocial challenge i PACKAGE`
+
+Install a challenge package (npm package name, git URL, tarball URL, or local path)
+
+```
+USAGE
+  $ bitsocial challenge i PACKAGE [--pkcOptions.dataPath <value>]
+
+ARGUMENTS
+  PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path to install the challenge into
+
+DESCRIPTION
+  Install a challenge package (npm package name, git URL, tarball URL, or local path)
+
+ALIASES
+  $ bitsocial challenge i
+  $ bitsocial challenge add
+
+EXAMPLES
+  $ bitsocial challenge install @bitsocial/mintpass-challenge
+
+  $ bitsocial challenge install @bitsocial/mintpass-challenge@1.0.0
+
+  $ bitsocial challenge install github:user/repo
+
+  $ bitsocial challenge install https://example.com/my-challenge-1.0.0.tar.gz
+
+  $ bitsocial challenge install ./my-local-challenge
+```
 
 ## `bitsocial challenge install PACKAGE`
 
@@ -333,6 +405,10 @@ FLAGS
 DESCRIPTION
   Install a challenge package (npm package name, git URL, tarball URL, or local path)
 
+ALIASES
+  $ bitsocial challenge i
+  $ bitsocial challenge add
+
 EXAMPLES
   $ bitsocial challenge install @bitsocial/mintpass-challenge
 
@@ -345,7 +421,7 @@ EXAMPLES
   $ bitsocial challenge install ./my-local-challenge
 ```
 
-_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/challenge/install.ts)_
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/challenge/install.ts)_
 
 ## `bitsocial challenge list`
 
@@ -362,13 +438,40 @@ FLAGS
 DESCRIPTION
   List installed challenge packages
 
+ALIASES
+  $ bitsocial challenge ls
+
 EXAMPLES
   $ bitsocial challenge list
 
   $ bitsocial challenge list -q
 ```
 
-_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/challenge/list.ts)_
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/challenge/list.ts)_
+
+## `bitsocial challenge ls`
+
+List installed challenge packages
+
+```
+USAGE
+  $ bitsocial challenge ls [-q] [--pkcOptions.dataPath <value>]
+
+FLAGS
+  -q, --quiet                        Only display challenge names
+      --pkcOptions.dataPath=<value>  Data path where challenges are installed
+
+DESCRIPTION
+  List installed challenge packages
+
+ALIASES
+  $ bitsocial challenge ls
+
+EXAMPLES
+  $ bitsocial challenge list
+
+  $ bitsocial challenge list -q
+```
 
 ## `bitsocial challenge remove NAME`
 
@@ -387,13 +490,102 @@ FLAGS
 DESCRIPTION
   Remove an installed challenge package
 
+ALIASES
+  $ bitsocial challenge uninstall
+  $ bitsocial challenge rm
+  $ bitsocial challenge un
+
 EXAMPLES
   $ bitsocial challenge remove my-challenge
 
   $ bitsocial challenge remove @scope/my-challenge
 ```
 
-_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/challenge/remove.ts)_
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/challenge/remove.ts)_
+
+## `bitsocial challenge rm NAME`
+
+Remove an installed challenge package
+
+```
+USAGE
+  $ bitsocial challenge rm NAME [--pkcOptions.dataPath <value>]
+
+ARGUMENTS
+  NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path where challenges are installed
+
+DESCRIPTION
+  Remove an installed challenge package
+
+ALIASES
+  $ bitsocial challenge uninstall
+  $ bitsocial challenge rm
+  $ bitsocial challenge un
+
+EXAMPLES
+  $ bitsocial challenge remove my-challenge
+
+  $ bitsocial challenge remove @scope/my-challenge
+```
+
+## `bitsocial challenge un NAME`
+
+Remove an installed challenge package
+
+```
+USAGE
+  $ bitsocial challenge un NAME [--pkcOptions.dataPath <value>]
+
+ARGUMENTS
+  NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path where challenges are installed
+
+DESCRIPTION
+  Remove an installed challenge package
+
+ALIASES
+  $ bitsocial challenge uninstall
+  $ bitsocial challenge rm
+  $ bitsocial challenge un
+
+EXAMPLES
+  $ bitsocial challenge remove my-challenge
+
+  $ bitsocial challenge remove @scope/my-challenge
+```
+
+## `bitsocial challenge uninstall NAME`
+
+Remove an installed challenge package
+
+```
+USAGE
+  $ bitsocial challenge uninstall NAME [--pkcOptions.dataPath <value>]
+
+ARGUMENTS
+  NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path where challenges are installed
+
+DESCRIPTION
+  Remove an installed challenge package
+
+ALIASES
+  $ bitsocial challenge uninstall
+  $ bitsocial challenge rm
+  $ bitsocial challenge un
+
+EXAMPLES
+  $ bitsocial challenge remove my-challenge
+
+  $ bitsocial challenge remove @scope/my-challenge
+```
 
 ## `bitsocial community create`
 
@@ -423,7 +615,7 @@ EXAMPLES
     $ bitsocial community create --jsonFile ./create-options.json
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/create.ts)_
 
 ## `bitsocial community delete ADDRESSES`
 
@@ -448,7 +640,7 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/delete.ts)_
 
 ## `bitsocial community edit ADDRESS`
 
@@ -518,7 +710,7 @@ EXAMPLES
     $ bitsocial community edit bitsocial.bso --jsonFile ./edit-options.json
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/edit.ts)_
 
 ## `bitsocial community export [ADDRESS]`
 
@@ -559,7 +751,7 @@ EXAMPLES
   $ bitsocial community export --publicKey 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/export.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/export.ts)_
+_See code: [src/cli/commands/community/export.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/export.ts)_
 
 ## `bitsocial community get [ADDRESS]`
 
@@ -590,7 +782,7 @@ EXAMPLES
   $ bitsocial community get --publicKey 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/get.ts)_
 
 ## `bitsocial community list`
 
@@ -613,7 +805,7 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/list.ts)_
 
 ## `bitsocial community start ADDRESSES`
 
@@ -647,7 +839,7 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q) --concurrency 1
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/start.ts)_
 
 ## `bitsocial community stop ADDRESSES`
 
@@ -672,7 +864,7 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/community/stop.ts)_
 
 ## `bitsocial daemon`
 
@@ -719,7 +911,7 @@ EXAMPLES
   $ bitsocial daemon --no-allowPrivateKeyExport
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/daemon.ts)_
 
 ## `bitsocial help [COMMAND]`
 
@@ -785,7 +977,7 @@ EXAMPLES
   $ bitsocial logs --stdout -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/logs.ts)_
 
 ## `bitsocial update check`
 
@@ -802,7 +994,7 @@ EXAMPLES
   $ bitsocial update check
 ```
 
-_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/update/check.ts)_
+_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/update/check.ts)_
 
 ## `bitsocial update install [VERSION]`
 
@@ -834,7 +1026,7 @@ EXAMPLES
   $ bitsocial update install --no-restart-daemons
 ```
 
-_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/update/install.ts)_
+_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/update/install.ts)_
 
 ## `bitsocial update versions`
 
@@ -856,7 +1048,7 @@ EXAMPLES
   $ bitsocial update versions --limit 5
 ```
 
-_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.65/src/cli/commands/update/versions.ts)_
+_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.66/src/cli/commands/update/versions.ts)_
 <!-- commandsstop -->
 
 ## Contribution
