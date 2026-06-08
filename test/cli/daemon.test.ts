@@ -389,7 +389,7 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
     // without running exit hooks (asyncExitHook/process.on("exit")), so the daemon has no
     // opportunity to clean up kubo. On Unix, SIGTERM is caught by the exit hook which runs
     // killKuboProcess(). The normal user path (Ctrl+C/SIGINT) works on all platforms.
-    it.skipIf(process.platform === "win32")("stops kubo when daemon exits during a restart cycle", { timeout: 60000 }, async () => {
+    it.skipIf(process.platform === "win32")("stops kubo when daemon exits during a restart cycle", { timeout: 120000 }, async () => {
         const previousDelay = process.env["PKC_CLI_TEST_IPFS_READY_DELAY_MS"];
         process.env["PKC_CLI_TEST_IPFS_READY_DELAY_MS"] = "5000";
 
@@ -404,9 +404,33 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
             );
             expect(typeof daemonProcess.pid).toBe("number");
 
+            // Diagnostics for the flaky-on-CI failures (issue #70/#77): the daemon's DEBUG output is
+            // redirected to its log files (not stderr), so dump those — they show which kubo pids were
+            // spawned, restarted and killed, and crucially the timing. Without this the CI log only
+            // contains the bare assertion. Fired on BOTH precondition failures below.
+            const dumpDiagnostics = async (reason: string) => {
+                const proc = daemonProcess!;
+                const tail = (text: string | undefined, lines: number) => (text ?? "").split("\n").slice(-lines).join("\n");
+                console.log(`[restart-cleanup diagnostics] ${reason}`);
+                console.log(`[restart-cleanup diagnostics] daemon exitCode=${proc.exitCode} signalCode=${proc.signalCode}`);
+                console.log(`[restart-cleanup diagnostics] daemon stdout tail:\n${tail(proc.capturedStdout, 40)}`);
+                console.log(`[restart-cleanup diagnostics] daemon stderr tail:\n${tail(proc.capturedStderr, 60)}`);
+                for (const logFile of await fsPromise.readdir(cleanupLogDir).catch(() => [] as string[])) {
+                    const content = await fsPromise.readFile(path.join(cleanupLogDir, logFile), "utf-8").catch(() => "");
+                    console.log(`[restart-cleanup diagnostics] log file ${logFile} tail:\n${tail(content, 250)}`);
+                }
+            };
+
             const shutdownRes = await fetch(`${cleanupKuboApiUrl}/shutdown`, { method: "POST" });
             expect(shutdownRes.status).toBe(200);
 
+            // Setup precondition (not the assertion under test): after /shutdown the daemon must
+            // auto-restart kubo before we can verify it dies on SIGTERM. The detect window must absorb
+            // the injected PKC_CLI_TEST_IPFS_READY_DELAY_MS (5s) plus restart under CI contention —
+            // test files run in parallel forks (fileParallelism) and a 2-vCPU ubuntu runner spawns many
+            // kubo nodes concurrently, so restart that lands in ~13s locally was observed taking >20s on
+            // CI (the old window). Widened to 45s; the test timeout was raised to 120s to match. If it
+            // still fails, dumpDiagnostics() prints the daemon's kubo restart timeline (issue #77).
             const kuboRestarted = await waitForCondition(async () => {
                 try {
                     const res = await fetch(`${cleanupKuboApiUrl}/bitswap/stat`, { method: "POST" });
@@ -414,7 +438,8 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
                 } catch {
                     return false;
                 }
-            }, 20000, 500);
+            }, 45000, 500);
+            if (!kuboRestarted) await dumpDiagnostics(`kubo did not come back up on ${cleanupKuboApiUrl} within the restart window`);
             expect(kuboRestarted).toBe(true);
 
             const killed = daemonProcess.kill();
@@ -433,21 +458,7 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
                     return true;
                 }
             }, 10000, 500);
-            if (!kuboStoppedAfterKill) {
-                // Diagnostics for the flaky-on-CI failure (issue #70): the daemon's DEBUG output is
-                // redirected to its log files (not stderr), so dump those — they show which kubo
-                // pids were spawned, restarted and killed. Without this the CI log only contains
-                // the bare assertion.
-                const tail = (text: string | undefined, lines: number) => (text ?? "").split("\n").slice(-lines).join("\n");
-                console.log(`[restart-cleanup diagnostics] kubo still responding on ${cleanupKuboApiUrl} after daemon exit`);
-                console.log(`[restart-cleanup diagnostics] daemon exitCode=${daemonProcess.exitCode} signalCode=${daemonProcess.signalCode}`);
-                console.log(`[restart-cleanup diagnostics] daemon stdout tail:\n${tail(daemonProcess.capturedStdout, 40)}`);
-                console.log(`[restart-cleanup diagnostics] daemon stderr tail:\n${tail(daemonProcess.capturedStderr, 60)}`);
-                for (const logFile of await fsPromise.readdir(cleanupLogDir).catch(() => [] as string[])) {
-                    const content = await fsPromise.readFile(path.join(cleanupLogDir, logFile), "utf-8").catch(() => "");
-                    console.log(`[restart-cleanup diagnostics] log file ${logFile} tail:\n${tail(content, 250)}`);
-                }
-            }
+            if (!kuboStoppedAfterKill) await dumpDiagnostics(`kubo still responding on ${cleanupKuboApiUrl} after daemon exit`);
             expect(kuboStoppedAfterKill).toBe(true);
         } finally {
             if (daemonProcess) await stopPkcDaemon(daemonProcess);
