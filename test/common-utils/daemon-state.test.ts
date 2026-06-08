@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs/promises";
 import path from "path";
+import { spawn, type ChildProcess } from "child_process";
+import { once } from "events";
 import { directory as randomDirectory } from "tempy";
+import defaults from "../../dist/common-utils/defaults.js";
 
 // We test the functions by importing them, but they use a hardcoded DAEMON_STATES_DIR.
 // To isolate tests, we test the logic directly with a custom dir via the module internals.
@@ -110,6 +113,83 @@ describe("daemon-state", () => {
 
             const alive = await getAliveDaemonStates();
             expect(alive.find((s) => s.pid === myPid)).toBeDefined();
+        });
+    });
+
+    // Regression test for https://github.com/bitsocialnet/bitsocial-cli/issues/66
+    // A daemon running inside a Docker container (PID 8 in the container's namespace) wrote its
+    // state file into the bind-mounted data dir. The container died without graceful shutdown,
+    // and on the host PID 8 belongs to a kernel thread — an alive but unrelated process. The
+    // bare `process.kill(pid, 0)` liveness check passed, so `update install` SIGINT'd the
+    // unrelated process and restarted the daemon twice on the same port.
+    describe("getAliveDaemonStates — PID reused by an unrelated process", () => {
+        const DAEMON_STATES_DIR = path.join(defaults.PKC_DATA_PATH, ".daemon_states");
+        let child: ChildProcess | undefined;
+
+        afterEach(() => {
+            child?.kill("SIGKILL");
+            child = undefined;
+        });
+
+        it("should prune a stale state file whose PID now belongs to a process that is not a bitsocial daemon", async () => {
+            // Stand-in for the kernel thread: an alive process that is not a bitsocial daemon
+            // and did not write the state file. Wait for 'spawn' so the child has exec'd and
+            // /proc/<pid>/cmdline shows `sleep`, not the forked copy of this test process.
+            child = spawn("sleep", ["120"]);
+            await once(child, "spawn");
+            const reusedPid = child.pid;
+            expect(reusedPid).toBeDefined();
+            createdPids.push(reusedPid!);
+
+            // Write the state file raw, byte-for-byte like the dead daemon left it on prod
+            // (legacy format — written by an old CLI version, before any identity fields).
+            await fs.mkdir(DAEMON_STATES_DIR, { recursive: true });
+            await fs.writeFile(
+                path.join(DAEMON_STATES_DIR, `${reusedPid}-daemon.state`),
+                JSON.stringify({ pid: reusedPid, startedAt: "2026-05-21T04:01:53.773Z", argv: [], pkcRpcUrl: "ws://localhost:9138/" }, null, 2)
+            );
+
+            const alive = await getAliveDaemonStates();
+            expect(alive.find((s) => s.pid === reusedPid)).toBeUndefined();
+
+            // The stale file must also be deleted from disk
+            const all = await readAllDaemonStates();
+            expect(all.find((s) => s.pid === reusedPid)).toBeUndefined();
+        });
+
+        it("should prune a state file whose recorded procStartTime does not match the process now under that PID", async () => {
+            const myPid = process.pid;
+            createdPids.push(myPid);
+
+            // Alive PID, but the recorded start time belongs to a process that no longer exists
+            await fs.mkdir(DAEMON_STATES_DIR, { recursive: true });
+            await fs.writeFile(
+                path.join(DAEMON_STATES_DIR, `${myPid}-daemon.state`),
+                JSON.stringify({ pid: myPid, startedAt: new Date().toISOString(), argv: [], pkcRpcUrl: "ws://localhost:9138/", procStartTime: "0" }, null, 2)
+            );
+
+            const alive = await getAliveDaemonStates();
+            expect(alive.find((s) => s.pid === myPid)).toBeUndefined();
+        });
+
+        it("should keep a legacy state file (no procStartTime) when the PID is a real bitsocial daemon process", async () => {
+            // Stand-in for a daemon started by an old CLI version: an alive process whose
+            // command line references bitsocial. The compound command (`; sleep 0`) stops bash
+            // from exec-replacing itself with `sleep`, which would drop the marker from cmdline.
+            child = spawn("bash", ["-c", "sleep 120; sleep 0", "bitsocial-daemon-legacy-test"]);
+            await once(child, "spawn");
+            const daemonPid = child.pid;
+            expect(daemonPid).toBeDefined();
+            createdPids.push(daemonPid!);
+
+            await fs.mkdir(DAEMON_STATES_DIR, { recursive: true });
+            await fs.writeFile(
+                path.join(DAEMON_STATES_DIR, `${daemonPid}-daemon.state`),
+                JSON.stringify({ pid: daemonPid, startedAt: new Date().toISOString(), argv: [], pkcRpcUrl: "ws://localhost:9138/" }, null, 2)
+            );
+
+            const alive = await getAliveDaemonStates();
+            expect(alive.find((s) => s.pid === daemonPid)).toBeDefined();
         });
     });
 
