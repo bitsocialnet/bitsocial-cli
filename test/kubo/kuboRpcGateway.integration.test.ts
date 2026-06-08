@@ -176,20 +176,42 @@ describe("kubo RPC + gateway integration", { timeout: 120_000 }, () => {
     let ipfsRepoPath: string;
 
     beforeAll(async () => {
-        const dataPath = tempDirectory();
-        ipfsRepoPath = path.join(dataPath, "ipfs-repo");
-        process.env.IPFS_PATH = ipfsRepoPath;
+        // kubo binds the API/gateway ports itself, so there's an unavoidable window between
+        // getAvailablePort() closing its probe socket and kubo binding the port where another
+        // process can claim it. The collision surfaces either as a pre-spawn port check throw
+        // ("...is already in use.") or as kubo losing the gateway bind on startup and exiting
+        // prematurely ("serveHTTPGateway: ... address already in use"). Both reject the awaited
+        // startKuboNode() promise with a message containing "already in use", so retry on that
+        // with a fresh repo + fresh ports. Anything else is a real failure and is re-thrown.
+        const maxAttempts = 4;
+        let lastError: unknown;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const dataPath = tempDirectory();
+            ipfsRepoPath = path.join(dataPath, "ipfs-repo");
+            process.env.IPFS_PATH = ipfsRepoPath;
 
-        const apiPort = await getAvailablePort();
-        const gatewayPort = await getAvailablePort();
-        apiUrl = new URL(`http://127.0.0.1:${apiPort}`);
-        gatewayUrl = new URL(`http://127.0.0.1:${gatewayPort}`);
+            const apiPort = await getAvailablePort();
+            const gatewayPort = await getAvailablePort();
+            apiUrl = new URL(`http://127.0.0.1:${apiPort}`);
+            gatewayUrl = new URL(`http://127.0.0.1:${gatewayPort}`);
 
-        await preInitKuboWithEphemeralSwarm(ipfsRepoPath, apiUrl, gatewayUrl);
+            await preInitKuboWithEphemeralSwarm(ipfsRepoPath, apiUrl, gatewayUrl);
 
-        kuboProcess = await startKuboNode(apiUrl, gatewayUrl, dataPath);
-
-        await waitForOkResponse(() => fetch(new URL("/api/v0/version", apiUrl), { method: "POST" }));
+            try {
+                kuboProcess = await startKuboNode(apiUrl, gatewayUrl, dataPath);
+                await waitForOkResponse(() => fetch(new URL("/api/v0/version", apiUrl), { method: "POST" }));
+                return;
+            } catch (error) {
+                lastError = error;
+                const message = error instanceof Error ? error.message : String(error);
+                // On rejection startKuboNode never leaks a live process (it either never spawned
+                // or already exited), so there's nothing to kill before the next attempt.
+                kuboProcess = undefined;
+                if (!/already in use/i.test(message) || attempt === maxAttempts) throw error;
+            }
+        }
+        // Unreachable: the loop either returns on success or throws. Keeps lastError referenced.
+        throw lastError;
     });
 
     afterAll(async () => {
