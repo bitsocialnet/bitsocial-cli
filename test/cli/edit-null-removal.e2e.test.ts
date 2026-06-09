@@ -7,20 +7,18 @@ import WebSocket from "ws";
 import {
     type ManagedChildProcess,
     stopPkcDaemon,
-    startPkcDaemon,
+    startPkcDaemonWithDynamicPorts,
     waitForCondition,
     waitForWebSocketOpen,
     waitForPortFree
 } from "../helpers/daemon-helpers.js";
 dns.setDefaultResultOrder("ipv4first");
 
-// --- Port allocation (unique to this test file) ---
-const RPC_PORT = 9638;
-const KUBO_API_PORT = 50309;
-const GATEWAY_PORT = 6803;
-const rpcWsUrl = `ws://localhost:${RPC_PORT}`;
-const kuboApiUrl = `http://0.0.0.0:${KUBO_API_PORT}/api/v0`;
-const gatewayUrl = `http://0.0.0.0:${GATEWAY_PORT}`;
+// Ports/URLs are allocated dynamically per run and assigned in beforeAll (issue #87).
+let RPC_PORT: number;
+let KUBO_API_PORT: number;
+let GATEWAY_PORT: number;
+let rpcWsUrl: string;
 
 const runBitsocialCommand = (
     args: string[],
@@ -67,10 +65,9 @@ describe("community edit null removal (real pkc instance)", () => {
     let communityAddress: string;
 
     beforeAll(async () => {
-        daemonProcess = await startPkcDaemon(
-            ["--pkcRpcUrl", rpcWsUrl],
-            { KUBO_RPC_URL: kuboApiUrl, IPFS_GATEWAY_URL: gatewayUrl }
-        );
+        const daemon = await startPkcDaemonWithDynamicPorts((e) => ["--pkcRpcUrl", e.rpcWsUrl]);
+        daemonProcess = daemon.daemonProcess;
+        ({ rpcPort: RPC_PORT, kuboPort: KUBO_API_PORT, gatewayPort: GATEWAY_PORT, rpcWsUrl } = daemon);
 
         await waitForCondition(async () => {
             try {

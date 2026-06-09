@@ -22,15 +22,29 @@ const EPHEMERAL_SWARM_ADDRESSES = [
 // then overrides Swarm to ephemeral addresses. When the bitsocial daemon later
 // runs `ipfs init` against this dir it'll bail with "configuration file already
 // exists", skip mergeCliDefaultsIntoIpfsConfig, and spawn kubo with our Swarm.
+//
+// Idempotent: if a config already exists (e.g. a retry reusing a seeded dataPath
+// after a port-bind race), skip `ipfs init`/profile apply but re-apply the API,
+// Gateway and Swarm addresses so the freshly allocated ports take effect. This lets
+// startPkcDaemonWithDynamicPorts retry with new ports without `ipfs init` throwing
+// "ipfs configuration file already exists!".
 export const preInitKuboWithEphemeralSwarm = async (ipfsDataPath: string, apiUrl: URL, gatewayUrl: URL) => {
     await fs.mkdir(ipfsDataPath, { recursive: true });
     const kuboBinaryPath = await resolveKuboBinary();
     const env = { ...process.env, IPFS_PATH: ipfsDataPath };
-
-    await execFileAsync(kuboBinaryPath, ["init"], { env });
-    await execFileAsync(kuboBinaryPath, ["config", "profile", "apply", "server"], { env });
-
     const configPath = path.join(ipfsDataPath, "config");
+
+    const configExists = await fs
+        .access(configPath)
+        .then(() => true)
+        .catch(() => false);
+
+    if (!configExists) {
+        await execFileAsync(kuboBinaryPath, ["init"], { env });
+        await execFileAsync(kuboBinaryPath, ["config", "profile", "apply", "server"], { env });
+    }
+
+    // Always (re-)apply API/Gateway addresses for the requested ports, then pin Swarm ephemeral.
     await mergeCliDefaultsIntoIpfsConfig(() => {}, configPath, apiUrl, gatewayUrl);
 
     const config = JSON.parse(await fs.readFile(configPath, "utf-8"));

@@ -33,20 +33,15 @@ import fs from "fs/promises";
 import path from "path";
 import {
     stopPkcDaemon,
-    startPkcDaemon,
+    startPkcDaemonWithDynamicPorts,
     ensureKuboNodeStopped,
     waitForKuboReady,
     type ManagedChildProcess
 } from "../helpers/daemon-helpers.js";
 
-// Ports unique to this file (avoid collisions with other test files and external processes).
-const RPC_PORT = 9468;
-const KUBO_PORT = 50121;
-const GATEWAY_PORT = 6581;
-const RPC_URL = `ws://localhost:${RPC_PORT}`;
-const KUBO_URL = `http://0.0.0.0:${KUBO_PORT}/api/v0`;
-const KUBO_API_URL = `http://localhost:${KUBO_PORT}/api/v0`;
-const GATEWAY_URL = `http://0.0.0.0:${GATEWAY_PORT}`;
+// Ports are allocated dynamically per test (issue #87): the kubo API port this file used to pin
+// (50121) fell in macOS's ephemeral range, so under fileParallelism it could be grabbed by another
+// test file's outbound socket and the daemon's kubo bind would intermittently fail.
 
 const CLI_VERSION = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf-8")).version as string;
 
@@ -72,6 +67,7 @@ const runUpdateInstall = (env: Record<string, string>): Promise<{ exitCode: numb
 describe("bitsocial update install restart race (issue #70)", async () => {
     let daemonA: ManagedChildProcess | undefined;
     let restartedPidFile: string | undefined;
+    let kuboApiUrl: string | undefined;
 
     afterEach(async () => {
         if (daemonA) await stopPkcDaemon(daemonA);
@@ -91,7 +87,8 @@ describe("bitsocial update install restart race (issue #70)", async () => {
             }
         }
         restartedPidFile = undefined;
-        await ensureKuboNodeStopped(KUBO_API_URL);
+        if (kuboApiUrl) await ensureKuboNodeStopped(kuboApiUrl);
+        kuboApiUrl = undefined;
     });
 
     it.skipIf(process.platform === "win32")(
@@ -138,29 +135,36 @@ describe("bitsocial update install restart race (issue #70)", async () => {
             );
             await fs.chmod(shim, 0o755);
 
-            const sharedEnv = {
+            const isolatedEnv = {
                 HOME: isolatedHome,
-                XDG_DATA_HOME: path.join(isolatedHome, ".local", "share"),
-                KUBO_RPC_URL: KUBO_URL,
-                IPFS_GATEWAY_URL: GATEWAY_URL
+                XDG_DATA_HOME: path.join(isolatedHome, ".local", "share")
             };
 
-            await ensureKuboNodeStopped(KUBO_API_URL);
-
             // Start daemon A — a real daemon with a real kubo, writing its state file into the
-            // isolated home so update install discovers only this daemon.
-            daemonA = await startPkcDaemon(["--pkcRpcUrl", RPC_URL], {
-                ...sharedEnv,
-                PKC_CLI_TEST_KUBO_SHUTDOWN_DELAY_MS: String(KUBO_SHUTDOWN_DELAY_MS)
-            });
+            // isolated home so update install discovers only this daemon. Dynamic ports + retry guard
+            // the macOS ephemeral-range bind race (issue #87); the update install restart below reuses
+            // the same KUBO_RPC_URL so the shim's port check observes the right kubo API port.
+            const daemon = await startPkcDaemonWithDynamicPorts(
+                (e) => ["--pkcRpcUrl", e.rpcWsUrl],
+                (e) => ({
+                    ...isolatedEnv,
+                    KUBO_RPC_URL: e.kuboRpcUrl,
+                    IPFS_GATEWAY_URL: e.gatewayUrl,
+                    PKC_CLI_TEST_KUBO_SHUTDOWN_DELAY_MS: String(KUBO_SHUTDOWN_DELAY_MS)
+                })
+            );
+            daemonA = daemon.daemonProcess;
+            kuboApiUrl = daemon.kuboApiUrl;
             expect(typeof daemonA.pid).toBe("number");
-            expect(await waitForKuboReady(KUBO_API_URL, 45000)).toBe(true);
+            expect(await waitForKuboReady(kuboApiUrl, 45000)).toBe(true);
 
             // Run the real `bitsocial update install <currentVersion>`: same version => skips npm,
             // but runs the full stop + _restartDaemons path. The shim (first on PATH) is what it
             // spawns for the restart.
             const result = await runUpdateInstall({
-                ...sharedEnv,
+                ...isolatedEnv,
+                KUBO_RPC_URL: daemon.kuboRpcUrl,
+                IPFS_GATEWAY_URL: daemon.gatewayUrl,
                 PATH: `${tmpBin}:${process.env.PATH}`,
                 PKC_CLI_TEST_RESTART_MARKER: markerFile
             });

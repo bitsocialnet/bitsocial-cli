@@ -8,20 +8,18 @@ import WebSocket from "ws";
 import {
     type ManagedChildProcess,
     stopPkcDaemon,
-    startPkcDaemon,
+    startPkcDaemonWithDynamicPorts,
     waitForCondition,
     waitForWebSocketOpen,
     waitForPortFree
 } from "../helpers/daemon-helpers.js";
 dns.setDefaultResultOrder("ipv4first");
 
-// --- Port allocation (unique to this test file) ---
-const RPC_PORT = 9538;
-const KUBO_API_PORT = 50209;
-const GATEWAY_PORT = 6703;
-const rpcWsUrl = `ws://localhost:${RPC_PORT}`;
-const kuboApiUrl = `http://0.0.0.0:${KUBO_API_PORT}/api/v0`;
-const gatewayUrl = `http://0.0.0.0:${GATEWAY_PORT}`;
+// Ports/URLs are allocated dynamically per run and assigned in beforeAll (issue #87).
+let RPC_PORT: number;
+let KUBO_API_PORT: number;
+let GATEWAY_PORT: number;
+let rpcWsUrl: string;
 
 // Generic subprocess runner with timeout
 const runBitsocialCommand = (
@@ -89,10 +87,9 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         logDir = path.join(stateHome, "bitsocial");
         await fsPromise.mkdir(logDir, { recursive: true });
 
-        daemonProcess = await startPkcDaemon(
-            ["--logPath", logDir, "--pkcRpcUrl", rpcWsUrl],
-            { KUBO_RPC_URL: kuboApiUrl, IPFS_GATEWAY_URL: gatewayUrl }
-        );
+        const daemon = await startPkcDaemonWithDynamicPorts((e) => ["--logPath", logDir, "--pkcRpcUrl", e.rpcWsUrl]);
+        daemonProcess = daemon.daemonProcess;
+        ({ rpcPort: RPC_PORT, kuboPort: KUBO_API_PORT, gatewayPort: GATEWAY_PORT, rpcWsUrl } = daemon);
 
         // Wait for log file to appear
         await waitForCondition(async () => {

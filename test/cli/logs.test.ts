@@ -7,18 +7,13 @@ import dns from "node:dns";
 import {
     type ManagedChildProcess,
     stopPkcDaemon,
-    startPkcDaemon,
+    startPkcDaemonWithDynamicPorts,
     waitForCondition
 } from "../helpers/daemon-helpers.js";
 dns.setDefaultResultOrder("ipv4first");
 
-// --- Port allocation (unique to this test file) ---
-const RPC_PORT = 9438;
-const KUBO_API_PORT = 50129;
-const GATEWAY_PORT = 6583;
-const rpcWsUrl = `ws://localhost:${RPC_PORT}`;
-const kuboApiUrl = `http://0.0.0.0:${KUBO_API_PORT}/api/v0`;
-const gatewayUrl = `http://0.0.0.0:${GATEWAY_PORT}`;
+// Ports/URLs are allocated dynamically per run and assigned in beforeAll (issue #87).
+let rpcWsUrl: string;
 
 const createLogDir = async () => {
     const logDir = randomDirectory();
@@ -497,10 +492,9 @@ describe("bitsocial logs (live daemon tests)", async () => {
 
     beforeAll(async () => {
         ({ logDir } = await createLogDir());
-        daemonProcess = await startPkcDaemon(
-            ["--logPath", logDir, "--pkcRpcUrl", rpcWsUrl],
-            { KUBO_RPC_URL: kuboApiUrl, IPFS_GATEWAY_URL: gatewayUrl }
-        );
+        const daemon = await startPkcDaemonWithDynamicPorts((e) => ["--logPath", logDir, "--pkcRpcUrl", e.rpcWsUrl]);
+        daemonProcess = daemon.daemonProcess;
+        rpcWsUrl = daemon.rpcWsUrl;
         // Wait for log file to be written
         await waitForCondition(async () => {
             const files = await fsPromise.readdir(logDir);

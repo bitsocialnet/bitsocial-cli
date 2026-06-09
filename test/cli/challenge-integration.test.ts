@@ -9,7 +9,7 @@ import {
     type ManagedChildProcess,
     stopPkcDaemon,
     waitForCondition,
-    startPkcDaemon,
+    startPkcDaemonWithDynamicPorts,
     waitForKuboReady
 } from "../helpers/daemon-helpers.js";
 
@@ -17,13 +17,10 @@ dns.setDefaultResultOrder("ipv4first");
 
 type PKCInstance = Awaited<ReturnType<typeof PKC>>;
 
-// --- Port allocation (unique to this test file) ---
-const RPC_PORT = 59138;
-const KUBO_API_PORT = 50039;
-const GATEWAY_PORT = 6493;
-const rpcWsUrl = `ws://localhost:${RPC_PORT}`;
-const kuboApiUrl = `http://0.0.0.0:${KUBO_API_PORT}/api/v0`;
-const gatewayUrl = `http://0.0.0.0:${GATEWAY_PORT}`;
+// Ports/URLs are allocated dynamically per run and assigned in beforeAll (issue #87).
+let RPC_PORT: number;
+let KUBO_API_PORT: number;
+let rpcWsUrl: string;
 
 // --- Helpers specific to this test file ---
 
@@ -167,11 +164,12 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
         expect(installResult.exitCode).toBe(0);
         expect(installResult.stdout).toContain("added test-challenge@1.0.0 in");
 
-        // Start daemon — it handles kubo, RPC, and webui internally
-        daemonProcess = await startPkcDaemon(
-            ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", rpcWsUrl],
-            { KUBO_RPC_URL: kuboApiUrl, IPFS_GATEWAY_URL: gatewayUrl }
-        );
+        // Start daemon — it handles kubo, RPC, and webui internally. Dynamic ports + retry guard
+        // against the macOS ephemeral-range bind race (issue #87); the seeded dataPath is reused
+        // across retries (preInitKuboWithEphemeralSwarm is idempotent).
+        const daemon = await startPkcDaemonWithDynamicPorts((e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl]);
+        daemonProcess = daemon.daemonProcess;
+        ({ rpcPort: RPC_PORT, kuboPort: KUBO_API_PORT, rpcWsUrl } = daemon);
 
         // Wait for kubo API to be fully ready (it can lag behind the "Communities in data path" message)
         const kuboReady = await waitForKuboReady(`http://localhost:${KUBO_API_PORT}/api/v0`, 30000);
