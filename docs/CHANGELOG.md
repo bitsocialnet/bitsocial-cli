@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.70 (2026-06-09)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.45 ([7a3d0a5](https://github.com/bitsocialnet/bitsocial-cli/commit/7a3d0a5))
+
 ## <small>0.19.69 (2026-06-09)</small>
 
 * fix(deps): pin undici@8 so pkc-js body-timeout polyfill covers @libp2p/http ([fc76c35](https://github.com/bitsocialnet/bitsocial-cli/commit/fc76c35)), closes [#84](https://github.com/bitsocialnet/bitsocial-cli/issues/84)
