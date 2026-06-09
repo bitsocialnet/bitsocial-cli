@@ -187,16 +187,21 @@ export default class Logs extends Command {
         let currentLogFile = latestLogFile;
 
         const existingContent = await fsPromise.readFile(currentLogFile, "utf-8");
+        // Anchor the follow offset to exactly the bytes we just read, NOT a separate
+        // fsPromise.stat() taken afterwards. A later stat is racy: any append landing between
+        // this read and the stat is skipped (position jumps past it) yet was never in the dump
+        // above, so follow mode silently drops those lines. Under load that window widens — this
+        // was the cause of the intermittent CI failure where an appended line was never surfaced
+        // (issue #77). Byte length (not string length) because position indexes bytes in the file.
+        let position = Buffer.byteLength(existingContent, "utf-8");
+        let pendingBuffer = "";
+
         const entries = this._parseLogEntries(existingContent);
         const filtered = this._filterEntries(entries, since, until);
         const streamFiltered = streamFilter ? this._filterByStream(filtered, streamFilter) : filtered;
         const tailed = this._tailEntries(streamFiltered, flags.tail);
         const initialOutput = tailed.map((e) => e.lines.join("\n")).join("\n");
         if (initialOutput) process.stdout.write(initialOutput + "\n");
-
-        const stat = await fsPromise.stat(currentLogFile);
-        let position = stat.size;
-        let pendingBuffer = "";
 
         // Watch for new data by reading directly from `position`. We intentionally do
         // NOT gate on fsPromise.stat().size — on Windows + NTFS, stat() returns a stale
