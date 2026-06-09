@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.69 (2026-06-09)</small>
+
+* fix(deps): pin undici@8 so pkc-js body-timeout polyfill covers @libp2p/http ([fc76c35](https://github.com/bitsocialnet/bitsocial-cli/commit/fc76c35)), closes [#84](https://github.com/bitsocialnet/bitsocial-cli/issues/84)
+
 ## <small>0.19.68 (2026-06-09)</small>
 
 * chore(deps): upgrade kubo 0.41.0 -> 0.42.0 (issue #80) ([5659d37](https://github.com/bitsocialnet/bitsocial-cli/commit/5659d37)), closes [#80](https://github.com/bitsocialnet/bitsocial-cli/issues/80)
