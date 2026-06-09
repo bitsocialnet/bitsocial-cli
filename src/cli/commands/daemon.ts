@@ -19,7 +19,7 @@ import { printBanner } from "../ascii-banner.js";
 import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
-import { pruneStaleStates, writeDaemonState, deleteDaemonState, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
+import { pruneStaleStates, writeDaemonState, deleteDaemonState, detectSelfSupervisor, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
 import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-utils/daemon-file-logger.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
@@ -327,13 +327,17 @@ export default class Daemon extends Command {
             // Prune stale daemon state files (dead PIDs from crashed daemons)
             await pruneStaleStates();
 
-            // Persist this daemon's PID and startup args so `bitsocial update install --restart-daemons` can stop and restart it
+            // Persist this daemon's PID and startup args so `bitsocial update install --restart-daemons` can stop and restart it.
+            // Also record the supervisor (e.g. systemd) so the updater restarts via the supervisor instead of spawning a
+            // detached daemon that would compete with it for the RPC port (issue #82).
             const daemonArgv = process.argv.slice(process.argv.indexOf("daemon") + 1);
+            const supervisor = await detectSelfSupervisor();
             await writeDaemonState({
                 pid: process.pid,
                 startedAt: new Date().toISOString(),
                 argv: daemonArgv,
-                pkcRpcUrl: pkcRpcUrl.toString()
+                pkcRpcUrl: pkcRpcUrl.toString(),
+                ...(supervisor ? { supervisor } : {})
             });
 
             // Create BSO name resolvers for .bso/.eth domain resolution

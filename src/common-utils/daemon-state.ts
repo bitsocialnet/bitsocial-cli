@@ -16,6 +16,18 @@ const DAEMON_STATES_DIR = path.join(defaults.PKC_DATA_PATH, ".daemon_states");
  */
 export const DAEMON_SHUTDOWN_TIMEOUT_MS = 120000;
 
+/**
+ * How a daemon's lifecycle is managed by an external supervisor. Recorded at startup so that
+ * `update install` restarts the daemon through its supervisor instead of spawning a detached
+ * replacement that would compete with the supervisor for the RPC port (issue #82).
+ */
+export interface DaemonSupervisor {
+    /** The supervisor managing this daemon. Only systemd is detected today. */
+    type: "systemd";
+    /** The unit that owns the daemon, e.g. "bitsocial.service". */
+    unit: string;
+}
+
 export interface DaemonState {
     pid: number;
     startedAt: string;
@@ -23,6 +35,65 @@ export interface DaemonState {
     pkcRpcUrl: string;
     /** OS-reported process start time, used to detect PID reuse. Absent in legacy state files. */
     procStartTime?: string;
+    /** External supervisor managing this daemon, if any. Absent for standalone or legacy daemons. */
+    supervisor?: DaemonSupervisor;
+}
+
+/**
+ * Parse the systemd service unit a process belongs to out of its cgroup contents, or undefined.
+ *   cgroup v2: a single line `0::/system.slice/bitsocial.service`
+ *   cgroup v1: many `id:controller:/system.slice/bitsocial.service` lines (all point at the same unit)
+ * The unit is the leaf of the cgroup path when it ends in `.service`. A user session has a `.scope`
+ * leaf (e.g. `…/session-36.scope`) — not a service — so it returns undefined (that daemon is not
+ * systemd-supervised even if it happens to live under system.slice somewhere up the tree).
+ */
+export function parseSystemdUnitFromCgroup(content: string): string | undefined {
+    for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        // hierarchy-id:controller-list:cgroup-path — the path is the last colon-separated field
+        const cgroupPath = line.slice(line.lastIndexOf(":") + 1);
+        const leaf = cgroupPath.slice(cgroupPath.lastIndexOf("/") + 1);
+        if (leaf.endsWith(".service")) return leaf;
+    }
+    return undefined;
+}
+
+/** Read the systemd unit owning `pid` (or the current process when "self") from /proc, or undefined. */
+export async function readSystemdUnit(pid: number | "self"): Promise<string | undefined> {
+    try {
+        const content = await fs.readFile(`/proc/${pid}/cgroup`, "utf-8");
+        return parseSystemdUnitFromCgroup(content);
+    } catch {
+        return undefined; // no /proc (non-Linux) or unreadable — treat as unsupervised
+    }
+}
+
+/**
+ * Detect whether THIS process was started by systemd, and under which unit. systemd sets
+ * $INVOCATION_ID for every service it spawns; the unit name comes from this process's own cgroup.
+ * `env`/`readUnit` are injectable for testing. Returns undefined when not systemd-supervised.
+ */
+export async function detectSelfSupervisor(
+    env: NodeJS.ProcessEnv = process.env,
+    readUnit: (pid: number | "self") => Promise<string | undefined> = readSystemdUnit
+): Promise<DaemonSupervisor | undefined> {
+    if (!env.INVOCATION_ID) return undefined;
+    const unit = await readUnit("self");
+    return unit ? { type: "systemd", unit } : undefined;
+}
+
+/**
+ * Resolve the supervisor for a daemon described by `state`. Prefers the `supervisor` it recorded
+ * at startup; for legacy daemons that predate that field, falls back to inferring the unit from the
+ * live process's cgroup. `readUnit` is injectable for testing.
+ */
+export async function resolveDaemonSupervisor(
+    state: DaemonState,
+    readUnit: (pid: number | "self") => Promise<string | undefined> = readSystemdUnit
+): Promise<DaemonSupervisor | undefined> {
+    if (state.supervisor) return state.supervisor;
+    const unit = await readUnit(state.pid);
+    return unit ? { type: "systemd", unit } : undefined;
 }
 
 function stateFilePath(pid: number): string {
