@@ -86,7 +86,7 @@ async function publishCommentWithChallenge(opts: {
         comment.on("challenge", async (challengeMsg: any) => {
             try {
                 challengeText = challengeMsg.challenges?.[0]?.challenge;
-                await comment.publishChallengeAnswers([challengeAnswer]);
+                await comment.publishChallengeAnswers({ challengeAnswers: [challengeAnswer] });
             } catch (err) {
                 clearTimeout(timeout);
                 reject(err);
