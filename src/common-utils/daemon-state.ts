@@ -69,31 +69,79 @@ export async function readSystemdUnit(pid: number | "self"): Promise<string | un
 }
 
 /**
+ * MainPID of a systemd unit as reported by the system manager, or undefined when it cannot be
+ * determined (systemctl missing, unit unknown, MainPID=0). `systemctl --user` units are invisible
+ * to the system manager and resolve to undefined — the daemon is then treated as unsupervised,
+ * matching the restart path, which also only drives the system manager.
+ */
+export async function readUnitMainPid(unit: string): Promise<number | undefined> {
+    try {
+        const { stdout } = await execFileAsync("systemctl", ["show", "--property=MainPID", "--value", unit]);
+        const mainPid = Number(String(stdout).trim());
+        return Number.isInteger(mainPid) && mainPid > 0 ? mainPid : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Parent PID of `pid` from /proc/<pid>/stat, or undefined. */
+export async function readParentPid(pid: number): Promise<number | undefined> {
+    try {
+        const stat = await fs.readFile(`/proc/${pid}/stat`, "utf-8");
+        // Format: `pid (comm) state ppid …` — comm may itself contain spaces or parens, so the
+        // fields are only parseable after the LAST closing paren.
+        const afterComm = stat.slice(stat.lastIndexOf(")") + 2);
+        const ppid = Number(afterComm.split(" ")[1]);
+        return Number.isInteger(ppid) && ppid > 0 ? ppid : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * Detect whether THIS process was started by systemd, and under which unit. systemd sets
- * $INVOCATION_ID for every service it spawns; the unit name comes from this process's own cgroup.
- * `env`/`readUnit` are injectable for testing. Returns undefined when not systemd-supervised.
+ * $INVOCATION_ID for every service it spawns and the unit name comes from this process's own
+ * cgroup — but BOTH are inherited by every descendant of any service (e.g. all processes inside a
+ * CI runner's agent service, issue #92), so unit membership alone is not ownership. The daemon is
+ * only systemd-supervised when it is the unit's main process (or its direct child, covering
+ * `ExecStart=/bin/sh -c …` wrappers); otherwise restarting the unit would bounce an unrelated
+ * service. `env`/`readUnit`/`getMainPid`/`self` are injectable for testing. Returns undefined when
+ * not systemd-supervised.
  */
 export async function detectSelfSupervisor(
     env: NodeJS.ProcessEnv = process.env,
-    readUnit: (pid: number | "self") => Promise<string | undefined> = readSystemdUnit
+    readUnit: (pid: number | "self") => Promise<string | undefined> = readSystemdUnit,
+    getMainPid: (unit: string) => Promise<number | undefined> = readUnitMainPid,
+    self: { pid: number; ppid: number } = { pid: process.pid, ppid: process.ppid }
 ): Promise<DaemonSupervisor | undefined> {
     if (!env.INVOCATION_ID) return undefined;
     const unit = await readUnit("self");
-    return unit ? { type: "systemd", unit } : undefined;
+    if (!unit) return undefined;
+    const mainPid = await getMainPid(unit);
+    if (mainPid === undefined || (mainPid !== self.pid && mainPid !== self.ppid)) return undefined;
+    return { type: "systemd", unit };
 }
 
 /**
  * Resolve the supervisor for a daemon described by `state`. Prefers the `supervisor` it recorded
- * at startup; for legacy daemons that predate that field, falls back to inferring the unit from the
- * live process's cgroup. `readUnit` is injectable for testing.
+ * at startup (already ownership-verified by detectSelfSupervisor); for legacy daemons that predate
+ * that field, falls back to inferring the unit from the live process's cgroup, with the same
+ * MainPID ownership check as detectSelfSupervisor (issue #92).
+ * `readUnit`/`getMainPid`/`getParentPid` are injectable for testing.
  */
 export async function resolveDaemonSupervisor(
     state: DaemonState,
-    readUnit: (pid: number | "self") => Promise<string | undefined> = readSystemdUnit
+    readUnit: (pid: number | "self") => Promise<string | undefined> = readSystemdUnit,
+    getMainPid: (unit: string) => Promise<number | undefined> = readUnitMainPid,
+    getParentPid: (pid: number) => Promise<number | undefined> = readParentPid
 ): Promise<DaemonSupervisor | undefined> {
     if (state.supervisor) return state.supervisor;
     const unit = await readUnit(state.pid);
-    return unit ? { type: "systemd", unit } : undefined;
+    if (!unit) return undefined;
+    const mainPid = await getMainPid(unit);
+    if (mainPid === undefined) return undefined;
+    if (mainPid !== state.pid && mainPid !== (await getParentPid(state.pid))) return undefined;
+    return { type: "systemd", unit };
 }
 
 function stateFilePath(pid: number): string {

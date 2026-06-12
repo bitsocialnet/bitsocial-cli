@@ -44,18 +44,37 @@ describe("parseSystemdUnitFromCgroup", () => {
 });
 
 describe("detectSelfSupervisor", () => {
+    const self = { pid: 5678, ppid: 5600 };
+
     it("returns undefined when INVOCATION_ID is absent (not started by systemd)", async () => {
-        const sup = await detectSelfSupervisor({}, async () => "bitsocial.service");
+        const sup = await detectSelfSupervisor({}, async () => "bitsocial.service", async () => self.pid, self);
         expect(sup).toBeUndefined();
     });
 
-    it("returns the systemd unit when INVOCATION_ID is set and the cgroup is a service", async () => {
-        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => "bitsocial.service");
+    it("returns the systemd unit when this process is the unit's MainPID", async () => {
+        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => "bitsocial.service", async () => self.pid, self);
+        expect(sup).toEqual({ type: "systemd", unit: "bitsocial.service" });
+    });
+
+    it("returns the systemd unit when the parent is the MainPID (ExecStart shell wrapper)", async () => {
+        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => "bitsocial.service", async () => self.ppid, self);
         expect(sup).toEqual({ type: "systemd", unit: "bitsocial.service" });
     });
 
     it("returns undefined when INVOCATION_ID is set but the cgroup is not a service", async () => {
-        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => undefined);
+        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => undefined, async () => self.pid, self);
+        expect(sup).toBeUndefined();
+    });
+
+    it("returns undefined when the unit's MainPID is an unrelated ancestor (issue #92: CI runner agent)", async () => {
+        // On GitHub Actions every process inherits $INVOCATION_ID and lives in the runner agent's
+        // service cgroup; the agent's MainPID is neither this process nor its parent.
+        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => "hosted-compute-agent.service", async () => 1234, self);
+        expect(sup).toBeUndefined();
+    });
+
+    it("returns undefined when the unit's MainPID cannot be read", async () => {
+        const sup = await detectSelfSupervisor({ INVOCATION_ID: "abc" }, async () => "bitsocial.service", async () => undefined, self);
         expect(sup).toBeUndefined();
     });
 });
@@ -71,16 +90,59 @@ describe("resolveDaemonSupervisor", () => {
         expect(sup).toEqual(recorded);
     });
 
-    it("falls back to the process cgroup for a legacy daemon (no supervisor field)", async () => {
-        const sup = await resolveDaemonSupervisor(base, async (pid) => {
-            expect(pid).toBe(base.pid);
-            return "bitsocial.service";
-        });
+    it("falls back to the process cgroup for a legacy daemon that is the unit's MainPID", async () => {
+        const sup = await resolveDaemonSupervisor(
+            base,
+            async (pid) => {
+                expect(pid).toBe(base.pid);
+                return "bitsocial.service";
+            },
+            async () => base.pid,
+            async () => undefined
+        );
         expect(sup).toEqual({ type: "systemd", unit: "bitsocial.service" });
     });
 
+    it("accepts a legacy daemon whose parent is the unit's MainPID (shell wrapper)", async () => {
+        const sup = await resolveDaemonSupervisor(
+            base,
+            async () => "bitsocial.service",
+            async () => 4000,
+            async (pid) => {
+                expect(pid).toBe(base.pid);
+                return 4000;
+            }
+        );
+        expect(sup).toEqual({ type: "systemd", unit: "bitsocial.service" });
+    });
+
+    it("returns undefined for a legacy daemon inside an unrelated ancestor service (issue #92)", async () => {
+        const sup = await resolveDaemonSupervisor(
+            base,
+            async () => "hosted-compute-agent.service",
+            async () => 1,
+            async () => 999
+        );
+        expect(sup).toBeUndefined();
+    });
+
+    it("returns undefined for a legacy daemon when the unit's MainPID cannot be read", async () => {
+        const sup = await resolveDaemonSupervisor(
+            base,
+            async () => "bitsocial.service",
+            async () => undefined,
+            async () => undefined
+        );
+        expect(sup).toBeUndefined();
+    });
+
     it("returns undefined for a legacy daemon whose cgroup is not a service", async () => {
-        const sup = await resolveDaemonSupervisor(base, async () => undefined);
+        const sup = await resolveDaemonSupervisor(
+            base,
+            async () => undefined,
+            async () => base.pid,
+            async () => undefined
+        );
         expect(sup).toBeUndefined();
     });
 });
