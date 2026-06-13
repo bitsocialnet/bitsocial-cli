@@ -254,10 +254,13 @@ export const allocateKuboEndpoints = async (): Promise<KuboEndpoints> => {
 };
 
 // startPkcDaemon rejects with either a string (subprocess exit, carrying captured stdout/stderr)
-// or an Error; the bind-race signature ("...address already in use") can surface in either.
+// or an Error; the bind-race signature can surface in either. A lost TOCTOU port race shows up two
+// ways: a raw bind failure ("...address already in use" / EADDRINUSE), OR the daemon's own pre-bind
+// guard firing first with "PKC RPC port ... became occupied before the daemon could bind it"
+// (src/cli/commands/daemon.ts). Both mean the same thing — retry with a fresh port set (issue #97).
 export const isAddressInUseError = (reason: unknown): boolean => {
     const message = typeof reason === "string" ? reason : reason instanceof Error ? reason.message : String(reason);
-    return /address already in use|EADDRINUSE/i.test(message);
+    return /address already in use|EADDRINUSE|became occupied before the daemon could bind it/i.test(message);
 };
 
 export type DynamicDaemonResult = KuboEndpoints & { daemonProcess: ManagedChildProcess };
