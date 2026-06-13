@@ -21,7 +21,9 @@ import {
     requestKuboShutdown,
     waitForWebSocketOpen,
     waitForKuboReady,
-    waitForPortFree
+    waitForPortFree,
+    withKuboBindRetry,
+    isAddressInUseError
 } from "../helpers/daemon-helpers.js";
 import { preInitKuboWithEphemeralSwarm } from "../helpers/kubo-helpers.js";
 dns.setDefaultResultOrder("ipv4first"); // to be able to resolve localhost
@@ -863,6 +865,62 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
             if (kuboApiUrl) await ensureKuboNodeStopped(kuboApiUrl);
         }
     });
+
+    it.skipIf(process.platform === "win32")(
+        "kills kubo (and prints no exit-hook termination notice) when startup fails after kubo is up",
+        { timeout: 90000 },
+        async () => {
+            // Reproduces issue #98: when the daemon throws during startup *after* kubo has spawned
+            // (the real TOCTOU RPC-port race, simulated here via PKC_CLI_TEST_FAIL_AFTER_KUBO_START),
+            // oclif's error handler calls process.exit(). process.exit() runs only synchronous exit
+            // hooks, so exit-hook would skip the async kubo cleanup — printing "SYNCHRONOUS TERMINATION
+            // NOTICE" and orphaning kubo. The daemon must instead tear kubo down itself and exit quietly.
+            const dataPath = randomDirectory();
+            // Retry on a lost kubo bind race (issue #87): the injected failure only fires once kubo is
+            // up, so if kubo's freshly-allocated ports are stolen in the TOCTOU window the daemon fails
+            // early instead — a different path. Retrying keeps the assertions below pinned to the
+            // intended path (the message check would otherwise flake on a bind race).
+            const { result, endpoints } = await withKuboBindRetry(async (e) => {
+                await preInitKuboWithEphemeralSwarm(path.join(dataPath, ".bitsocial-cli.ipfs"), new URL(e.kuboRpcUrl), new URL(e.gatewayUrl));
+                const res = await runPkcDaemonExpectFailure(["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl], {
+                    KUBO_RPC_URL: e.kuboRpcUrl,
+                    IPFS_GATEWAY_URL: e.gatewayUrl,
+                    PKC_CLI_TEST_FAIL_AFTER_KUBO_START: "1"
+                });
+                const combined = `${res.stdout}\n${res.stderr}`;
+                // The daemon resolves (doesn't reject) on any failure; throw an address-in-use error so
+                // withKuboBindRetry retries only when we lost the bind race before the injected failure.
+                if (!combined.includes("Simulated startup failure after kubo start") && isAddressInUseError(combined))
+                    throw new Error(`address already in use (retry with fresh ports): ${combined}`);
+                return res;
+            });
+
+            try {
+                // The daemon exited non-zero on the injected startup failure (after kubo was up)...
+                expect(result.exitCode).not.toBe(0);
+                const combinedOutput = `${result.stdout}\n${result.stderr}`;
+                expect(combinedOutput).toContain("Simulated startup failure after kubo start");
+                // ...without exit-hook's synchronous-termination warning (proves the async cleanup ran)...
+                expect(combinedOutput).not.toContain("SYNCHRONOUS TERMINATION NOTICE");
+                // ...and kubo was killed by the daemon's own cleanup, not orphaned.
+                const kuboStopped = await waitForCondition(
+                    async () => {
+                        try {
+                            const res = await fetch(`${endpoints.kuboApiUrl}/bitswap/stat`, { method: "POST" });
+                            return !res.ok;
+                        } catch {
+                            return true; // connection refused = stopped
+                        }
+                    },
+                    20000,
+                    500
+                );
+                expect(kuboStopped).toBe(true);
+            } finally {
+                await ensureKuboNodeStopped(endpoints.kuboApiUrl);
+            }
+        }
+    );
 });
 
 describe("bitsocial daemon DEBUG env var", () => {

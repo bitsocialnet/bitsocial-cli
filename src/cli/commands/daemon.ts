@@ -260,6 +260,13 @@ export default class Daemon extends Command {
         const { logFilePath, stdoutWrite } = await this._pipeDebugLogsToLogFile(flags.logPath, PKCLogger as PKCLoggerType);
         const log = PKCLogger("bitsocial-cli:daemon");
 
+        // Captured once the async exit hook is registered (inside the try). The startup-failure
+        // catch and the force-quit signal guard use these to run kubo/daemon cleanup and drop the
+        // hook before the process exits via process.exit() — which would otherwise skip the async
+        // hook (exit-hook's "SYNCHRONOUS TERMINATION NOTICE") and orphan kubo. (issue #98)
+        let runDaemonShutdown: (() => Promise<void>) | undefined;
+        let removeAsyncExitHook: (() => void) | undefined;
+
         try {
             // Log debug info after pipe is set up so it goes to the log file, not terminal
             const envDebug: string | undefined = process.env["_PKC_DEBUG"] || process.env["DEBUG"];
@@ -480,6 +487,13 @@ export default class Daemon extends Command {
             const createOrConnectRpc = async () => {
                 if (mainProcessExited) return;
                 if (startedOwnRpc) return;
+                // Test hook (issue #98): force a startup failure *after* keepKuboUp() has already
+                // spawned kubo, reproducing the real TOCTOU port race (createOrConnectRpc throwing
+                // once kubo is up). Verifies the daemon tears kubo down — and doesn't print
+                // exit-hook's "SYNCHRONOUS TERMINATION NOTICE" — when oclif process.exit()s on a
+                // thrown startup error, instead of orphaning kubo.
+                if (process.env["PKC_CLI_TEST_FAIL_AFTER_KUBO_START"])
+                    throw new Error("Simulated startup failure after kubo start (PKC_CLI_TEST_FAIL_AFTER_KUBO_START)");
                 // Re-check the port: the early fail-fast at startup is a few ms before this runs,
                 // so a TOCTOU race could let another process grab the port in between. If that
                 // happens we must fail rather than silently leaving the daemon without an RPC.
@@ -597,36 +611,44 @@ export default class Daemon extends Command {
                 liveKuboPids.clear();
             };
 
-            asyncExitHook(
-                async () => {
-                    if (keepKuboUpInterval) clearInterval(keepKuboUpInterval);
-                    if (mainProcessExited) return; // we already exited
-                    console.log(
-                        "\nShutting down Bitsocial daemon, it may take a few seconds to shut down all communities and the IPFS node..."
-                    );
-                    log("Received signal to exit, shutting down both kubo and pkc rpc. Please wait, it may take a few seconds");
+            const shutdownDaemon = async () => {
+                if (keepKuboUpInterval) clearInterval(keepKuboUpInterval);
+                if (mainProcessExited) return; // we already exited
+                console.log(
+                    "\nShutting down Bitsocial daemon, it may take a few seconds to shut down all communities and the IPFS node..."
+                );
+                log("Received signal to exit, shutting down both kubo and pkc rpc. Please wait, it may take a few seconds");
 
-                    mainProcessExited = true;
+                mainProcessExited = true;
 
-                    // Remove daemon state file so update install knows we're gone
-                    await deleteDaemonState(process.pid).catch(() => {});
+                // Remove daemon state file so update install knows we're gone
+                await deleteDaemonState(process.pid).catch(() => {});
 
-                    // Start killing Kubo immediately, in parallel with daemon server destroy.
-                    // This way Kubo receives SIGINT right away, even if daemonServer.destroy() hangs.
-                    const kuboKillPromise = killKuboProcess();
+                // Start killing Kubo immediately, in parallel with daemon server destroy.
+                // This way Kubo receives SIGINT right away, even if daemonServer.destroy() hangs.
+                const kuboKillPromise = killKuboProcess();
 
-                    if (daemonServer)
-                        try {
-                            await daemonServer.destroy();
-                            log("Daemon server shut down");
-                        } catch (e) {
-                            log.error("Error shutting down daemon server", e);
-                        }
+                if (daemonServer)
+                    try {
+                        await daemonServer.destroy();
+                        log("Daemon server shut down");
+                    } catch (e) {
+                        log.error("Error shutting down daemon server", e);
+                    }
 
-                    await kuboKillPromise;
-                },
+                await kuboKillPromise;
+            };
+            // Run kubo/daemon cleanup on SIGINT/SIGTERM/beforeExit. Capture the unsubscribe handle
+            // and the shutdown fn so the startup-failure catch (and the force-quit guard below) can
+            // run cleanup themselves and drop this hook: oclif calls process.exit() as it unwinds a
+            // thrown startup error, and process.exit() runs only synchronous exit hooks — exit-hook
+            // would skip this async one (printing its "SYNCHRONOUS TERMINATION NOTICE") and orphan a
+            // kubo we already spawned. (issue #98)
+            removeAsyncExitHook = asyncExitHook(
+                shutdownDaemon,
                 { wait: DAEMON_SHUTDOWN_TIMEOUT_MS } // could take two minutes to shut down
             );
+            runDaemonShutdown = shutdownDaemon;
 
             // Emergency cleanup: if the process force-exits (e.g. double Ctrl+C),
             // synchronously SIGKILL every live kubo's process group. This is a no-op if
@@ -652,6 +674,11 @@ export default class Daemon extends Command {
                     terminationSignalCount++;
                     if (terminationSignalCount >= 2) {
                         log(`Received ${signal} again during shutdown, force-quitting`);
+                        // Deliberate immediate exit: the first signal's async shutdown is still
+                        // running but the user wants out now. Drop the async exit hook first so the
+                        // imminent process.exit() doesn't trip exit-hook's "SYNCHRONOUS TERMINATION
+                        // NOTICE"; kubo is still SIGKILLed by the emergency "exit" handler. (issue #98)
+                        removeAsyncExitHook?.();
                         process.exit(signal === "SIGINT" ? 130 : 143);
                     }
                 });
@@ -717,6 +744,22 @@ export default class Daemon extends Command {
 
             stdoutWrite(`Full log: ${logFilePath}\n`);
             stdoutWrite(`Or run: bitsocial logs\n`);
+
+            // oclif's error handler calls process.exit() as it unwinds this throw, which runs only
+            // synchronous exit hooks — exit-hook would skip the async kubo/daemon cleanup (printing
+            // "SYNCHRONOUS TERMINATION NOTICE") and orphan a kubo we may have already spawned, and
+            // leave this daemon's state file behind. Run that cleanup now and drop the now-redundant
+            // hook so the process exits clean. No-ops if we failed before the hook was registered.
+            // Cap the wait with the same DAEMON_SHUTDOWN_TIMEOUT_MS the signal path gets (via the
+            // exit-hook `wait` option) so a hung daemonServer.destroy() can't swallow the original
+            // startup error forever; the unref'd timer never keeps the loop alive. (issue #98)
+            if (runDaemonShutdown)
+                await Promise.race([
+                    runDaemonShutdown().catch(() => {}),
+                    new Promise<void>((resolve) => setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS).unref())
+                ]);
+            removeAsyncExitHook?.();
+
             throw err;
         }
     }
