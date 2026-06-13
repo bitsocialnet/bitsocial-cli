@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.73 (2026-06-13)</small>
+
+* test(daemon): poll waitForKuboReady when verifying kubo is up (issue #95) ([d06787d](https://github.com/bitsocialnet/bitsocial-cli/commit/d06787d)), closes [#95](https://github.com/bitsocialnet/bitsocial-cli/issues/95)
+* test(daemon): retry the bind race when the daemon's pre-bind guard fires (issue #97) ([22093a6](https://github.com/bitsocialnet/bitsocial-cli/commit/22093a6)), closes [#97](https://github.com/bitsocialnet/bitsocial-cli/issues/97)
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.47 -> 0.0.48 (issue #96) ([091566d](https://github.com/bitsocialnet/bitsocial-cli/commit/091566d)), closes [#96](https://github.com/bitsocialnet/bitsocial-cli/issues/96)
+* fix(daemon-state): tolerate Windows EPERM/EACCES/EBUSY when pruning stale state files (issue #94) ([d341f64](https://github.com/bitsocialnet/bitsocial-cli/commit/d341f64)), closes [#94](https://github.com/bitsocialnet/bitsocial-cli/issues/94)
+* docs(community/list): note -q is much faster than the default (#76) ([c04145f](https://github.com/bitsocialnet/bitsocial-cli/commit/c04145f)), closes [#76](https://github.com/bitsocialnet/bitsocial-cli/issues/76)
+* perf(cli): enable V8 compile cache in bin/run (#90) ([ff7b40c](https://github.com/bitsocialnet/bitsocial-cli/commit/ff7b40c)), closes [#90](https://github.com/bitsocialnet/bitsocial-cli/issues/90)
+
 ## <small>0.19.72 (2026-06-12)</small>
 
 * fix(update): require MainPID ownership before treating a daemon as systemd-managed (issue #92) ([28591bd](https://github.com/bitsocialnet/bitsocial-cli/commit/28591bd)), closes [#92](https://github.com/bitsocialnet/bitsocial-cli/issues/92) [#89](https://github.com/bitsocialnet/bitsocial-cli/issues/89) [pre-#82](https://github.com/pre-/issues/82)
