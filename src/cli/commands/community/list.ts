@@ -10,7 +10,10 @@ export default class List extends BaseCommand {
     static override examples = ["bitsocial community list -q", "bitsocial community list"];
 
     static override flags = {
-        quiet: Flags.boolean({ char: "q", summary: "Only display community addresses" })
+        quiet: Flags.boolean({
+            char: "q",
+            summary: "Only display community addresses (much faster: skips the per-community 'started' lookup)"
+        })
     };
 
     async run(): Promise<void> {
