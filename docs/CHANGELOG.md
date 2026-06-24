@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.75 (2026-06-24)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.49 -> 0.0.50 (issue #101) ([43af72e](https://github.com/bitsocialnet/bitsocial-cli/commit/43af72e)), closes [#101](https://github.com/bitsocialnet/bitsocial-cli/issues/101)
+
 ## <small>0.19.74 (2026-06-24)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.48 -> 0.0.49 (issue #100) ([c1be32d](https://github.com/bitsocialnet/bitsocial-cli/commit/c1be32d)), closes [#100](https://github.com/bitsocialnet/bitsocial-cli/issues/100)
