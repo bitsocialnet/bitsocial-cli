@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.74 (2026-06-24)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.48 -> 0.0.49 (issue #100) ([c1be32d](https://github.com/bitsocialnet/bitsocial-cli/commit/c1be32d)), closes [#100](https://github.com/bitsocialnet/bitsocial-cli/issues/100)
+* fix(daemon): cap startup-failure shutdown + pin its test to the injected path (issue #98) ([bf4778e](https://github.com/bitsocialnet/bitsocial-cli/commit/bf4778e)), closes [#98](https://github.com/bitsocialnet/bitsocial-cli/issues/98) [#87](https://github.com/bitsocialnet/bitsocial-cli/issues/87)
+* fix(daemon): run async kubo cleanup before process.exit on startup failure (issue #98) ([7d94cdb](https://github.com/bitsocialnet/bitsocial-cli/commit/7d94cdb)), closes [#98](https://github.com/bitsocialnet/bitsocial-cli/issues/98) [87/#97](https://github.com/bitsocialnet/bitsocial-cli/issues/97)
+
 ## <small>0.19.73 (2026-06-13)</small>
 
 * test(daemon): poll waitForKuboReady when verifying kubo is up (issue #95) ([d06787d](https://github.com/bitsocialnet/bitsocial-cli/commit/d06787d)), closes [#95](https://github.com/bitsocialnet/bitsocial-cli/issues/95)
