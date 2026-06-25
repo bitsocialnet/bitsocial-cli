@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.78 (2026-06-25)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.51 -> 0.0.53 (issue #106) ([7d3a79e](https://github.com/bitsocialnet/bitsocial-cli/commit/7d3a79e)), closes [#106](https://github.com/bitsocialnet/bitsocial-cli/issues/106)
+* feat(routers): add routerofbitsocial.xyz and bsotracker.online to default HTTP routers (issue #105) ([b6e8d06](https://github.com/bitsocialnet/bitsocial-cli/commit/b6e8d06)), closes [#105](https://github.com/bitsocialnet/bitsocial-cli/issues/105)
+
 ## <small>0.19.77 (2026-06-25)</small>
 
 * fix(ipfs): replace deprecated --enable-namesys-pubsub flag with Ipns.UsePubsub config (issue #103) ([dc607b2](https://github.com/bitsocialnet/bitsocial-cli/commit/dc607b2)), closes [#103](https://github.com/bitsocialnet/bitsocial-cli/issues/103)
