@@ -72,6 +72,19 @@ export async function mergeCliDefaultsIntoIpfsConfig(log: any, ipfsConfigPath: s
     log("Applied bitsocial CLI defaults to freshly initialized IPFS config.", ipfsConfigPath);
 }
 
+// Kubo deprecated the `--enable-namesys-pubsub` daemon flag in favor of the `Ipns.UsePubsub`
+// config option. We previously passed that flag on every daemon start, so to preserve behavior
+// we ensure `Ipns.UsePubsub: true` is set on every start — including pre-existing repos whose
+// config we otherwise leave untouched. Only the single key is written; all other user settings
+// are preserved, and the file is left alone if it is already enabled.
+export async function ensureIpnsPubsubEnabled(log: any, ipfsConfigPath: string) {
+    const config = JSON.parse((await fsPromises.readFile(ipfsConfigPath)).toString());
+    if (config?.Ipns?.UsePubsub === true) return;
+    config.Ipns = { ...(config.Ipns ?? {}), UsePubsub: true };
+    await fsPromises.writeFile(ipfsConfigPath, JSON.stringify(config, null, 4));
+    log("Enabled Ipns.UsePubsub in IPFS config (replaces deprecated --enable-namesys-pubsub flag).", ipfsConfigPath);
+}
+
 // use this custom function instead of spawnSync for better logging
 // also spawnSync might have been causing crash on start on windows
 
@@ -246,6 +259,9 @@ export async function startKuboNode(
         log("IPFS config already exists; skipping config overrides to preserve user changes.");
     }
 
+    // Replaces the deprecated `--enable-namesys-pubsub` daemon flag; must run for existing repos too.
+    await ensureIpnsPubsubEnabled(log, ipfsConfigPath);
+
     try {
         await _spawnAsync(log, kuboExePath, ["repo", "migrate"], { env, hideWindows: true });
         log("Ensured IPFS repository is migrated to the latest supported version.");
@@ -259,7 +275,7 @@ export async function startKuboNode(
     // Spawn phase: the promise only wraps the event-driven wait for kubo's "Daemon is ready",
     // so every settle path goes through resolve/reject.
     return new Promise((resolve, reject) => {
-        const daemonArgs = ["--enable-namesys-pubsub", "--migrate"];
+        const daemonArgs = ["--migrate"];
 
         const kuboProcess: ChildProcessWithoutNullStreams = spawn(kuboExePath, ["daemon", ...daemonArgs], {
             env,

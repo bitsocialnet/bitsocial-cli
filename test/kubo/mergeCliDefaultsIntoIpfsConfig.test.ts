@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { file as tempFile } from "tempy";
 import * as fs from "fs/promises";
 import path from "path";
-import { mergeCliDefaultsIntoIpfsConfig } from "../../src/ipfs/startIpfs.js";
+import { mergeCliDefaultsIntoIpfsConfig, ensureIpnsPubsubEnabled } from "../../src/ipfs/startIpfs.js";
 
 const noopLog = () => {
     /* no-op for tests */
@@ -92,5 +92,38 @@ describe("mergeCliDefaultsIntoIpfsConfig", () => {
 
         expect(mergedConfig.Gateway.PublicGateways["custom.host"]).toMatchObject({ UseSubdomains: false });
         expect(mergedConfig.Gateway.PublicGateways["127.0.0.1"]).toMatchObject({ UseSubdomains: false });
+    });
+});
+
+describe("ensureIpnsPubsubEnabled", () => {
+    it("sets Ipns.UsePubsub on a config that has no Ipns section", async () => {
+        const configPath = await writeConfigToTempFile({ Addresses: { Gateway: "/ip4/0.0.0.0/tcp/8080" } });
+
+        await ensureIpnsPubsubEnabled(noopLog, configPath);
+
+        const updated = JSON.parse(await fs.readFile(configPath, "utf-8"));
+        expect(updated.Ipns.UsePubsub).toBe(true);
+        // unrelated config is preserved
+        expect(updated.Addresses.Gateway).toBe("/ip4/0.0.0.0/tcp/8080");
+    });
+
+    it("preserves existing Ipns settings while enabling UsePubsub", async () => {
+        const configPath = await writeConfigToTempFile({ Ipns: { RepublishPeriod: "1h", UsePubsub: false } });
+
+        await ensureIpnsPubsubEnabled(noopLog, configPath);
+
+        const updated = JSON.parse(await fs.readFile(configPath, "utf-8"));
+        expect(updated.Ipns.UsePubsub).toBe(true);
+        expect(updated.Ipns.RepublishPeriod).toBe("1h");
+    });
+
+    it("is a no-op (no rewrite) when already enabled", async () => {
+        const configPath = await writeConfigToTempFile({ Ipns: { UsePubsub: true } });
+        const before = await fs.readFile(configPath, "utf-8");
+
+        await ensureIpnsPubsubEnabled(noopLog, configPath);
+
+        const after = await fs.readFile(configPath, "utf-8");
+        expect(after).toBe(before);
     });
 });
