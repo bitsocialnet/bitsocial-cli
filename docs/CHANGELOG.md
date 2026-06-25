@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.77 (2026-06-25)</small>
+
+* fix(ipfs): replace deprecated --enable-namesys-pubsub flag with Ipns.UsePubsub config (issue #103) ([dc607b2](https://github.com/bitsocialnet/bitsocial-cli/commit/dc607b2)), closes [#103](https://github.com/bitsocialnet/bitsocial-cli/issues/103)
+
 ## <small>0.19.76 (2026-06-25)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.50 -> 0.0.51 (issue #102) ([5dbffc5](https://github.com/bitsocialnet/bitsocial-cli/commit/5dbffc5)), closes [#102](https://github.com/bitsocialnet/bitsocial-cli/issues/102)
