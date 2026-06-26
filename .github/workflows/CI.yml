@@ -63,7 +63,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TARBALL=$(npm pack | tail -1)
-          npm install -g "./$TARBALL"
+          # Retry: the kubo postinstall downloads its binary from dist.ipfs.tech,
+          # which intermittently returns 5xx and aborts the install with no retry
+          # of its own (issue #110).
+          for attempt in 1 2 3; do
+            npm install -g "./$TARBALL" && break
+            echo "global install attempt $attempt failed; retrying in 15s..."
+            sleep 15
+          done
           bitsocial --version
 
       # disable hosts we shouldn't use (Linux only)
