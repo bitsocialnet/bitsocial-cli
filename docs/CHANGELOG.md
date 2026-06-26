@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.80 (2026-06-26)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.55 -> 0.0.57 (issue #109) ([1f11cb2](https://github.com/bitsocialnet/bitsocial-cli/commit/1f11cb2)), closes [#109](https://github.com/bitsocialnet/bitsocial-cli/issues/109)
+* chore(deps): upgrade 5chan web UI v0.9.4 -> v0.9.7 ([0d56889](https://github.com/bitsocialnet/bitsocial-cli/commit/0d56889))
+
 ## <small>0.19.79 (2026-06-26)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.53 -> 0.0.54 (issue #107) ([25d0a8f](https://github.com/bitsocialnet/bitsocial-cli/commit/25d0a8f)), closes [#107](https://github.com/bitsocialnet/bitsocial-cli/issues/107)
