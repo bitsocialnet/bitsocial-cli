@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.81 (2026-06-26)</small>
+
+* ci: retry global install to survive transient kubo download failures (#110) ([6262e96](https://github.com/bitsocialnet/bitsocial-cli/commit/6262e96)), closes [#110](https://github.com/bitsocialnet/bitsocial-cli/issues/110)
+* ci: retry npm ci too, kubo download flakiness hits every install step (#110) ([2243a7f](https://github.com/bitsocialnet/bitsocial-cli/commit/2243a7f)), closes [#110](https://github.com/bitsocialnet/bitsocial-cli/issues/110)
+
 ## <small>0.19.80 (2026-06-26)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.55 -> 0.0.57 (issue #109) ([1f11cb2](https://github.com/bitsocialnet/bitsocial-cli/commit/1f11cb2)), closes [#109](https://github.com/bitsocialnet/bitsocial-cli/issues/109)
