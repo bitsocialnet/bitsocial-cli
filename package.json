@@ -113,13 +113,13 @@
         "wait-on": "6.0.1"
     },
     "dependencies": {
-        "@bitsocial/bso-resolver": "0.0.8",
+        "@bitsocial/bso-resolver": "0.0.10",
         "@multiformats/multiaddr": "13.0.1",
         "@oclif/core": "4.8.0",
         "@oclif/plugin-help": "6.2.36",
         "@oclif/plugin-not-found": "3.2.73",
         "@oclif/table": "0.5.1",
-        "@pkcprotocol/pkc-js": "0.0.69",
+        "@pkcprotocol/pkc-js": "0.0.71",
         "dataobject-parser": "1.2.22",
         "decompress": "4.2.1",
         "env-paths": "2.2.1",
