@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.86 (2026-07-30)</small>
+
+* ci: speed up global install with --prefer-offline ([ff6aa9b](https://github.com/bitsocialnet/bitsocial-cli/commit/ff6aa9b))
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.71 -> 0.0.73 (issue #118) ([0382b13](https://github.com/bitsocialnet/bitsocial-cli/commit/0382b13)), closes [#118](https://github.com/bitsocialnet/bitsocial-cli/issues/118)
+
 ## <small>0.19.85 (2026-07-14)</small>
 
 * chore(deps): upgrade pkc-js 0.0.71, bso-resolver 0.0.10 (issue #116) ([1d7d301](https://github.com/bitsocialnet/bitsocial-cli/commit/1d7d301)), closes [#116](https://github.com/bitsocialnet/bitsocial-cli/issues/116)
