@@ -78,8 +78,11 @@ jobs:
           # Retry: the kubo postinstall downloads its binary from dist.ipfs.tech,
           # which intermittently returns 5xx and aborts the install with no retry
           # of its own (issue #110).
+          # --prefer-offline reuses the cache primed by `npm ci` above, which
+          # skips the registry round trips that made this step take 17m on
+          # Windows and blow the job timeout.
           for attempt in 1 2 3; do
-            npm install -g "./$TARBALL" && break
+            npm install -g --prefer-offline --no-audit --no-fund "./$TARBALL" && break
             echo "global install attempt $attempt failed; retrying in 15s..."
             sleep 15
           done
