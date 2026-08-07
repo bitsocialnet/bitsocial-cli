@@ -872,20 +872,24 @@ Run a network-connected Bitsocial node. Once the daemon is running you can creat
 
 ```
 USAGE
-  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--chainProviderUrls <value>...]
-    [--allowPrivateKeyExport]
+  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--chainProviderUrls <value>...] [--enableIpfsGc]
+    [--ipfsGcIntervalMinutes <value>] [--allowPrivateKeyExport]
 
 FLAGS
-  --[no-]allowPrivateKeyExport    Allow RPC clients to request community exports that include the community signer's
-                                  private key (`bitsocial community export --includePrivateKey`). Disable with
-                                  --no-allowPrivateKeyExport when exposing the RPC to untrusted clients
-  --chainProviderUrls=<value>...  [default:
-                                  https://eth.drpc.org,https://ethereum.publicnode.com,https://ethereum-rpc.publicnode.c
-                                  om,https://rpc.mevblocker.io,https://1rpc.io/eth,https://eth-pokt.nodies.app] RPC
-                                  URL(s) for .bso name resolution. Can be specified multiple times.
-  --logPath=<value>               (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
-                                  will be used to store logs
-  --pkcRpcUrl=<value>             (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
+  --[no-]allowPrivateKeyExport     Allow RPC clients to request community exports that include the community signer's
+                                   private key (`bitsocial community export --includePrivateKey`). Disable with
+                                   --no-allowPrivateKeyExport when exposing the RPC to untrusted clients
+  --chainProviderUrls=<value>...   [default:
+                                   https://eth.drpc.org,https://ethereum.publicnode.com,https://ethereum-rpc.publicnode.
+                                   com,https://rpc.mevblocker.io,https://1rpc.io/eth,https://eth-pokt.nodies.app] RPC
+                                   URL(s) for .bso name resolution. Can be specified multiple times.
+  --[no-]enableIpfsGc              Periodically garbage-collect the IPFS repo over the kubo RPC API while the daemon is
+                                   up. Only reclaims unpinned blocks — pinned data and MFS are never collected. Disable
+                                   with --no-enableIpfsGc
+  --ipfsGcIntervalMinutes=<value>  [default: 60] How often to garbage-collect the IPFS repo, in minutes
+  --logPath=<value>                (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
+                                   will be used to store logs
+  --pkcRpcUrl=<value>              (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
 
 DESCRIPTION
   Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and
