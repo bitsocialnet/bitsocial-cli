@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.87 (2026-08-07)</small>
+
+* refactor(daemon): run repo gc unconditionally every hour ([d67d486](https://github.com/bitsocialnet/bitsocial-cli/commit/d67d486))
+* feat(daemon): periodic IPFS repo GC over kubo RPC, upgrade kubo 0.43.0 + pkc-js 0.0.77 ([6757a87](https://github.com/bitsocialnet/bitsocial-cli/commit/6757a87)), closes [ipfs/kubo#11424](https://github.com/ipfs/kubo/issues/11424)
+
 ## <small>0.19.86 (2026-07-30)</small>
 
 * ci: speed up global install with --prefer-offline ([ff6aa9b](https://github.com/bitsocialnet/bitsocial-cli/commit/ff6aa9b))
