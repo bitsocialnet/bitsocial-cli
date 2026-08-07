@@ -112,13 +112,13 @@ export default class Daemon extends Command {
 
         enableIpfsGc: Flags.boolean({
             description:
-                "Periodically garbage-collect the IPFS repo over the kubo RPC API while the daemon is up. GC only runs once the repo passes 90% of Datastore.StorageMax (default 10GB), and only reclaims unpinned blocks — pinned data and MFS are never collected. Disable with --no-enableIpfsGc",
+                "Periodically garbage-collect the IPFS repo over the kubo RPC API while the daemon is up. Only reclaims unpinned blocks — pinned data and MFS are never collected. Disable with --no-enableIpfsGc",
             allowNo: true,
             default: true
         }),
 
         ipfsGcIntervalMinutes: Flags.integer({
-            description: "How often to check whether the IPFS repo needs garbage collection, in minutes",
+            description: "How often to garbage-collect the IPFS repo, in minutes",
             default: DEFAULT_REPO_GC_INTERVAL_MS / 60_000,
             min: 1
         }),
@@ -737,9 +737,9 @@ export default class Daemon extends Command {
             await createOrConnectRpc();
 
             // Runs against whichever kubo the daemon ends up talking to, including one started by
-            // another program (--pkcOptions.kuboRpcClientsOptions). pkc-js also GCs on the same
-            // watermark, but only from a started local community's IPNS sync — a daemon that is up
-            // with no community started would otherwise never reclaim anything (issue #119).
+            // another program (--pkcOptions.kuboRpcClientsOptions). pkc-js also GCs, but only from
+            // a started local community's IPNS sync — a daemon that is up with no community
+            // started would otherwise never reclaim anything (issue #119).
             if (flags.enableIpfsGc)
                 stopRepoGcScheduler = startRepoGcScheduler({
                     kuboApiUrl: kuboRpcEndpoint,

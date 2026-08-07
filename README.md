@@ -884,11 +884,9 @@ FLAGS
                                    com,https://rpc.mevblocker.io,https://1rpc.io/eth,https://eth-pokt.nodies.app] RPC
                                    URL(s) for .bso name resolution. Can be specified multiple times.
   --[no-]enableIpfsGc              Periodically garbage-collect the IPFS repo over the kubo RPC API while the daemon is
-                                   up. GC only runs once the repo passes 90% of Datastore.StorageMax (default 10GB), and
-                                   only reclaims unpinned blocks — pinned data and MFS are never collected. Disable with
-                                   --no-enableIpfsGc
-  --ipfsGcIntervalMinutes=<value>  [default: 60] How often to check whether the IPFS repo needs garbage collection, in
-                                   minutes
+                                   up. Only reclaims unpinned blocks — pinned data and MFS are never collected. Disable
+                                   with --no-enableIpfsGc
+  --ipfsGcIntervalMinutes=<value>  [default: 60] How often to garbage-collect the IPFS repo, in minutes
   --logPath=<value>                (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
                                    will be used to store logs
   --pkcRpcUrl=<value>              (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on

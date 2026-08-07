@@ -1,23 +1,7 @@
 import { PKCLogger } from "../util.js";
 
-// GC once the repo is within this fraction of Datastore.StorageMax. kubo's own `--enable-gc`
-// makes the same decision from Datastore.StorageGCWatermark (default 90) and so does pkc-js's
-// cleanUpIpfsRepoIfDue, so we mirror it rather than invent a third policy.
-export const GC_HIGH_WATERMARK = 0.9;
-
-// Matches kubo's default Datastore.GCPeriod. A repo that is over the watermark tends to STAY over
-// it (GC only reclaims unpinned blocks), so this interval is the floor between runs, not a promise
-// that anything is reclaimed each time.
+// Matches kubo's default Datastore.GCPeriod.
 export const DEFAULT_REPO_GC_INTERVAL_MS = 60 * 60 * 1000;
-
-export type RepoGcOutcome = {
-    ran: boolean;
-    skippedReason?: "below-watermark" | "repo-stat-failed" | "gc-failed";
-    reclaimedCids?: number;
-    repoSizeBefore?: number;
-    repoSizeAfter?: number;
-    storageMax?: number;
-};
 
 type FetchLike = (input: string, init?: { method?: string; signal?: AbortSignal }) => Promise<Response>;
 
@@ -31,26 +15,9 @@ function toConnectableApiBase(kuboApiUrl: URL | string): string {
     return url.toString().replace(/\/+$/, "");
 }
 
-async function postRpc(fetchImpl: FetchLike, apiBase: string, pathAndQuery: string, signal?: AbortSignal): Promise<Response> {
-    const response = await fetchImpl(`${apiBase}/${pathAndQuery}`, { method: "POST", signal });
-    if (!response.ok) throw new Error(`kubo RPC ${pathAndQuery} responded ${response.status} ${response.statusText}`);
-    return response;
-}
-
-// `size-only` matters: the default repo/stat also counts every object, which walks the entire
-// flatfs blockstore. On the repos this feature exists for that is millions of files.
-async function readRepoStat(
-    fetchImpl: FetchLike,
-    apiBase: string,
-    signal?: AbortSignal
-): Promise<{ repoSize: number; storageMax: number }> {
-    const response = await postRpc(fetchImpl, apiBase, "repo/stat?size-only=true", signal);
-    const body = (await response.json()) as { RepoSize?: number; StorageMax?: number };
-    return { repoSize: Number(body.RepoSize ?? 0), storageMax: Number(body.StorageMax ?? 0) };
-}
-
 /**
- * Runs `repo gc` over the kubo RPC API if the repo has crossed the watermark.
+ * Runs `repo gc` over the kubo RPC API. GC only ever reclaims unpinned blocks, so this is safe to
+ * run unconditionally — kubo decides what is actually collectable.
  *
  * We drive GC over RPC rather than passing kubo's own `--enable-gc` daemon flag. A kubo daemon
  * started with `--enable-gc` never exits in response to `POST /api/v0/shutdown` — it logs
@@ -64,52 +31,22 @@ async function readRepoStat(
  * `gcErrc` never closes and `daemonFunc` blocks forever draining it. Reproduces on 0.24.0, 0.42.0
  * and 0.43.0, which is also why the earlier attempt at the flag (f228d7d, Dec 2023, kubo ~0.24)
  * was reverted two days later. Do not add `--enable-gc` back without re-testing that path.
- *
- * `force` skips the watermark check but is still subject to the caller's interval.
  */
-export async function runRepoGcIfDue(options: {
+export async function runRepoGc(options: {
     kuboApiUrl: URL | string;
     log?: any;
-    force?: boolean;
     signal?: AbortSignal;
     fetchImpl?: FetchLike;
-}): Promise<RepoGcOutcome> {
+}): Promise<{ ran: boolean; reclaimedCids?: number }> {
     const log = options.log ?? PKCLogger("bitsocial-cli:ipfs:repoGc");
     const fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
     const apiBase = toConnectableApiBase(options.kuboApiUrl);
 
-    let repoSizeBefore: number | undefined;
-    let storageMax: number | undefined;
-
-    if (!options.force) {
-        let stat: { repoSize: number; storageMax: number };
-        try {
-            stat = await readRepoStat(fetchImpl, apiBase, options.signal);
-        } catch (error) {
-            // A daemon we can't stat is one to back off from, not to blindly GC.
-            log.error?.("Skipping repo gc: failed to read repo/stat from the kubo node", apiBase, error);
-            return { ran: false, skippedReason: "repo-stat-failed" };
-        }
-        repoSizeBefore = stat.repoSize;
-        storageMax = stat.storageMax;
-
-        // storageMax comes from Datastore.StorageMax. If the daemon reports no ceiling there is
-        // nothing to compare against, so fall back to GCing on the interval alone rather than
-        // never GCing at all.
-        if (stat.storageMax > 0) {
-            const threshold = stat.storageMax * GC_HIGH_WATERMARK;
-            if (stat.repoSize < threshold) {
-                log.trace?.(
-                    `Skipping repo gc on ${apiBase} - repo size ${stat.repoSize} is below the ${GC_HIGH_WATERMARK * 100}% watermark ${threshold} of StorageMax ${stat.storageMax}`
-                );
-                return { ran: false, skippedReason: "below-watermark", repoSizeBefore, storageMax };
-            }
-        }
-    }
-
     let reclaimedCids = 0;
     try {
-        const response = await postRpc(fetchImpl, apiBase, "repo/gc?quiet=true", options.signal);
+        const response = await fetchImpl(`${apiBase}/repo/gc?quiet=true`, { method: "POST", signal: options.signal });
+        if (!response.ok) throw new Error(`kubo RPC repo/gc responded ${response.status} ${response.statusText}`);
+
         // repo/gc streams newline-delimited JSON, one object per reclaimed CID. Draining it fully
         // is what makes this await mean "GC finished" rather than "GC started".
         const text = await response.text();
@@ -126,22 +63,11 @@ export async function runRepoGcIfDue(options: {
         }
     } catch (error) {
         log.error?.("Failed to GC ipfs repo", apiBase, error);
-        return { ran: false, skippedReason: "gc-failed", repoSizeBefore, storageMax };
+        return { ran: false };
     }
 
-    let repoSizeAfter: number | undefined;
-    try {
-        repoSizeAfter = (await readRepoStat(fetchImpl, apiBase, options.signal)).repoSize;
-    } catch (error) {
-        log.trace?.("repo gc finished but the follow-up repo/stat failed", error);
-    }
-
-    // How much a GC actually reclaims is worth logging rather than assuming: GC never touches
-    // pinned data, and a node with thousands of recursive pins can stay over the watermark.
-    log(
-        `GC reclaimed ${reclaimedCids} cids from the IPFS node ${apiBase} - repo size ${repoSizeBefore ?? "unknown"} -> ${repoSizeAfter ?? "unknown"}`
-    );
-    return { ran: true, reclaimedCids, repoSizeBefore, repoSizeAfter, storageMax };
+    log(`GC reclaimed ${reclaimedCids} cids from the IPFS node ${apiBase}`);
+    return { ran: true, reclaimedCids };
 }
 
 /**
@@ -165,7 +91,7 @@ export function startRepoGcScheduler(options: {
 
     const tick = () => {
         if (inFlight) return;
-        inFlight = runRepoGcIfDue({
+        inFlight = runRepoGc({
             kuboApiUrl: options.kuboApiUrl,
             log,
             signal: abortController.signal,

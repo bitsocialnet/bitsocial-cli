@@ -1,109 +1,66 @@
 import { describe, it, expect, vi } from "vitest";
-import { runRepoGcIfDue, startRepoGcScheduler, GC_HIGH_WATERMARK, DEFAULT_REPO_GC_INTERVAL_MS } from "../../src/ipfs/repoGc.js";
-
-const STORAGE_MAX = 10_000_000_000;
+import { runRepoGc, startRepoGcScheduler, DEFAULT_REPO_GC_INTERVAL_MS } from "../../src/ipfs/repoGc.js";
 
 const silentLog: any = Object.assign(() => {}, { error: () => {}, trace: () => {} });
 
-// Minimal kubo RPC stub: repo/stat answers with the sizes the case needs, repo/gc streams one
-// newline-delimited JSON object per reclaimed CID exactly like the real endpoint.
-const makeKuboStub = (options: {
-    repoSizes: number[];
-    storageMax?: number;
-    gcCids?: string[];
-    statStatus?: number;
-    gcStatus?: number;
-}) => {
+// Minimal kubo RPC stub: repo/gc streams one newline-delimited JSON object per reclaimed CID,
+// exactly like the real endpoint.
+const makeKuboStub = (options: { gcCids?: string[]; gcStatus?: number; gcErrors?: string[] } = {}) => {
     const calls: string[] = [];
-    let statCall = 0;
     const fetchImpl = vi.fn(async (url: string) => {
         calls.push(url);
-        if (url.includes("repo/stat")) {
-            if (options.statStatus && options.statStatus >= 400)
-                return new Response("nope", { status: options.statStatus, statusText: "Server Error" });
-            const size = options.repoSizes[Math.min(statCall++, options.repoSizes.length - 1)];
-            return new Response(JSON.stringify({ RepoSize: size, StorageMax: options.storageMax ?? STORAGE_MAX }), { status: 200 });
-        }
-        if (url.includes("repo/gc")) {
-            if (options.gcStatus && options.gcStatus >= 400)
-                return new Response("nope", { status: options.gcStatus, statusText: "Server Error" });
-            const body = (options.gcCids ?? []).map((cid) => JSON.stringify({ Key: { "/": cid }, Error: "" })).join("\n");
-            return new Response(body, { status: 200 });
-        }
-        throw new Error(`unexpected kubo RPC call ${url}`);
+        if (!url.includes("repo/gc")) throw new Error(`unexpected kubo RPC call ${url}`);
+        if (options.gcStatus && options.gcStatus >= 400)
+            return new Response("nope", { status: options.gcStatus, statusText: "Server Error" });
+        const lines = [
+            ...(options.gcCids ?? []).map((cid) => JSON.stringify({ Key: { "/": cid }, Error: "" })),
+            ...(options.gcErrors ?? []).map((err) => JSON.stringify({ Error: err }))
+        ];
+        return new Response(lines.join("\n"), { status: 200 });
     });
     return { fetchImpl, calls };
 };
 
-describe("runRepoGcIfDue (issue #119)", () => {
-    it("skips GC when the repo is below the 90% StorageMax watermark", async () => {
-        const { fetchImpl, calls } = makeKuboStub({ repoSizes: [STORAGE_MAX * 0.5] });
-        const outcome = await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
-
-        expect(outcome.ran).toBe(false);
-        expect(outcome.skippedReason).toBe("below-watermark");
-        expect(calls.some((url) => url.includes("repo/gc"))).toBe(false);
-    });
-
-    it("runs GC once the repo crosses the watermark, and reports what it reclaimed", async () => {
-        const before = STORAGE_MAX * GC_HIGH_WATERMARK + 1;
-        const { fetchImpl, calls } = makeKuboStub({ repoSizes: [before, 1_000], gcCids: ["QmA", "QmB", "QmC"] });
-        const outcome = await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
+describe("runRepoGc (issue #119)", () => {
+    it("GCs unconditionally — no repo/stat, no watermark check", async () => {
+        const { fetchImpl, calls } = makeKuboStub({ gcCids: ["QmA", "QmB", "QmC"] });
+        const outcome = await runRepoGc({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
 
         expect(outcome.ran).toBe(true);
         expect(outcome.reclaimedCids).toBe(3);
-        expect(outcome.repoSizeBefore).toBe(before);
-        expect(outcome.repoSizeAfter).toBe(1_000);
-        expect(calls.some((url) => url.includes("repo/gc"))).toBe(true);
-    });
-
-    it("asks for size-only repo stats so it does not walk the whole blockstore", async () => {
-        const { fetchImpl, calls } = makeKuboStub({ repoSizes: [1] });
-        await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
-
-        expect(calls[0]).toContain("size-only=true");
-    });
-
-    it("GCs on the interval alone when the daemon reports no StorageMax ceiling", async () => {
-        const { fetchImpl } = makeKuboStub({ repoSizes: [1_000, 500], storageMax: 0, gcCids: ["QmA"] });
-        const outcome = await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
-
-        expect(outcome.ran).toBe(true);
-    });
-
-    it("skips the watermark check when forced", async () => {
-        const { fetchImpl, calls } = makeKuboStub({ repoSizes: [1_000], gcCids: ["QmA"] });
-        const outcome = await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, force: true, fetchImpl });
-
-        expect(outcome.ran).toBe(true);
-        // Goes straight to repo/gc — the only repo/stat is the follow-up that measures what was
-        // reclaimed, never a pre-GC watermark check.
+        expect(calls.length).toBe(1);
         expect(calls[0]).toContain("repo/gc");
-        expect(calls.filter((url) => url.includes("repo/stat")).length).toBe(1);
+        expect(calls.some((url) => url.includes("repo/stat"))).toBe(false);
     });
 
-    it("backs off instead of blindly GCing when repo/stat fails", async () => {
-        const { fetchImpl, calls } = makeKuboStub({ repoSizes: [1], statStatus: 500 });
-        const outcome = await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
+    it("still reports success when kubo had nothing to collect", async () => {
+        const { fetchImpl } = makeKuboStub({ gcCids: [] });
+        const outcome = await runRepoGc({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
 
-        expect(outcome.ran).toBe(false);
-        expect(outcome.skippedReason).toBe("repo-stat-failed");
-        expect(calls.some((url) => url.includes("repo/gc"))).toBe(false);
+        expect(outcome.ran).toBe(true);
+        expect(outcome.reclaimedCids).toBe(0);
     });
 
-    it("resolves rather than throws when repo/gc itself fails", async () => {
-        const { fetchImpl } = makeKuboStub({ repoSizes: [STORAGE_MAX], gcStatus: 500 });
-        const outcome = await runRepoGcIfDue({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
+    it("counts only reclaimed keys, not per-block errors in the stream", async () => {
+        const { fetchImpl } = makeKuboStub({ gcCids: ["QmA"], gcErrors: ["could not remove QmZ"] });
+        const outcome = await runRepoGc({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
+
+        expect(outcome.ran).toBe(true);
+        expect(outcome.reclaimedCids).toBe(1);
+    });
+
+    it("resolves rather than throws when repo/gc fails", async () => {
+        const { fetchImpl } = makeKuboStub({ gcStatus: 500 });
+        const outcome = await runRepoGc({ kuboApiUrl: "http://127.0.0.1:5001/api/v0", log: silentLog, fetchImpl });
 
         expect(outcome.ran).toBe(false);
-        expect(outcome.skippedReason).toBe("gc-failed");
     });
 
     // The daemon tracks kubo at its configured bind address, which is routinely a wildcard.
     // Connecting to 0.0.0.0 fails with EINVAL on macOS.
     it("rewrites a wildcard bind address to loopback before connecting", async () => {
-        const { fetchImpl, calls } = makeKuboStub({ repoSizes: [1] });
-        await runRepoGcIfDue({ kuboApiUrl: "http://0.0.0.0:5001/api/v0", log: silentLog, fetchImpl });
+        const { fetchImpl, calls } = makeKuboStub({ gcCids: [] });
+        await runRepoGc({ kuboApiUrl: "http://0.0.0.0:5001/api/v0", log: silentLog, fetchImpl });
 
         expect(calls[0]).toContain("127.0.0.1");
         expect(calls[0]).not.toContain("0.0.0.0");
@@ -118,7 +75,7 @@ describe("startRepoGcScheduler (issue #119)", () => {
     it("GCs on each interval tick and stops when told to", async () => {
         vi.useFakeTimers();
         try {
-            const { fetchImpl, calls } = makeKuboStub({ repoSizes: [STORAGE_MAX], gcCids: ["QmA"] });
+            const { fetchImpl, calls } = makeKuboStub({ gcCids: ["QmA"] });
             const stop = startRepoGcScheduler({
                 kuboApiUrl: "http://127.0.0.1:5001/api/v0",
                 intervalMs: 1000,
@@ -129,12 +86,14 @@ describe("startRepoGcScheduler (issue #119)", () => {
             expect(calls.length).toBe(0); // nothing on construction
 
             await vi.advanceTimersByTimeAsync(1000);
-            expect(calls.some((url) => url.includes("repo/gc"))).toBe(true);
-            const afterFirstTick = calls.length;
+            expect(calls.length).toBe(1);
+
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(calls.length).toBe(3); // one GC per interval
 
             stop();
             await vi.advanceTimersByTimeAsync(5000);
-            expect(calls.length).toBe(afterFirstTick); // no further ticks after stop
+            expect(calls.length).toBe(3); // no further ticks after stop
         } finally {
             vi.useRealTimers();
         }
@@ -147,8 +106,7 @@ describe("startRepoGcScheduler (issue #119)", () => {
         try {
             let releaseGc: (() => void) | undefined;
             const gcStarted: number[] = [];
-            const fetchImpl = vi.fn(async (url: string) => {
-                if (url.includes("repo/stat")) return new Response(JSON.stringify({ RepoSize: STORAGE_MAX, StorageMax: STORAGE_MAX }));
+            const fetchImpl = vi.fn(async () => {
                 gcStarted.push(1);
                 await new Promise<void>((resolve) => (releaseGc = resolve));
                 return new Response("");
