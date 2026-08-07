@@ -3,6 +3,7 @@ import { ChildProcessWithoutNullStreams } from "child_process";
 
 import defaults from "../../common-utils/defaults.js";
 import { startKuboNode } from "../../ipfs/startIpfs.js";
+import { startRepoGcScheduler, DEFAULT_REPO_GC_INTERVAL_MS } from "../../ipfs/repoGc.js";
 import path from "path";
 import tcpPortUsed from "tcp-port-used";
 import {
@@ -107,6 +108,19 @@ export default class Daemon extends Command {
             description: "RPC URL(s) for .bso name resolution. Can be specified multiple times.",
             multiple: true,
             default: DEFAULT_PROVIDERS
+        }),
+
+        enableIpfsGc: Flags.boolean({
+            description:
+                "Periodically garbage-collect the IPFS repo over the kubo RPC API while the daemon is up. GC only runs once the repo passes 90% of Datastore.StorageMax (default 10GB), and only reclaims unpinned blocks — pinned data and MFS are never collected. Disable with --no-enableIpfsGc",
+            allowNo: true,
+            default: true
+        }),
+
+        ipfsGcIntervalMinutes: Flags.integer({
+            description: "How often to check whether the IPFS repo needs garbage collection, in minutes",
+            default: DEFAULT_REPO_GC_INTERVAL_MS / 60_000,
+            min: 1
         }),
 
         allowPrivateKeyExport: Flags.boolean({
@@ -403,15 +417,20 @@ export default class Daemon extends Command {
                     );
                 }
                 let spawnedProcess: ChildProcessWithoutNullStreams | undefined;
-                const startPromise = startKuboNode(kuboRpcEndpoint, ipfsGatewayEndpoint, mergedPkcOptions.dataPath!, (process) => {
-                    spawnedProcess = process;
-                    kuboProcess = process;
-                    if (process.pid) {
-                        const pid = process.pid;
-                        liveKuboPids.add(pid);
-                        process.once("exit", () => liveKuboPids.delete(pid));
+                const startPromise = startKuboNode(
+                    kuboRpcEndpoint,
+                    ipfsGatewayEndpoint,
+                    mergedPkcOptions.dataPath!,
+                    (process) => {
+                        spawnedProcess = process;
+                        kuboProcess = process;
+                        if (process.pid) {
+                            const pid = process.pid;
+                            liveKuboPids.add(pid);
+                            process.once("exit", () => liveKuboPids.delete(pid));
+                        }
                     }
-                });
+                );
                 pendingKuboStart = startPromise;
                 let startedProcess: ChildProcessWithoutNullStreams | undefined;
                 try {
@@ -537,6 +556,7 @@ export default class Daemon extends Command {
             };
 
             let keepKuboUpInterval: NodeJS.Timeout | undefined;
+            let stopRepoGcScheduler: (() => void) | undefined;
             const { asyncExitHook } = await import("exit-hook");
             const killKuboProcessGroup = (pid: number, signal: NodeJS.Signals) => {
                 // Kill the entire process group (negative PID) on non-Windows.
@@ -613,6 +633,7 @@ export default class Daemon extends Command {
 
             const shutdownDaemon = async () => {
                 if (keepKuboUpInterval) clearInterval(keepKuboUpInterval);
+                stopRepoGcScheduler?.();
                 if (mainProcessExited) return; // we already exited
                 console.log(
                     "\nShutting down Bitsocial daemon, it may take a few seconds to shut down all communities and the IPFS node..."
@@ -714,6 +735,17 @@ export default class Daemon extends Command {
             // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
             await createOrConnectRpc();
+
+            // Runs against whichever kubo the daemon ends up talking to, including one started by
+            // another program (--pkcOptions.kuboRpcClientsOptions). pkc-js also GCs on the same
+            // watermark, but only from a started local community's IPNS sync — a daemon that is up
+            // with no community started would otherwise never reclaim anything (issue #119).
+            if (flags.enableIpfsGc)
+                stopRepoGcScheduler = startRepoGcScheduler({
+                    kuboApiUrl: kuboRpcEndpoint,
+                    intervalMs: flags.ipfsGcIntervalMinutes * 60 * 1000,
+                    log: PKCLogger("bitsocial-cli:ipfs:repoGc")
+                });
 
             keepKuboUpInterval = setInterval(async () => {
                 if (mainProcessExited) return;
