@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.88 (2026-08-08)</small>
+
+* chore(deps): upgrade 5chan web UI v0.9.7 -> v0.9.17 ([49c6c1e](https://github.com/bitsocialnet/bitsocial-cli/commit/49c6c1e))
+
 ## <small>0.19.87 (2026-08-07)</small>
 
 * refactor(daemon): run repo gc unconditionally every hour ([d67d486](https://github.com/bitsocialnet/bitsocial-cli/commit/d67d486))
