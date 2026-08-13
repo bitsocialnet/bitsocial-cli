@@ -342,5 +342,87 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 }
             }
         });
+
+        // Issue #124: replacing an already-imported package under the same name left the
+        // daemon running the old ESM module while reporting the new version.
+        it("upgrading an installed challenge in place takes effect without a daemon restart", { timeout: 180_000 }, async () => {
+            const sub = await pkc.createCommunity();
+            await sub.edit({
+                settings: {
+                    challenges: [{ name: "test-challenge" }]
+                }
+            });
+            await sub.start();
+            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+
+            try {
+                // v1 (installed in beforeAll) is active
+                const v1Result = await publishCommentWithChallenge({
+                    pkc,
+                    communityAddress: sub.address,
+                    challengeAnswer: "2"
+                });
+                expect(v1Result.challengeSuccess).toBe(true);
+                expect(v1Result.challengeText).toBe("1+1");
+
+                // Replace test-challenge with v2 — same package name, different behavior
+                const v2SrcDir = path.join(randomDirectory(), "test-challenge");
+                await createMinimalChallengeDir(v2SrcDir, "test-challenge", {
+                    version: "2.0.0",
+                    description: "A test challenge for integration tests",
+                    challenge: "3+3",
+                    answer: "6"
+                });
+
+                const installResult = await runBitsocialChallenge(["install", v2SrcDir, "--pkcOptions.dataPath", dataPath]);
+                expect(installResult.exitCode).toBe(0);
+                expect(installResult.stdout).toContain("changed test-challenge@2.0.0 in");
+
+                // Reload without restarting the daemon
+                const reloadRes = await fetch(`http://localhost:${RPC_PORT}/api/challenges/reload`, { method: "POST" });
+                expect(reloadRes.status).toBe(200);
+                const reloadBody = (await reloadRes.json()) as { ok: boolean; challenges: string[] };
+                expect(reloadBody.ok).toBe(true);
+                expect(reloadBody.challenges).toContain("test-challenge@2.0.0");
+                expect(reloadBody.challenges).not.toContain("test-challenge@1.0.0");
+
+                // The active factory must match the reported version
+                const v2Result = await publishCommentWithChallenge({
+                    pkc,
+                    communityAddress: sub.address,
+                    challengeAnswer: "6"
+                });
+                expect(v2Result.challengeText).toBe("3+3");
+                expect(v2Result.challengeSuccess).toBe(true);
+
+                // The old answer must no longer pass
+                const staleAnswerResult = await publishCommentWithChallenge({
+                    pkc,
+                    communityAddress: sub.address,
+                    challengeAnswer: "2"
+                });
+                expect(staleAnswerResult.challengeSuccess).toBe(false);
+
+                // Reloading again without changing anything keeps v2 active
+                const reloadAgainRes = await fetch(`http://localhost:${RPC_PORT}/api/challenges/reload`, { method: "POST" });
+                expect(reloadAgainRes.status).toBe(200);
+                const reloadAgainBody = (await reloadAgainRes.json()) as { ok: boolean; challenges: string[] };
+                expect(reloadAgainBody.challenges).toContain("test-challenge@2.0.0");
+
+                const afterIdempotentReload = await publishCommentWithChallenge({
+                    pkc,
+                    communityAddress: sub.address,
+                    challengeAnswer: "6"
+                });
+                expect(afterIdempotentReload.challengeText).toBe("3+3");
+                expect(afterIdempotentReload.challengeSuccess).toBe(true);
+            } finally {
+                try {
+                    await sub.stop();
+                } catch {
+                    /* ignore */
+                }
+            }
+        });
     });
 });
