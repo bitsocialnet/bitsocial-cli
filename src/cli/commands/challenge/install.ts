@@ -1,4 +1,5 @@
-import { Args, Flags, Command } from "@oclif/core";
+import { Args, Flags } from "@oclif/core";
+import { BaseCommand } from "../../base-command.js";
 import path from "path";
 import fs from "fs/promises";
 import decompress from "decompress";
@@ -10,10 +11,11 @@ import {
     readChallengePackageJson,
     runNpmPack,
     runNpmInstall,
-    verifyNativeModuleAbi
+    verifyNativeModuleAbi,
+    reloadChallengesInDaemon
 } from "../../../challenge-packages/challenge-utils.js";
 
-export default class Install extends Command {
+export default class Install extends BaseCommand {
     static override description = "Install a challenge package (npm package name, git URL, tarball URL, or local path)";
 
     static override aliases = ["challenge:i", "challenge:add"];
@@ -132,11 +134,10 @@ export default class Install extends Command {
             const elapsedSeconds = Math.max(1, Math.round((Date.now() - startTime) / 1000));
             this.log(`${alreadyExists ? "changed" : "added"} ${pkg.name}${version} in ${elapsedSeconds}s`);
 
-            // 10. Best-effort reload via daemon
-            try {
-                await fetch("http://localhost:9138/api/challenges/reload", { method: "POST" });
-            } catch {
-                // daemon not running, that's fine
+            // 10. Best-effort reload in the daemon at --pkcRpcUrl, so the install takes effect
+            //     without a restart
+            if (await reloadChallengesInDaemon(flags.pkcRpcUrl)) {
+                this.log(`reloaded ${pkg.name}${version} in the daemon at ${flags.pkcRpcUrl}`);
             }
         } finally {
             // 11. Clean up temp dir (includes the previous-install backup, if any)

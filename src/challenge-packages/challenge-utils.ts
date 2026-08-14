@@ -1,4 +1,5 @@
 import path from "path";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import fs from "fs/promises";
 import type { Dirent } from "fs";
@@ -309,11 +310,115 @@ export function formatChallengeNameVersion(challenge: Pick<InstalledChallenge, "
     return challenge.version && challenge.version !== "unknown" ? `${challenge.name}@${challenge.version}` : challenge.name;
 }
 
+/**
+ * HTTP url of a daemon's challenge-reload endpoint, derived from its --pkcRpcUrl. The endpoint
+ * is served by the same http server as the RPC socket, and its local-only variant requires the
+ * request to come from the loopback interface — so a wildcard bind is dialed as loopback rather
+ * than as 0.0.0.0.
+ */
+export function challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl: string): string | undefined {
+    let url: URL;
+    try {
+        url = new URL(pkcRpcUrl);
+    } catch {
+        return undefined;
+    }
+    if (!url.port) return undefined;
+    // URL.hostname keeps the brackets around an IPv6 literal — strip them so the host can be
+    // compared and re-bracketed exactly once
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    const host = hostname === "0.0.0.0" || hostname === "::" ? "127.0.0.1" : hostname;
+    return `http://${host.includes(":") ? `[${host}]` : host}:${url.port}/api/challenges/reload`;
+}
+
+/** How long install/remove wait for a daemon to finish reloading before giving up. */
+export const CHALLENGE_RELOAD_TIMEOUT_MS = 30000;
+
+/**
+ * Ask the daemon at `pkcRpcUrl` to reload its challenge packages, so an install/remove takes
+ * effect without a restart. Returns whether a daemon actually reloaded — best-effort, since
+ * no daemon running is not an error.
+ *
+ * The request is bounded: a daemon that accepts the connection but never answers (busy, wedged,
+ * or something else listening on the port) would otherwise hold the CLI for undici's 300s
+ * default. Aborting only ends our wait — the daemon may still finish the reload.
+ */
+export async function reloadChallengesInDaemon(pkcRpcUrl: string | URL, timeoutMs = CHALLENGE_RELOAD_TIMEOUT_MS): Promise<boolean> {
+    const reloadUrl = challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl.toString());
+    if (!reloadUrl) return false;
+    try {
+        const res = await fetch(reloadUrl, { method: "POST", signal: AbortSignal.timeout(timeoutMs) });
+        return res.ok;
+    } catch {
+        return false; // daemon not running or not answering, that's fine
+    }
+}
+
+// Hash of a challenge package's own source, used as the import cache key (see
+// loadChallengesIntoPKC).  Only node_modules is skipped: dependencies are pinned by the
+// install that produced this package dir, and hashing them would make every reload walk
+// the entire dependency tree.  Dot-prefixed files and directories are hashed — pkg.main
+// may point into one (".dist/index.js"), and skipping them left that entry out of the key,
+// so a same-version replacement kept the old import URL and served the stale module.
+export async function hashChallengePackageContents(challengeDir: string): Promise<string> {
+    const hash = createHash("sha256");
+
+    const walk = async (dir: string, relativeDir: string): Promise<void> => {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        // Sort so the digest does not depend on readdir order
+        entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        for (const entry of entries) {
+            if (entry.name === "node_modules") continue;
+            const absolutePath = path.join(dir, entry.name);
+            const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+            if (entry.isDirectory()) {
+                await walk(absolutePath, relativePath);
+            } else if (entry.isFile()) {
+                // Frame each record: feeding the path and the raw bytes back to back makes the
+                // stream ambiguous, so {index.js:"A", j:"Z"} and {index.js:"AjZ"} would hash
+                // identically and a changed entry could reuse the previous cache key
+                const contents = await fs.readFile(absolutePath);
+                const fileDigest = createHash("sha256").update(contents).digest("hex");
+                hash.update(`${relativePath}\0${fileDigest}\0`);
+            }
+        }
+    };
+
+    await walk(challengeDir, "");
+    return hash.digest("hex").slice(0, 16);
+}
+
+/**
+ * What each challenge name held in PKC.challenges before this process first registered a package
+ * under it.  PKC.challenges *is* pkc-js's own registry, so a package named after a built-in
+ * ("question") shadows it — unregistering has to hand the built-in back rather than delete the
+ * key.  `hadPrevious: false` means the name was ours alone and can be deleted.
+ *
+ * A process serves one data path (the daemon passes its own), so this is not keyed by data path.
+ */
+const shadowedChallenges = new Map<string, { hadPrevious: boolean; previous: unknown }>();
+
 export async function loadChallengesIntoPKC(dataPath?: string): Promise<InstalledChallenge[]> {
     const challenges = await listInstalledChallenges(dataPath);
-    if (challenges.length === 0) return [];
 
     const PKC = await import("@pkcprotocol/pkc-js");
+    const registry = (PKC.default as any).challenges as Record<string, unknown>;
+
+    // Hand back any name whose package is no longer installed, so `challenge remove` takes effect
+    // without a restart.  A package that is still installed but fails to import keeps its
+    // previously loaded factory: it is excluded from the returned list either way, and dropping a
+    // working challenge because its replacement is broken would take the community's publication
+    // flow down instead of leaving it on known-good code.
+    const installedNames = new Set(challenges.map((challenge) => challenge.name));
+    for (const [name, original] of shadowedChallenges) {
+        if (installedNames.has(name)) continue;
+        if (original.hadPrevious) registry[name] = original.previous;
+        else delete registry[name];
+        shadowedChallenges.delete(name);
+    }
+
+    if (challenges.length === 0) return [];
+
     const loaded: InstalledChallenge[] = [];
 
     for (const challenge of challenges) {
@@ -322,9 +427,28 @@ export async function loadChallengesIntoPKC(dataPath?: string): Promise<Installe
             // Resolve the entry point
             const entryPoint = pkg.main || "index.js";
             const entryPath = path.resolve(challenge.path, entryPoint);
-            const imported = await import(pathToFileURL(entryPath).href);
+
+            // Node caches ESM modules by URL, and `challenge install` swaps a new build onto
+            // the same destination path.  Importing the bare path would therefore hand back
+            // the module evaluated before the upgrade, so the registry would keep serving the
+            // old factory while metadata reports the new version (issue #124).  Keying the URL
+            // on the package contents re-evaluates the entry whenever the package changes and
+            // stays byte-identical (so cached, so factory-identical) when it does not.
+            //
+            // Only the entry module is re-evaluated: relative imports inside the package do not
+            // inherit the query, so a multi-file package graph would keep its stale submodules.
+            // Challenge packages are expected to ship a bundled entry point.
+            const entryUrl = pathToFileURL(entryPath);
+            entryUrl.searchParams.set("bitsocialChallengeContent", await hashChallengePackageContents(challenge.path));
+
+            const imported = await import(entryUrl.href);
             const factory = imported.default || imported;
-            (PKC.default as any).challenges[challenge.name] = factory;
+            // Remember what this name held before we first took it over, so `challenge remove`
+            // can hand it back instead of leaving a dead key (or deleting a pkc-js built-in)
+            if (!shadowedChallenges.has(challenge.name)) {
+                shadowedChallenges.set(challenge.name, { hadPrevious: challenge.name in registry, previous: registry[challenge.name] });
+            }
+            registry[challenge.name] = factory;
             loaded.push(challenge);
         } catch (err) {
             console.error(`Failed to load challenge "${challenge.name}":`, err);
