@@ -6,7 +6,6 @@ import type { Dirent } from "fs";
 import { execFileSync, spawn } from "child_process";
 import defaults from "../common-utils/defaults.js";
 import { migrateDataDirectory } from "../common-utils/data-migration.js";
-import { getAliveDaemonStates } from "../common-utils/daemon-state.js";
 
 export interface InstalledChallenge {
     name: string;
@@ -312,10 +311,10 @@ export function formatChallengeNameVersion(challenge: Pick<InstalledChallenge, "
 }
 
 /**
- * HTTP origin of a daemon's challenge-reload endpoint, derived from the ws:// RPC url it
- * recorded in its state file. The reload endpoint is served by the same http server as the
- * RPC socket, and its local-only variant requires the request to come from the loopback
- * interface — so a wildcard bind is dialed as loopback rather than as 0.0.0.0.
+ * HTTP url of a daemon's challenge-reload endpoint, derived from its --pkcRpcUrl. The endpoint
+ * is served by the same http server as the RPC socket, and its local-only variant requires the
+ * request to come from the loopback interface — so a wildcard bind is dialed as loopback rather
+ * than as 0.0.0.0.
  */
 export function challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl: string): string | undefined {
     let url: URL;
@@ -333,63 +332,19 @@ export function challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl: string): string | und
 }
 
 /**
- * Data path a running daemon was started with, read back from the argv in its state file.
- * A daemon started without the flag uses the default data path.
+ * Ask the daemon at `pkcRpcUrl` to reload its challenge packages, so an install/remove takes
+ * effect without a restart. Returns whether a daemon actually reloaded — best-effort, since
+ * no daemon running is not an error.
  */
-export function dataPathFromDaemonArgv(argv: string[]): string {
-    const flag = "--pkcOptions.dataPath";
-    for (let i = 0; i < argv.length; i++) {
-        const arg = argv[i]!;
-        if (arg === flag) {
-            const value = argv[i + 1];
-            if (value !== undefined && !value.startsWith("-")) return value;
-        } else if (arg.startsWith(`${flag}=`)) {
-            return arg.slice(flag.length + 1);
-        }
-    }
-    return defaults.PKC_DATA_PATH;
-}
-
-/**
- * Ask every running daemon that serves `dataPath` to reload its challenge packages, so an
- * install/remove takes effect without a restart.  Best-effort: a daemon that is not running,
- * or is mid-shutdown, is not an error.
- *
- * Daemons are discovered through their state files rather than assumed to be on the default
- * RPC port — a daemon started with --pkcRpcUrl would otherwise never be reached.  Daemons
- * serving a different data path are left alone: their challenges dir did not change.
- * When no state files exist at all (a daemon predating them), the default RPC url is tried
- * so the previous behavior still holds.
- */
-export async function reloadChallengesInRunningDaemons(dataPath: string): Promise<number> {
-    let reloadUrls: string[];
+export async function reloadChallengesInDaemon(pkcRpcUrl: string | URL): Promise<boolean> {
+    const reloadUrl = challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl.toString());
+    if (!reloadUrl) return false;
     try {
-        const aliveDaemons = await getAliveDaemonStates();
-        if (aliveDaemons.length === 0) {
-            reloadUrls = [challengeReloadUrlFromPkcRpcUrl(defaults.PKC_RPC_URL.toString())!];
-        } else {
-            const resolvedDataPath = path.resolve(dataPath);
-            reloadUrls = aliveDaemons
-                .filter((state) => path.resolve(dataPathFromDaemonArgv(state.argv)) === resolvedDataPath)
-                .map((state) => challengeReloadUrlFromPkcRpcUrl(state.pkcRpcUrl))
-                .filter((url): url is string => url !== undefined);
-        }
+        const res = await fetch(reloadUrl, { method: "POST" });
+        return res.ok;
     } catch {
-        // Unreadable state dir — fall back to the default RPC url
-        reloadUrls = [challengeReloadUrlFromPkcRpcUrl(defaults.PKC_RPC_URL.toString())!];
+        return false; // daemon not running, that's fine
     }
-
-    const results = await Promise.all(
-        [...new Set(reloadUrls)].map(async (url) => {
-            try {
-                const res = await fetch(url, { method: "POST" });
-                return res.ok;
-            } catch {
-                return false; // daemon not running, that's fine
-            }
-        })
-    );
-    return results.filter(Boolean).length;
 }
 
 // Hash of a challenge package's own source, used as the import cache key (see

@@ -1,4 +1,5 @@
-import { Args, Flags, Command } from "@oclif/core";
+import { Args, Flags } from "@oclif/core";
+import { BaseCommand } from "../../base-command.js";
 import fs from "fs/promises";
 import path from "path";
 import defaults from "../../../common-utils/defaults.js";
@@ -6,10 +7,10 @@ import {
     getChallengesDir,
     challengeNameToDir,
     readChallengePackageJson,
-    reloadChallengesInRunningDaemons
+    reloadChallengesInDaemon
 } from "../../../challenge-packages/challenge-utils.js";
 
-export default class Remove extends Command {
+export default class Remove extends BaseCommand {
     static override description = "Remove an installed challenge package";
 
     static override aliases = ["challenge:uninstall", "challenge:rm", "challenge:un"];
@@ -74,8 +75,8 @@ export default class Remove extends Command {
 
         this.log(`removed ${args.name}${version}`);
 
-        // Best-effort reload in every running daemon serving this data path, so the
-        // removal takes effect without a restart
-        await reloadChallengesInRunningDaemons(dataPath);
+        // Best-effort reload in the daemon at --pkcRpcUrl, so the removal takes effect
+        // without a restart
+        await reloadChallengesInDaemon(flags.pkcRpcUrl);
     }
 }

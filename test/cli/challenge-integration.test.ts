@@ -426,9 +426,9 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
         });
 
         // `challenge install` reloads on its own. It used to POST a hardcoded localhost:9138,
-        // so a daemon on a non-default RPC port (like this one) never saw the install; targets
-        // now come from the state files running daemons write.
-        it("challenge install alone updates a running daemon on a non-default RPC port", { timeout: 180_000 }, async () => {
+        // so a daemon on a non-default RPC port (like this one) never saw the install; the
+        // reload target now comes from the command's own --pkcRpcUrl.
+        it("challenge install --pkcRpcUrl alone updates a daemon on a non-default RPC port", { timeout: 180_000 }, async () => {
             const sub = await pkc.createCommunity();
             await sub.edit({
                 settings: {
@@ -448,11 +448,18 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 });
 
                 // No explicit /api/challenges/reload call anywhere in this test — install must
-                // find this daemon by itself
-                const installResult = await runBitsocialChallenge(["install", v3SrcDir, "--pkcOptions.dataPath", dataPath]);
+                // reload the daemon at --pkcRpcUrl by itself
+                const installResult = await runBitsocialChallenge([
+                    "install",
+                    v3SrcDir,
+                    "--pkcOptions.dataPath",
+                    dataPath,
+                    "--pkcRpcUrl",
+                    rpcWsUrl
+                ]);
                 expect(installResult.exitCode).toBe(0);
                 expect(installResult.stdout).toContain("changed test-challenge@3.0.0 in");
-                expect(installResult.stdout).toContain("reloaded test-challenge@3.0.0 in 1 running daemon");
+                expect(installResult.stdout).toContain(`reloaded test-challenge@3.0.0 in the daemon at ${rpcWsUrl}`);
 
                 const result = await publishCommentWithChallenge({
                     pkc,

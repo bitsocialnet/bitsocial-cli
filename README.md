@@ -328,13 +328,14 @@ Install a challenge package (npm package name, git URL, tarball URL, or local pa
 
 ```
 USAGE
-  $ bitsocial challenge add PACKAGE [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge add PACKAGE --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path to install the challenge into
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Install a challenge package (npm package name, git URL, tarball URL, or local path)
@@ -361,13 +362,14 @@ Install a challenge package (npm package name, git URL, tarball URL, or local pa
 
 ```
 USAGE
-  $ bitsocial challenge i PACKAGE [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge i PACKAGE --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path to install the challenge into
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Install a challenge package (npm package name, git URL, tarball URL, or local path)
@@ -394,13 +396,14 @@ Install a challenge package (npm package name, git URL, tarball URL, or local pa
 
 ```
 USAGE
-  $ bitsocial challenge install PACKAGE [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge install PACKAGE --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   PACKAGE  Package specifier — anything npm can install (name, name@version, git URL, tarball URL, local path)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path to install the challenge into
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Install a challenge package (npm package name, git URL, tarball URL, or local path)
@@ -479,13 +482,14 @@ Remove an installed challenge package
 
 ```
 USAGE
-  $ bitsocial challenge remove NAME [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge remove NAME --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path where challenges are installed
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Remove an installed challenge package
@@ -509,13 +513,14 @@ Remove an installed challenge package
 
 ```
 USAGE
-  $ bitsocial challenge rm NAME [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge rm NAME --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path where challenges are installed
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Remove an installed challenge package
@@ -537,13 +542,14 @@ Remove an installed challenge package
 
 ```
 USAGE
-  $ bitsocial challenge un NAME [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge un NAME --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path where challenges are installed
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Remove an installed challenge package
@@ -565,13 +571,14 @@ Remove an installed challenge package
 
 ```
 USAGE
-  $ bitsocial challenge uninstall NAME [--pkcOptions.dataPath <value>]
+  $ bitsocial challenge uninstall NAME --pkcRpcUrl <value> [--pkcOptions.dataPath <value>]
 
 ARGUMENTS
   NAME  The challenge package name (e.g., my-challenge or @scope/my-challenge)
 
 FLAGS
   --pkcOptions.dataPath=<value>  Data path where challenges are installed
+  --pkcRpcUrl=<value>            (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION
   Remove an installed challenge package
@@ -883,7 +890,7 @@ FLAGS
                                   https://eth.drpc.org,https://ethereum.publicnode.com,https://ethereum-rpc.publicnode.c
                                   om,https://rpc.mevblocker.io,https://1rpc.io/eth,https://eth-pokt.nodies.app] RPC
                                   URL(s) for .bso name resolution. Can be specified multiple times.
-  --logPath=<value>               (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
+  --logPath=<value>               (required) [default: /home/user2/.local/state/bitsocial] Specify a directory which
                                   will be used to store logs
   --pkcRpcUrl=<value>             (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
 
