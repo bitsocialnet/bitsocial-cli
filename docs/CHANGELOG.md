@@ -1,5 +1,15 @@
 # Changelog
 
+## <small>0.19.89 (2026-08-14)</small>
+
+* fix(challenge): close two holes in the content key, assert test readiness ([fec6a31](https://github.com/bitsocialnet/bitsocial-cli/commit/fec6a31))
+* fix(challenge): reload replaced challenge packages instead of cached ESM modules ([4e59472](https://github.com/bitsocialnet/bitsocial-cli/commit/4e59472))
+* fix(challenge): reload the daemon that actually serves the data path, not localhost:9138 ([6f37b98](https://github.com/bitsocialnet/bitsocial-cli/commit/6f37b98)), closes [#124](https://github.com/bitsocialnet/bitsocial-cli/issues/124)
+* fix(challenge): target the reload at --pkcRpcUrl instead of a hardcoded url ([d88c2bc](https://github.com/bitsocialnet/bitsocial-cli/commit/d88c2bc)), closes [#124](https://github.com/bitsocialnet/bitsocial-cli/issues/124)
+* fix(challenge): unregister removed challenges and bound the reload request ([cd12cd2](https://github.com/bitsocialnet/bitsocial-cli/commit/cd12cd2))
+* test(challenge): reproduce stale ESM module after same-name upgrade (#124) ([0237f02](https://github.com/bitsocialnet/bitsocial-cli/commit/0237f02)), closes [#124](https://github.com/bitsocialnet/bitsocial-cli/issues/124)
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.77 -> 0.0.81 ([1cc8952](https://github.com/bitsocialnet/bitsocial-cli/commit/1cc8952)), closes [#256](https://github.com/bitsocialnet/bitsocial-cli/issues/256) [#259](https://github.com/bitsocialnet/bitsocial-cli/issues/259) [#260](https://github.com/bitsocialnet/bitsocial-cli/issues/260) [#263](https://github.com/bitsocialnet/bitsocial-cli/issues/263)
+
 ## <small>0.19.88 (2026-08-08)</small>
 
 * chore(deps): upgrade 5chan web UI v0.9.7 -> v0.9.17 ([49c6c1e](https://github.com/bitsocialnet/bitsocial-cli/commit/49c6c1e))
