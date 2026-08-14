@@ -1,4 +1,5 @@
 import path from "path";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import fs from "fs/promises";
 import type { Dirent } from "fs";
@@ -309,6 +310,34 @@ export function formatChallengeNameVersion(challenge: Pick<InstalledChallenge, "
     return challenge.version && challenge.version !== "unknown" ? `${challenge.name}@${challenge.version}` : challenge.name;
 }
 
+// Hash of a challenge package's own source, used as the import cache key (see
+// loadChallengesIntoPKC).  node_modules and dot-entries are skipped: dependencies are
+// pinned by the install that produced this package dir, and hashing them would make
+// every reload walk the entire dependency tree.
+async function hashChallengePackageContents(challengeDir: string): Promise<string> {
+    const hash = createHash("sha256");
+
+    const walk = async (dir: string, relativeDir: string): Promise<void> => {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        // Sort so the digest does not depend on readdir order
+        entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        for (const entry of entries) {
+            if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+            const absolutePath = path.join(dir, entry.name);
+            const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+            if (entry.isDirectory()) {
+                await walk(absolutePath, relativePath);
+            } else if (entry.isFile()) {
+                hash.update(relativePath);
+                hash.update(await fs.readFile(absolutePath));
+            }
+        }
+    };
+
+    await walk(challengeDir, "");
+    return hash.digest("hex").slice(0, 16);
+}
+
 export async function loadChallengesIntoPKC(dataPath?: string): Promise<InstalledChallenge[]> {
     const challenges = await listInstalledChallenges(dataPath);
     if (challenges.length === 0) return [];
@@ -322,7 +351,21 @@ export async function loadChallengesIntoPKC(dataPath?: string): Promise<Installe
             // Resolve the entry point
             const entryPoint = pkg.main || "index.js";
             const entryPath = path.resolve(challenge.path, entryPoint);
-            const imported = await import(pathToFileURL(entryPath).href);
+
+            // Node caches ESM modules by URL, and `challenge install` swaps a new build onto
+            // the same destination path.  Importing the bare path would therefore hand back
+            // the module evaluated before the upgrade, so the registry would keep serving the
+            // old factory while metadata reports the new version (issue #124).  Keying the URL
+            // on the package contents re-evaluates the entry whenever the package changes and
+            // stays byte-identical (so cached, so factory-identical) when it does not.
+            //
+            // Only the entry module is re-evaluated: relative imports inside the package do not
+            // inherit the query, so a multi-file package graph would keep its stale submodules.
+            // Challenge packages are expected to ship a bundled entry point.
+            const entryUrl = pathToFileURL(entryPath);
+            entryUrl.searchParams.set("bitsocialChallengeContent", await hashChallengePackageContents(challenge.path));
+
+            const imported = await import(entryUrl.href);
             const factory = imported.default || imported;
             (PKC.default as any).challenges[challenge.name] = factory;
             loaded.push(challenge);
