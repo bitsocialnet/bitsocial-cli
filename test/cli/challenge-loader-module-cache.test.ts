@@ -3,7 +3,7 @@ import { directory as randomDirectory } from "tempy";
 import fsPromise from "fs/promises";
 import path from "path";
 import PKC from "@pkcprotocol/pkc-js";
-import { loadChallengesIntoPKC } from "../../src/challenge-packages/challenge-utils.js";
+import { loadChallengesIntoPKC, hashChallengePackageContents } from "../../src/challenge-packages/challenge-utils.js";
 
 // Issue #124: loadChallengesIntoPKC() imports every package from the same entry URL on
 // every reload. Node caches ESM modules by URL, so replacing a package in place (what
@@ -101,5 +101,83 @@ describe("loadChallengesIntoPKC module cache", { timeout: 60_000 }, () => {
         expect(await verifyWithActiveChallenge("8")).toBe(true);
         // Unchanged contents must not create a fresh module instance on every reload
         expect(getLoadedFactory()).toBe(factoryAfterFirstLoad);
+    });
+
+    // The content key skipped dot-prefixed entries, so a package whose pkg.main points into a
+    // dot directory kept its old import URL across a same-version replacement — the version
+    // never changes either, so nothing busted the cache and the stale module stayed active.
+    it("activates new code when a dot-path entry is replaced at the same version", async () => {
+        const dataPath = randomDirectory();
+        const challengeDir = path.join(dataPath, "challenges", CHALLENGE_NAME);
+
+        const installDotPathEntry = async (challenge: string): Promise<void> => {
+            await fsPromise.rm(challengeDir, { recursive: true, force: true });
+            await fsPromise.mkdir(path.join(challengeDir, ".dist"), { recursive: true });
+            await fsPromise.writeFile(
+                path.join(challengeDir, "package.json"),
+                JSON.stringify({ name: CHALLENGE_NAME, version: "1.0.0", type: "module", main: ".dist/index.js" }, null, 2)
+            );
+            await fsPromise.writeFile(
+                path.join(challengeDir, ".dist", "index.js"),
+                `export default function() {
+    return {
+        type: 'text/plain',
+        challenge: '${challenge}',
+        getChallenge: async () => ({ challenge: '${challenge}', type: 'text/plain', verify: async () => ({ success: true }) })
+    };
+};
+`
+            );
+        };
+
+        await installDotPathEntry("1+1");
+        await loadChallengesIntoPKC(dataPath);
+        expect(getActiveChallengeText()).toBe("1+1");
+
+        // Same version, new entry contents — `challenge install` allows this (reinstall replaces
+        // content even when the version is unchanged)
+        await installDotPathEntry("3+3");
+        await loadChallengesIntoPKC(dataPath);
+        expect(getActiveChallengeText()).toBe("3+3");
+    });
+});
+
+describe("hashChallengePackageContents", () => {
+    const writeFiles = async (dir: string, files: Record<string, string>): Promise<string> => {
+        await fsPromise.rm(dir, { recursive: true, force: true });
+        for (const [relativePath, contents] of Object.entries(files)) {
+            const filePath = path.join(dir, relativePath);
+            await fsPromise.mkdir(path.dirname(filePath), { recursive: true });
+            await fsPromise.writeFile(filePath, contents);
+        }
+        return dir;
+    };
+
+    it("distinguishes contents that share a concatenated byte stream", async () => {
+        // Hashing `path` then raw `contents` back to back is ambiguous: these two package
+        // states feed the identical stream "index.js" "A" "j" "Z" vs "index.js" "AjZ"
+        const root = randomDirectory();
+        const split = await writeFiles(path.join(root, "split"), { "index.js": "A", j: "Z" });
+        const merged = await writeFiles(path.join(root, "merged"), { "index.js": "AjZ" });
+
+        expect(await hashChallengePackageContents(split)).not.toBe(await hashChallengePackageContents(merged));
+    });
+
+    it("is stable for identical contents and changes when a file changes", async () => {
+        const root = randomDirectory();
+        const first = await writeFiles(path.join(root, "first"), { "index.js": "A", "lib/helper.js": "B" });
+        const same = await writeFiles(path.join(root, "same"), { "index.js": "A", "lib/helper.js": "B" });
+        const changed = await writeFiles(path.join(root, "changed"), { "index.js": "A", "lib/helper.js": "C" });
+
+        expect(await hashChallengePackageContents(first)).toBe(await hashChallengePackageContents(same));
+        expect(await hashChallengePackageContents(first)).not.toBe(await hashChallengePackageContents(changed));
+    });
+
+    it("ignores node_modules so reloads do not walk the dependency tree", async () => {
+        const root = randomDirectory();
+        const withoutDeps = await writeFiles(path.join(root, "without"), { "index.js": "A" });
+        const withDeps = await writeFiles(path.join(root, "with"), { "index.js": "A", "node_modules/dep/index.js": "anything" });
+
+        expect(await hashChallengePackageContents(withoutDeps)).toBe(await hashChallengePackageContents(withDeps));
     });
 });

@@ -207,7 +207,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
             });
             await sub.start();
             // Wait for community to publish its first IPNS record
-            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+            expect(await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500)).toBe(true);
         }, 120_000);
 
         afterAll(async () => {
@@ -263,7 +263,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 }
             });
             await sub.start();
-            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+            expect(await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500)).toBe(true);
         }, 120_000);
 
         afterAll(async () => {
@@ -324,7 +324,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 }
             });
             await sub.start();
-            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+            expect(await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500)).toBe(true);
 
             try {
                 const result = await publishCommentWithChallenge({
@@ -353,7 +353,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 }
             });
             await sub.start();
-            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+            expect(await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500)).toBe(true);
 
             try {
                 // v1 (installed in beforeAll) is active
@@ -436,7 +436,7 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 }
             });
             await sub.start();
-            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+            expect(await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500)).toBe(true);
 
             try {
                 const v3SrcDir = path.join(randomDirectory(), "test-challenge");

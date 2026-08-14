@@ -348,10 +348,12 @@ export async function reloadChallengesInDaemon(pkcRpcUrl: string | URL): Promise
 }
 
 // Hash of a challenge package's own source, used as the import cache key (see
-// loadChallengesIntoPKC).  node_modules and dot-entries are skipped: dependencies are
-// pinned by the install that produced this package dir, and hashing them would make
-// every reload walk the entire dependency tree.
-async function hashChallengePackageContents(challengeDir: string): Promise<string> {
+// loadChallengesIntoPKC).  Only node_modules is skipped: dependencies are pinned by the
+// install that produced this package dir, and hashing them would make every reload walk
+// the entire dependency tree.  Dot-prefixed files and directories are hashed — pkg.main
+// may point into one (".dist/index.js"), and skipping them left that entry out of the key,
+// so a same-version replacement kept the old import URL and served the stale module.
+export async function hashChallengePackageContents(challengeDir: string): Promise<string> {
     const hash = createHash("sha256");
 
     const walk = async (dir: string, relativeDir: string): Promise<void> => {
@@ -359,14 +361,18 @@ async function hashChallengePackageContents(challengeDir: string): Promise<strin
         // Sort so the digest does not depend on readdir order
         entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
         for (const entry of entries) {
-            if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+            if (entry.name === "node_modules") continue;
             const absolutePath = path.join(dir, entry.name);
             const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
             if (entry.isDirectory()) {
                 await walk(absolutePath, relativePath);
             } else if (entry.isFile()) {
-                hash.update(relativePath);
-                hash.update(await fs.readFile(absolutePath));
+                // Frame each record: feeding the path and the raw bytes back to back makes the
+                // stream ambiguous, so {index.js:"A", j:"Z"} and {index.js:"AjZ"} would hash
+                // identically and a changed entry could reuse the previous cache key
+                const contents = await fs.readFile(absolutePath);
+                const fileDigest = createHash("sha256").update(contents).digest("hex");
+                hash.update(`${relativePath}\0${fileDigest}\0`);
             }
         }
     };
