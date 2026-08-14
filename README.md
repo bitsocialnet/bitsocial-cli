@@ -424,7 +424,7 @@ EXAMPLES
   $ bitsocial challenge install ./my-local-challenge
 ```
 
-_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/challenge/install.ts)_
+_See code: [src/cli/commands/challenge/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/challenge/install.ts)_
 
 ## `bitsocial challenge list`
 
@@ -450,7 +450,7 @@ EXAMPLES
   $ bitsocial challenge list -q
 ```
 
-_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/challenge/list.ts)_
+_See code: [src/cli/commands/challenge/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/challenge/list.ts)_
 
 ## `bitsocial challenge ls`
 
@@ -505,7 +505,7 @@ EXAMPLES
   $ bitsocial challenge remove @scope/my-challenge
 ```
 
-_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/challenge/remove.ts)_
+_See code: [src/cli/commands/challenge/remove.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/challenge/remove.ts)_
 
 ## `bitsocial challenge rm NAME`
 
@@ -622,7 +622,7 @@ EXAMPLES
     $ bitsocial community create --jsonFile ./create-options.json
 ```
 
-_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/create.ts)_
+_See code: [src/cli/commands/community/create.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/create.ts)_
 
 ## `bitsocial community delete ADDRESSES`
 
@@ -647,7 +647,7 @@ EXAMPLES
   $ bitsocial community delete 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/delete.ts)_
+_See code: [src/cli/commands/community/delete.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/delete.ts)_
 
 ## `bitsocial community edit ADDRESS`
 
@@ -717,7 +717,7 @@ EXAMPLES
     $ bitsocial community edit bitsocial.bso --jsonFile ./edit-options.json
 ```
 
-_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/edit.ts)_
+_See code: [src/cli/commands/community/edit.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/edit.ts)_
 
 ## `bitsocial community export [ADDRESS]`
 
@@ -758,7 +758,7 @@ EXAMPLES
   $ bitsocial community export --publicKey 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/export.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/export.ts)_
+_See code: [src/cli/commands/community/export.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/export.ts)_
 
 ## `bitsocial community get [ADDRESS]`
 
@@ -789,7 +789,7 @@ EXAMPLES
   $ bitsocial community get --publicKey 12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu
 ```
 
-_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/get.ts)_
+_See code: [src/cli/commands/community/get.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/get.ts)_
 
 ## `bitsocial community list`
 
@@ -812,7 +812,7 @@ EXAMPLES
   $ bitsocial community list
 ```
 
-_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/list.ts)_
+_See code: [src/cli/commands/community/list.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/list.ts)_
 
 ## `bitsocial community start ADDRESSES`
 
@@ -846,7 +846,7 @@ EXAMPLES
     $ bitsocial community start $(bitsocial community list -q) --concurrency 1
 ```
 
-_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/start.ts)_
+_See code: [src/cli/commands/community/start.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/start.ts)_
 
 ## `bitsocial community stop ADDRESSES`
 
@@ -871,7 +871,7 @@ EXAMPLES
   $ bitsocial community stop Qmb99crTbSUfKXamXwZBe829Vf6w5w5TktPkb6WstC9RFW
 ```
 
-_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/community/stop.ts)_
+_See code: [src/cli/commands/community/stop.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/community/stop.ts)_
 
 ## `bitsocial daemon`
 
@@ -879,20 +879,24 @@ Run a network-connected Bitsocial node. Once the daemon is running you can creat
 
 ```
 USAGE
-  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--chainProviderUrls <value>...]
-    [--allowPrivateKeyExport]
+  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--chainProviderUrls <value>...] [--enableIpfsGc]
+    [--ipfsGcIntervalMinutes <value>] [--allowPrivateKeyExport]
 
 FLAGS
-  --[no-]allowPrivateKeyExport    Allow RPC clients to request community exports that include the community signer's
-                                  private key (`bitsocial community export --includePrivateKey`). Disable with
-                                  --no-allowPrivateKeyExport when exposing the RPC to untrusted clients
-  --chainProviderUrls=<value>...  [default:
-                                  https://eth.drpc.org,https://ethereum.publicnode.com,https://ethereum-rpc.publicnode.c
-                                  om,https://rpc.mevblocker.io,https://1rpc.io/eth,https://eth-pokt.nodies.app] RPC
-                                  URL(s) for .bso name resolution. Can be specified multiple times.
-  --logPath=<value>               (required) [default: /home/user2/.local/state/bitsocial] Specify a directory which
-                                  will be used to store logs
-  --pkcRpcUrl=<value>             (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
+  --[no-]allowPrivateKeyExport     Allow RPC clients to request community exports that include the community signer's
+                                   private key (`bitsocial community export --includePrivateKey`). Disable with
+                                   --no-allowPrivateKeyExport when exposing the RPC to untrusted clients
+  --chainProviderUrls=<value>...   [default:
+                                   https://eth.drpc.org,https://ethereum.publicnode.com,https://ethereum-rpc.publicnode.
+                                   com,https://rpc.mevblocker.io,https://1rpc.io/eth,https://eth-pokt.nodies.app] RPC
+                                   URL(s) for .bso name resolution. Can be specified multiple times.
+  --[no-]enableIpfsGc              Periodically garbage-collect the IPFS repo over the kubo RPC API while the daemon is
+                                   up. Only reclaims unpinned blocks — pinned data and MFS are never collected. Disable
+                                   with --no-enableIpfsGc
+  --ipfsGcIntervalMinutes=<value>  [default: 60] How often to garbage-collect the IPFS repo, in minutes
+  --logPath=<value>                (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
+                                   will be used to store logs
+  --pkcRpcUrl=<value>              (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
 
 DESCRIPTION
   Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and
@@ -918,7 +922,7 @@ EXAMPLES
   $ bitsocial daemon --no-allowPrivateKeyExport
 ```
 
-_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/daemon.ts)_
+_See code: [src/cli/commands/daemon.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/daemon.ts)_
 
 ## `bitsocial help [COMMAND]`
 
@@ -984,7 +988,7 @@ EXAMPLES
   $ bitsocial logs --stdout -f
 ```
 
-_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/logs.ts)_
+_See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/logs.ts)_
 
 ## `bitsocial update check`
 
@@ -1001,7 +1005,7 @@ EXAMPLES
   $ bitsocial update check
 ```
 
-_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/update/check.ts)_
+_See code: [src/cli/commands/update/check.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/update/check.ts)_
 
 ## `bitsocial update install [VERSION]`
 
@@ -1033,7 +1037,7 @@ EXAMPLES
   $ bitsocial update install --no-restart-daemons
 ```
 
-_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/update/install.ts)_
+_See code: [src/cli/commands/update/install.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/update/install.ts)_
 
 ## `bitsocial update versions`
 
@@ -1055,7 +1059,7 @@ EXAMPLES
   $ bitsocial update versions --limit 5
 ```
 
-_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.85/src/cli/commands/update/versions.ts)_
+_See code: [src/cli/commands/update/versions.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.88/src/cli/commands/update/versions.ts)_
 <!-- commandsstop -->
 
 ## Contribution

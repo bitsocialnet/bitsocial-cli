@@ -1,6 +1,6 @@
 {
     "name": "@bitsocial/bitsocial-cli",
-    "version": "0.19.85",
+    "version": "0.19.88",
     "description": "Command line interface to Bitsocial API",
     "types": "./dist/index.d.ts",
     "homepage": "https://github.com/bitsocialnet/bitsocial-cli",
@@ -119,13 +119,13 @@
         "@oclif/plugin-help": "6.2.36",
         "@oclif/plugin-not-found": "3.2.73",
         "@oclif/table": "0.5.1",
-        "@pkcprotocol/pkc-js": "0.0.73",
+        "@pkcprotocol/pkc-js": "0.0.81",
         "dataobject-parser": "1.2.22",
         "decompress": "4.2.1",
         "env-paths": "2.2.1",
         "exit-hook": "4.0.0",
         "express": "4.19.2",
-        "kubo": "0.42.0",
+        "kubo": "0.43.0",
         "p-limit": "7.3.0",
         "strip-json-comments": "5.0.3",
         "tcp-port-used": "1.0.2",
@@ -144,8 +144,8 @@
             "sha256OfHtmlZip": "14653b19e88868fda6fef26601f477947e44251cc52bd95d7d6fec158ae67b6f"
         },
         {
-            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.9.7",
-            "sha256OfHtmlZip": "878f7291b309d2845c5f616f02b802830d0c8764c701f524322d4ff56024269f"
+            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.9.17",
+            "sha256OfHtmlZip": "d7a8ebdd7a437568b828909093b7a881de6b091f6740ef81086427efb1752284"
         }
     ]
 }
