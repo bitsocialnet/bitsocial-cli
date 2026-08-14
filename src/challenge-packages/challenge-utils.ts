@@ -331,19 +331,26 @@ export function challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl: string): string | und
     return `http://${host.includes(":") ? `[${host}]` : host}:${url.port}/api/challenges/reload`;
 }
 
+/** How long install/remove wait for a daemon to finish reloading before giving up. */
+export const CHALLENGE_RELOAD_TIMEOUT_MS = 30000;
+
 /**
  * Ask the daemon at `pkcRpcUrl` to reload its challenge packages, so an install/remove takes
  * effect without a restart. Returns whether a daemon actually reloaded — best-effort, since
  * no daemon running is not an error.
+ *
+ * The request is bounded: a daemon that accepts the connection but never answers (busy, wedged,
+ * or something else listening on the port) would otherwise hold the CLI for undici's 300s
+ * default. Aborting only ends our wait — the daemon may still finish the reload.
  */
-export async function reloadChallengesInDaemon(pkcRpcUrl: string | URL): Promise<boolean> {
+export async function reloadChallengesInDaemon(pkcRpcUrl: string | URL, timeoutMs = CHALLENGE_RELOAD_TIMEOUT_MS): Promise<boolean> {
     const reloadUrl = challengeReloadUrlFromPkcRpcUrl(pkcRpcUrl.toString());
     if (!reloadUrl) return false;
     try {
-        const res = await fetch(reloadUrl, { method: "POST" });
+        const res = await fetch(reloadUrl, { method: "POST", signal: AbortSignal.timeout(timeoutMs) });
         return res.ok;
     } catch {
-        return false; // daemon not running, that's fine
+        return false; // daemon not running or not answering, that's fine
     }
 }
 
@@ -381,11 +388,37 @@ export async function hashChallengePackageContents(challengeDir: string): Promis
     return hash.digest("hex").slice(0, 16);
 }
 
+/**
+ * What each challenge name held in PKC.challenges before this process first registered a package
+ * under it.  PKC.challenges *is* pkc-js's own registry, so a package named after a built-in
+ * ("question") shadows it — unregistering has to hand the built-in back rather than delete the
+ * key.  `hadPrevious: false` means the name was ours alone and can be deleted.
+ *
+ * A process serves one data path (the daemon passes its own), so this is not keyed by data path.
+ */
+const shadowedChallenges = new Map<string, { hadPrevious: boolean; previous: unknown }>();
+
 export async function loadChallengesIntoPKC(dataPath?: string): Promise<InstalledChallenge[]> {
     const challenges = await listInstalledChallenges(dataPath);
-    if (challenges.length === 0) return [];
 
     const PKC = await import("@pkcprotocol/pkc-js");
+    const registry = (PKC.default as any).challenges as Record<string, unknown>;
+
+    // Hand back any name whose package is no longer installed, so `challenge remove` takes effect
+    // without a restart.  A package that is still installed but fails to import keeps its
+    // previously loaded factory: it is excluded from the returned list either way, and dropping a
+    // working challenge because its replacement is broken would take the community's publication
+    // flow down instead of leaving it on known-good code.
+    const installedNames = new Set(challenges.map((challenge) => challenge.name));
+    for (const [name, original] of shadowedChallenges) {
+        if (installedNames.has(name)) continue;
+        if (original.hadPrevious) registry[name] = original.previous;
+        else delete registry[name];
+        shadowedChallenges.delete(name);
+    }
+
+    if (challenges.length === 0) return [];
+
     const loaded: InstalledChallenge[] = [];
 
     for (const challenge of challenges) {
@@ -410,7 +443,12 @@ export async function loadChallengesIntoPKC(dataPath?: string): Promise<Installe
 
             const imported = await import(entryUrl.href);
             const factory = imported.default || imported;
-            (PKC.default as any).challenges[challenge.name] = factory;
+            // Remember what this name held before we first took it over, so `challenge remove`
+            // can hand it back instead of leaving a dead key (or deleting a pkc-js built-in)
+            if (!shadowedChallenges.has(challenge.name)) {
+                shadowedChallenges.set(challenge.name, { hadPrevious: challenge.name in registry, previous: registry[challenge.name] });
+            }
+            registry[challenge.name] = factory;
             loaded.push(challenge);
         } catch (err) {
             console.error(`Failed to load challenge "${challenge.name}":`, err);

@@ -142,6 +142,73 @@ describe("loadChallengesIntoPKC module cache", { timeout: 60_000 }, () => {
     });
 });
 
+// loadChallengesIntoPKC only ever added to the registry, so a challenge stayed live after
+// `challenge remove` until the daemon restarted.
+describe("loadChallengesIntoPKC unregistering", { timeout: 60_000 }, () => {
+    it("unregisters a challenge whose package is gone", async () => {
+        const dataPath = randomDirectory();
+        const challengesDir = path.join(dataPath, "challenges");
+        await fsPromise.mkdir(challengesDir, { recursive: true });
+        await installChallengePackage(challengesDir, { version: "1.0.0", challenge: "1+1", answer: "2" });
+
+        await loadChallengesIntoPKC(dataPath);
+        expect(getLoadedFactory()).toBeDefined();
+
+        await fsPromise.rm(path.join(challengesDir, CHALLENGE_NAME), { recursive: true, force: true });
+        const loaded = await loadChallengesIntoPKC(dataPath);
+
+        expect(loaded).toEqual([]);
+        expect(getLoadedFactory()).toBeUndefined();
+    });
+
+    it("restores a shadowed pkc-js built-in instead of deleting it", async () => {
+        const dataPath = randomDirectory();
+        const challengesDir = path.join(dataPath, "challenges");
+        const builtInName = "question";
+        const builtInFactory = (PKC as any).challenges[builtInName];
+        expect(builtInFactory).toBeTypeOf("function");
+
+        const packageDir = path.join(challengesDir, builtInName);
+        await fsPromise.mkdir(packageDir, { recursive: true });
+        await fsPromise.writeFile(
+            path.join(packageDir, "package.json"),
+            JSON.stringify({ name: builtInName, version: "1.0.0", type: "module" }, null, 2)
+        );
+        await fsPromise.writeFile(
+            path.join(packageDir, "index.js"),
+            `export default function() {
+    return { type: 'text/plain', challenge: 'shadowed', getChallenge: async () => ({ challenge: 'shadowed', type: 'text/plain', verify: async () => ({ success: true }) }) };
+};
+`
+        );
+
+        await loadChallengesIntoPKC(dataPath);
+        expect((PKC as any).challenges[builtInName]).not.toBe(builtInFactory);
+
+        await fsPromise.rm(packageDir, { recursive: true, force: true });
+        await loadChallengesIntoPKC(dataPath);
+
+        expect((PKC as any).challenges[builtInName]).toBe(builtInFactory);
+    });
+
+    it("keeps the working factory when a replacement fails to import", async () => {
+        const dataPath = randomDirectory();
+        const challengesDir = path.join(dataPath, "challenges");
+        await fsPromise.mkdir(challengesDir, { recursive: true });
+        await installChallengePackage(challengesDir, { version: "1.0.0", challenge: "1+1", answer: "2" });
+        await loadChallengesIntoPKC(dataPath);
+
+        // Replace the entry with code that throws on evaluation
+        await fsPromise.writeFile(path.join(challengesDir, CHALLENGE_NAME, "index.js"), `throw new Error("broken challenge");\n`);
+        const loaded = await loadChallengesIntoPKC(dataPath);
+
+        // Excluded from the response, so it cannot claim a version it did not activate...
+        expect(loaded).toEqual([]);
+        // ...but the community keeps serving known-good code rather than losing the challenge
+        expect(getActiveChallengeText()).toBe("1+1");
+    });
+});
+
 describe("hashChallengePackageContents", () => {
     const writeFiles = async (dir: string, files: Record<string, string>): Promise<string> => {
         await fsPromise.rm(dir, { recursive: true, force: true });
