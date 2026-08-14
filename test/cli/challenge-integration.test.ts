@@ -424,5 +424,50 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
                 }
             }
         });
+
+        // `challenge install` reloads on its own. It used to POST a hardcoded localhost:9138,
+        // so a daemon on a non-default RPC port (like this one) never saw the install; targets
+        // now come from the state files running daemons write.
+        it("challenge install alone updates a running daemon on a non-default RPC port", { timeout: 180_000 }, async () => {
+            const sub = await pkc.createCommunity();
+            await sub.edit({
+                settings: {
+                    challenges: [{ name: "test-challenge" }]
+                }
+            });
+            await sub.start();
+            await waitForCondition(() => !!(sub as any).updatedAt, 60000, 500);
+
+            try {
+                const v3SrcDir = path.join(randomDirectory(), "test-challenge");
+                await createMinimalChallengeDir(v3SrcDir, "test-challenge", {
+                    version: "3.0.0",
+                    description: "A test challenge for integration tests",
+                    challenge: "5+5",
+                    answer: "10"
+                });
+
+                // No explicit /api/challenges/reload call anywhere in this test — install must
+                // find this daemon by itself
+                const installResult = await runBitsocialChallenge(["install", v3SrcDir, "--pkcOptions.dataPath", dataPath]);
+                expect(installResult.exitCode).toBe(0);
+                expect(installResult.stdout).toContain("changed test-challenge@3.0.0 in");
+                expect(installResult.stdout).toContain("reloaded test-challenge@3.0.0 in 1 running daemon");
+
+                const result = await publishCommentWithChallenge({
+                    pkc,
+                    communityAddress: sub.address,
+                    challengeAnswer: "10"
+                });
+                expect(result.challengeText).toBe("5+5");
+                expect(result.challengeSuccess).toBe(true);
+            } finally {
+                try {
+                    await sub.stop();
+                } catch {
+                    /* ignore */
+                }
+            }
+        });
     });
 });

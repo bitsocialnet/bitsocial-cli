@@ -2,7 +2,12 @@ import { Args, Flags, Command } from "@oclif/core";
 import fs from "fs/promises";
 import path from "path";
 import defaults from "../../../common-utils/defaults.js";
-import { getChallengesDir, challengeNameToDir, readChallengePackageJson } from "../../../challenge-packages/challenge-utils.js";
+import {
+    getChallengesDir,
+    challengeNameToDir,
+    readChallengePackageJson,
+    reloadChallengesInRunningDaemons
+} from "../../../challenge-packages/challenge-utils.js";
 
 export default class Remove extends Command {
     static override description = "Remove an installed challenge package";
@@ -69,11 +74,8 @@ export default class Remove extends Command {
 
         this.log(`removed ${args.name}${version}`);
 
-        // Best-effort reload via daemon
-        try {
-            await fetch("http://localhost:9138/api/challenges/reload", { method: "POST" });
-        } catch {
-            // daemon not running, that's fine
-        }
+        // Best-effort reload in every running daemon serving this data path, so the
+        // removal takes effect without a restart
+        await reloadChallengesInRunningDaemons(dataPath);
     }
 }

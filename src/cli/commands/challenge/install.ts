@@ -10,7 +10,8 @@ import {
     readChallengePackageJson,
     runNpmPack,
     runNpmInstall,
-    verifyNativeModuleAbi
+    verifyNativeModuleAbi,
+    reloadChallengesInRunningDaemons
 } from "../../../challenge-packages/challenge-utils.js";
 
 export default class Install extends Command {
@@ -132,11 +133,11 @@ export default class Install extends Command {
             const elapsedSeconds = Math.max(1, Math.round((Date.now() - startTime) / 1000));
             this.log(`${alreadyExists ? "changed" : "added"} ${pkg.name}${version} in ${elapsedSeconds}s`);
 
-            // 10. Best-effort reload via daemon
-            try {
-                await fetch("http://localhost:9138/api/challenges/reload", { method: "POST" });
-            } catch {
-                // daemon not running, that's fine
+            // 10. Best-effort reload in every running daemon serving this data path, so the
+            //     install takes effect without a restart
+            const reloadedDaemonCount = await reloadChallengesInRunningDaemons(dataPath);
+            if (reloadedDaemonCount > 0) {
+                this.log(`reloaded ${pkg.name}${version} in ${reloadedDaemonCount} running daemon${reloadedDaemonCount === 1 ? "" : "s"}`);
             }
         } finally {
             // 11. Clean up temp dir (includes the previous-install backup, if any)
