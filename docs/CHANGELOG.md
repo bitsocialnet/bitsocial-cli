@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.92 (2026-08-17)</small>
+
+* test(daemon): poll waitForKuboReady instead of a one-shot fetch in the KUBO_RPC_URL test ([2612210](https://github.com/bitsocialnet/bitsocial-cli/commit/2612210)), closes [#95](https://github.com/bitsocialnet/bitsocial-cli/issues/95) [#133](https://github.com/bitsocialnet/bitsocial-cli/issues/133)
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.82 -> 0.0.83 ([c5d59ad](https://github.com/bitsocialnet/bitsocial-cli/commit/c5d59ad))
+
 ## <small>0.19.91 (2026-08-17)</small>
 
 * test(daemon-state): isolate the states dir so a parallel daemon's prune can't delete test files ([11da835](https://github.com/bitsocialnet/bitsocial-cli/commit/11da835)), closes [#130](https://github.com/bitsocialnet/bitsocial-cli/issues/130)
