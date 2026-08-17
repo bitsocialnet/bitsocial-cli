@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.91 (2026-08-17)</small>
+
+* test(daemon-state): isolate the states dir so a parallel daemon's prune can't delete test files ([11da835](https://github.com/bitsocialnet/bitsocial-cli/commit/11da835)), closes [#130](https://github.com/bitsocialnet/bitsocial-cli/issues/130)
+* test(daemon): retry the bind race when the CLI's own port guard fires (issue #128) ([5efb310](https://github.com/bitsocialnet/bitsocial-cli/commit/5efb310)), closes [#128](https://github.com/bitsocialnet/bitsocial-cli/issues/128)
+
 ## <small>0.19.90 (2026-08-17)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.81 -> 0.0.82 ([a6e1794](https://github.com/bitsocialnet/bitsocial-cli/commit/a6e1794))
