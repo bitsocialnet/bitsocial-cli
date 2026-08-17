@@ -1,13 +1,23 @@
 import { describe, it, expect, afterEach } from "vitest";
-import {
-    parseSystemdUnitFromCgroup,
-    detectSelfSupervisor,
-    resolveDaemonSupervisor,
-    writeDaemonState,
-    readAllDaemonStates,
-    deleteDaemonState
-} from "../../dist/common-utils/daemon-state.js";
+import path from "path";
+import { directory as randomDirectory } from "tempy";
 import type { DaemonState, DaemonSupervisor } from "../../dist/common-utils/daemon-state.js";
+
+// Isolate the daemon states dir (issue #130): the round-trip tests below write state files for
+// synthetic DEAD pids, and the dist module resolves its states dir once, at import time, from
+// env-paths' data dir. Left at its default that dir is machine-global, and every daemon prunes
+// dead-pid files there on startup — including daemons other test files start in parallel, which
+// would delete these files mid-test. The override must precede the import (PKC_DATA_PATH and
+// DAEMON_STATES_DIR are both computed eagerly), hence the dynamic import. See
+// test/common-utils/daemon-state.test.ts for the full story and its regression test.
+const isolatedHome = randomDirectory();
+process.env["HOME"] = isolatedHome;
+process.env["XDG_DATA_HOME"] = path.join(isolatedHome, ".local", "share");
+process.env["LOCALAPPDATA"] = path.join(isolatedHome, "AppData", "Local");
+process.env["APPDATA"] = path.join(isolatedHome, "AppData", "Roaming");
+
+const { parseSystemdUnitFromCgroup, detectSelfSupervisor, resolveDaemonSupervisor, writeDaemonState, readAllDaemonStates, deleteDaemonState } =
+    await import("../../dist/common-utils/daemon-state.js");
 
 // Supervisor detection/resolution for issue #82. The parser is pure; detect/resolve take an
 // injectable cgroup reader so we never depend on the test runner's own cgroup.
