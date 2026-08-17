@@ -232,7 +232,10 @@ describe("bitsocial daemon (kubo daemon is started by bitsocial-cli)", async () 
 
     afterAll(async () => {
         await stopPkcDaemon(daemonProcess);
-        await waitForPortFree(rpcPort, "localhost", 10000);
+        // beforeAll may have thrown before assigning rpcPort (a lost bind race, say). There is no
+        // port to wait on then, and failing here would just stack a teardown error on top of the
+        // real startup one (issue #128).
+        if (rpcPort !== undefined) await waitForPortFree(rpcPort, "localhost", 10000);
     });
 
     it(`PKC RPC server is started`, async () => {
