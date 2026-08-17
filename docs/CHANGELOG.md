@@ -2,6 +2,24 @@
 
 ## <small>0.19.92 (2026-08-17)</small>
 
+> [!WARNING]
+> **Back up your community databases before upgrading.** This release permanently deletes old comments that fail current signature validation.
+>
+> The pkc-js 0.0.83 bump makes community databases that predate the latest schema loadable again. Loading them lets the pending schema migration finally run, and that migration includes a validation pass that **deletes** any comment failing today's signature rules. On databases that had been stuck unmigrated, this pass runs for the first time.
+>
+> **What gets deleted:** comments signed before 2024-11-01 by old clients that set `protocolVersion` on the record without including it in `signature.signedPropertyNames`. Each one is removed along with its replies. On one production node this deleted 1264 comments plus their cascaded replies across 12 communities, with two small archive-only communities losing nearly all of their history.
+>
+> **What is safe:** anything signed on or after 2024-11-01. Since that point `signedPropertyNames` has always included `protocolVersion`, so no recent or active content is affected.
+>
+> **Back up first,** with the daemon stopped so the files are quiescent:
+>
+> ```sh
+> systemctl stop bitsocial     # or however you run the daemon
+> cp -a ~/.local/share/bitsocial/communities ~/bitsocial-communities-backup
+> ```
+>
+> The migration does write its own copy to `communities/.backup_before_migration/`, but that copy is **deleted as soon as the migration succeeds**, so it is not a substitute for your own backup.
+
 * test(daemon): poll waitForKuboReady instead of a one-shot fetch in the KUBO_RPC_URL test ([2612210](https://github.com/bitsocialnet/bitsocial-cli/commit/2612210)), closes [#95](https://github.com/bitsocialnet/bitsocial-cli/issues/95) [#133](https://github.com/bitsocialnet/bitsocial-cli/issues/133)
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.82 -> 0.0.83 ([c5d59ad](https://github.com/bitsocialnet/bitsocial-cli/commit/c5d59ad))
 
