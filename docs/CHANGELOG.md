@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.90 (2026-08-17)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.81 -> 0.0.82 ([a6e1794](https://github.com/bitsocialnet/bitsocial-cli/commit/a6e1794))
+
 ## <small>0.19.89 (2026-08-14)</small>
 
 * fix(challenge): close two holes in the content key, assert test readiness ([fec6a31](https://github.com/bitsocialnet/bitsocial-cli/commit/fec6a31))
