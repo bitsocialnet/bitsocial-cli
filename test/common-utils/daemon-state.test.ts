@@ -3,23 +3,42 @@ import fs from "fs/promises";
 import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { once } from "events";
+import { pathToFileURL } from "url";
 import { directory as randomDirectory } from "tempy";
-import defaults from "../../dist/common-utils/defaults.js";
-
-// We test the functions by importing them, but they use a hardcoded DAEMON_STATES_DIR.
-// To isolate tests, we test the logic directly with a custom dir via the module internals.
-// Since the module uses a fixed path, we'll test by writing/reading actual state files
-// in the real states dir, then cleaning up.
-
-// Import the actual functions
-import {
-    writeDaemonState,
-    readAllDaemonStates,
-    deleteDaemonState,
-    getAliveDaemonStates,
-    pruneStaleStates
-} from "../../dist/common-utils/daemon-state.js";
 import type { DaemonState } from "../../dist/common-utils/daemon-state.js";
+
+// These tests exercise the real dist module by writing and reading actual state files, and that module
+// resolves its states dir ONCE, at import time, from env-paths' data dir (daemon-state.ts:
+// DAEMON_STATES_DIR). Left at its default, that dir is machine-global — shared with every daemon on the
+// box, including those other test files start in parallel, each of which prunes dead-pid state files on
+// startup and so deletes the synthetic dead-pid ones written here (issue #130). So point the data dir at
+// a tempdir. Because both PKC_DATA_PATH and DAEMON_STATES_DIR are computed eagerly at module load, the
+// override has to happen BEFORE the dist modules are imported — hence the dynamic imports below.
+// env-paths derives the data dir from XDG_DATA_HOME on linux, HOME on macOS and LOCALAPPDATA on
+// windows, so all of them are overridden.
+const isolatedHome = randomDirectory();
+
+/**
+ * The data-dir env as the rest of the machine sees it, captured before the override, so a spawned
+ * pruner can be pointed at the REAL shared dir (see runExternalPrune). Keys with an undefined value are
+ * dropped from a child's env by child_process, which correctly restores "was never set".
+ */
+const REAL_DATA_DIR_ENV: NodeJS.ProcessEnv = {
+    HOME: process.env["HOME"],
+    XDG_DATA_HOME: process.env["XDG_DATA_HOME"],
+    LOCALAPPDATA: process.env["LOCALAPPDATA"],
+    APPDATA: process.env["APPDATA"]
+};
+
+process.env["HOME"] = isolatedHome;
+process.env["XDG_DATA_HOME"] = path.join(isolatedHome, ".local", "share");
+process.env["LOCALAPPDATA"] = path.join(isolatedHome, "AppData", "Local");
+process.env["APPDATA"] = path.join(isolatedHome, "AppData", "Roaming");
+
+const { writeDaemonState, readAllDaemonStates, deleteDaemonState, getAliveDaemonStates, pruneStaleStates } = await import(
+    "../../dist/common-utils/daemon-state.js"
+);
+const { default: defaults } = await import("../../dist/common-utils/defaults.js");
 
 // Use a PID range that definitely doesn't exist (very large PIDs)
 const FAKE_PID_BASE = 9999900;
@@ -32,6 +51,23 @@ const makeState = (pid: number): DaemonState => ({
     argv: ["--pkcRpcUrl", `ws://localhost:${9000 + pid}`],
     pkcRpcUrl: `ws://localhost:${9000 + pid}`
 });
+
+const DAEMON_STATE_MODULE = pathToFileURL(path.join(process.cwd(), "dist", "common-utils", "daemon-state.js")).href;
+
+/**
+ * Run `pruneStaleStates()` in a separate process against the machine-global states dir — exactly what
+ * a `bitsocial daemon` startup in a parallel test file does (daemon.ts calls it on startup), and what
+ * deleted this file's state files mid-test before the dir was isolated (issue #130). Touching the shared
+ * dir is safe: it removes only files whose pid is dead, the same best-effort cleanup any daemon does.
+ */
+const runExternalPrune = async (): Promise<void> => {
+    const proc = spawn(process.execPath, ["-e", `import('${DAEMON_STATE_MODULE}').then((m) => m.pruneStaleStates())`], {
+        stdio: "ignore",
+        env: { ...process.env, ...REAL_DATA_DIR_ENV }
+    });
+    const [exitCode] = (await once(proc, "close")) as [number | null];
+    expect(exitCode).toBe(0);
+};
 
 describe("daemon-state", () => {
     const createdPids: number[] = [];
@@ -57,6 +93,25 @@ describe("daemon-state", () => {
             expect(found).toBeDefined();
             expect(found!.argv).toEqual(state.argv);
             expect(found!.pkcRpcUrl).toBe(state.pkcRpcUrl);
+        });
+
+        // Regression test for https://github.com/bitsocialnet/bitsocial-cli/issues/130
+        // These tests write state files for synthetic DEAD pids, and the states dir the dist module
+        // resolves at import time used to be the machine-global one every daemon shares. Any daemon
+        // starting in a parallel test file prunes that dir on startup (daemon.ts -> pruneStaleStates),
+        // and a dead pid is exactly what it deletes — so this file's files vanished mid-test. It
+        // surfaced on Windows CI, whose slower timing widens the window: "should write multiple state
+        // files" failed with `expected [ 9999903 ] to include 9999902`, pid1's file pruned between the
+        // two writes and the read.
+        it("keeps its own state file when another daemon prunes the shared states dir", async () => {
+            const pid = nextFakePid();
+            createdPids.push(pid);
+            await writeDaemonState(makeState(pid));
+
+            await runExternalPrune();
+
+            const all = await readAllDaemonStates();
+            expect(all.map((s) => s.pid)).toContain(pid);
         });
 
         it("should write multiple state files", async () => {
