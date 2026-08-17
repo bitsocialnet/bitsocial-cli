@@ -178,6 +178,15 @@ export const waitForKuboReady = async (kuboApiUrl: string, timeoutMs = 20000) =>
 };
 
 export const waitForPortFree = async (port: number, host = "localhost", timeoutMs = 20000) => {
+    // A suite whose beforeAll threw still runs its afterAll, so this used to be handed an undefined
+    // port and net.Socket answered with a bare 'The "options" or "port" or "path" argument must be
+    // specified' — a teardown crash reported alongside the real startup error, pointing at the wrong
+    // line. Name the actual cause instead (issue #128).
+    if (!Number.isInteger(port) || port <= 0)
+        throw new Error(
+            `waitForPortFree was called with a non-numeric port (${String(port)}). This usually means the suite's ` +
+                `beforeAll threw before assigning it — fix that failure first, this teardown error is a symptom of it.`
+        );
     return waitForCondition(
         () =>
             new Promise<boolean>((resolve) => {
@@ -254,13 +263,23 @@ export const allocateKuboEndpoints = async (): Promise<KuboEndpoints> => {
 };
 
 // startPkcDaemon rejects with either a string (subprocess exit, carrying captured stdout/stderr)
-// or an Error; the bind-race signature can surface in either. A lost TOCTOU port race shows up two
-// ways: a raw bind failure ("...address already in use" / EADDRINUSE), OR the daemon's own pre-bind
-// guard firing first with "PKC RPC port ... became occupied before the daemon could bind it"
-// (src/cli/commands/daemon.ts). Both mean the same thing — retry with a fresh port set (issue #97).
+// or an Error; the bind-race signature can surface in either. A lost TOCTOU port race reaches us
+// three ways, and all three mean the same thing — retry with a fresh port set (issues #97, #128):
+//
+//   1. A raw bind failure from kubo itself: "...address already in use" / EADDRINUSE.
+//   2. The daemon's RPC pre-bind guard, which races its own check: "PKC RPC port ... became
+//      occupied before the daemon could bind it" (src/cli/commands/daemon.ts).
+//   3. The CLI's port-availability guards, which phrase it as "... port <host>:<port> ... is
+//      already in use" and never say "address": the kubo API / gateway / swarm checks in
+//      src/ipfs/startIpfs.ts and src/cli/commands/daemon.ts, plus the "PKC RPC port is already in
+//      use at <url>" check. Omitting these is what let a lost gateway-port race take down
+//      daemon.test.ts's whole beforeAll instead of being retried (issue #128).
+//
+// Keep the third pattern anchored on "port ... is already in use" rather than a bare "in use" so
+// an unrelated failure that merely mentions a port is still treated as real and rethrown.
 export const isAddressInUseError = (reason: unknown): boolean => {
     const message = typeof reason === "string" ? reason : reason instanceof Error ? reason.message : String(reason);
-    return /address already in use|EADDRINUSE|became occupied before the daemon could bind it/i.test(message);
+    return /address already in use|EADDRINUSE|became occupied before the daemon could bind it|port\b.*\bis already in use/i.test(message);
 };
 
 export type DynamicDaemonResult = KuboEndpoints & { daemonProcess: ManagedChildProcess };

@@ -5,7 +5,14 @@
 // allocator and the retry helper directly (no daemon spawn) so they're fast and deterministic.
 import { describe, it, expect } from "vitest";
 import net from "net";
-import { allocateFreePort, allocateKuboEndpoints, isAddressInUseError, withKuboBindRetry, type KuboEndpoints } from "./daemon-helpers.js";
+import {
+    allocateFreePort,
+    allocateKuboEndpoints,
+    isAddressInUseError,
+    waitForPortFree,
+    withKuboBindRetry,
+    type KuboEndpoints
+} from "./daemon-helpers.js";
 
 const isBindable = (port: number, host = "127.0.0.1") =>
     new Promise<boolean>((resolve) => {
@@ -34,6 +41,48 @@ describe("dynamic port allocation helpers (issue #87)", () => {
         expect(isAddressInUseError("listen tcp4 0.0.0.0:50599: bind: address already in use")).toBe(true);
         expect(isAddressInUseError(new Error("EADDRINUSE: address already in use 0.0.0.0:50599"))).toBe(true);
         expect(isAddressInUseError("some unrelated failure")).toBe(false);
+    });
+
+    // Issue #128: the same lost bind race also reaches us through the CLI's own pre-bind guards,
+    // which phrase it as "... port <host>:<port> ... is already in use" and never say "address
+    // already in use". Missing these meant startPkcDaemonWithDynamicPorts rethrew instead of
+    // retrying, so the race surfaced as a hard suite failure (daemon.test.ts's beforeAll).
+    it("isAddressInUseError recognises the CLI's own pre-bind guard wordings (issue #128)", () => {
+        // src/ipfs/startIpfs.ts:215 — one guard, three labels
+        expect(
+            isAddressInUseError(
+                "Cannot start IPFS daemon because the IPFS Gateway port 0.0.0.0:37685 (configured as /ip4/0.0.0.0/tcp/37685) is already in use."
+            )
+        ).toBe(true);
+        expect(
+            isAddressInUseError(
+                "Cannot start IPFS daemon because the IPFS Swarm port 0.0.0.0:41003 (configured as /ip4/0.0.0.0/tcp/41003) is already in use."
+            )
+        ).toBe(true);
+        // src/cli/commands/daemon.ts:416
+        expect(
+            isAddressInUseError(
+                new Error(
+                    "Cannot start IPFS daemon because the IPFS API port 0.0.0.0:34811 (configured as http://0.0.0.0:34811/api/v0) is already in use."
+                )
+            )
+        ).toBe(true);
+        // src/cli/commands/daemon.ts:320
+        expect(
+            isAddressInUseError("PKC RPC port is already in use at ws://localhost:41234/ (another bitsocial daemon is likely running).")
+        ).toBe(true);
+        // Still not a catch-all: an unrelated failure that merely mentions a port must not retry.
+        expect(isAddressInUseError("kubo repo is corrupt (port 41234 was fine)")).toBe(false);
+        expect(isAddressInUseError("could not reach the gateway port 0.0.0.0:37685")).toBe(false);
+    });
+
+    // The second, avoidable failure from issue #128: when beforeAll dies before assigning its port,
+    // afterAll called waitForPortFree(undefined) and net.Socket raised a TypeError about "options"
+    // or "port" — a teardown crash reported next to the real startup error. Name the cause instead.
+    it("waitForPortFree rejects with a cause-naming error when handed no port (issue #128)", async () => {
+        await expect(waitForPortFree(undefined as unknown as number, "localhost", 100)).rejects.toThrow(/waitForPortFree/i);
+        await expect(waitForPortFree(undefined as unknown as number, "localhost", 100)).rejects.toThrow(/beforeAll/i);
+        await expect(waitForPortFree(Number.NaN, "localhost", 100)).rejects.toThrow(/waitForPortFree/i);
     });
 
     it("withKuboBindRetry retries a bind race with fresh endpoints, then succeeds", async () => {
