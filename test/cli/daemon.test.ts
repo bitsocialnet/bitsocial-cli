@@ -753,9 +753,13 @@ describe(`bitsocial daemon KUBO_RPC_URL env var`, async () => {
         try {
             const daemon = await startPkcDaemonWithDynamicPorts((e) => ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", e.rpcWsUrl]);
             daemonProcess = daemon.daemonProcess;
-            // Kubo should be reachable on the port configured via the injected KUBO_RPC_URL env var
-            const res = await fetch(`${daemon.kuboApiUrl}/bitswap/stat`, { method: "POST" });
-            expect(res.status).toBe(200);
+            // Kubo should be reachable on the port configured via the injected KUBO_RPC_URL env var.
+            // Poll instead of a one-shot fetch: startPkcDaemon resolves on the "Communities in data
+            // path" banner, but pkc-js restarts kubo around init (it rewrites the Routing config and
+            // POSTs /shutdown on first connect), so a single fetch can land in the window where the
+            // API port refuses connections (issue #133, lineage #95).
+            const kuboReady = await waitForKuboReady(daemon.kuboApiUrl, 45000);
+            expect(kuboReady).toBe(true);
         } finally {
             await stopPkcDaemon(daemonProcess);
         }
