@@ -43,6 +43,20 @@ jobs:
           - variant: offline
             npm: '11.13.0'
             flags: '--offline --no-audit --no-fund'
+          # Round 2. Round 1 killed the resolution and postinstall theories:
+          # dry-run resolution is 12s on windows, and --ignore-scripts was no
+          # faster. What is left is reify - writing ~1386 packages to disk. The
+          # global prefix lives on C:, while the workspace (where npm ci writes
+          # the same tree in ~1m) is on D:, the runner's fast volume. Move the
+          # prefix to D: and see if the whole gap disappears.
+          - variant: prefix-on-d
+            npm: '11.13.0'
+            flags: '--prefer-offline --no-audit --no-fund'
+            prefix: 'D:\\npm-global'
+          - variant: prefix-on-d-npm12
+            npm: '12.0.2'
+            flags: '--prefer-offline --no-audit --no-fund'
+            prefix: 'D:\\npm-global'
 
     steps:
       - uses: actions/checkout@v6
@@ -83,16 +97,35 @@ jobs:
           grep -c '^add ' dryrun.txt || true
           tail -3 dryrun.txt
 
+      # Which volume is each path on? npm ci writes to the workspace on D:,
+      # the global install writes to the prefix - confirm where that is.
+      - name: Report paths
+        shell: bash
+        run: |
+          echo "prefix=$(npm config get prefix)"
+          echo "cache=$(npm config get cache)"
+          echo "workspace=$PWD"
+
+      - name: Point npm prefix at D:: (round 2 variants only)
+        if: matrix.prefix != ''
+        shell: bash
+        run: |
+          mkdir -p "/d/npm-global"
+          npm config set prefix "${{ matrix.prefix }}"
+          echo "prefix now: $(npm config get prefix)"
+          echo "D:\\npm-global" >> $GITHUB_PATH
+
       - name: Verify global install from pack (timed)
         shell: bash
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set +e
           TARBALL=$(ls -1 bitsocial-bitsocial-cli-*.tgz | tail -1)
-          echo "variant=${{ matrix.variant }} npm=$(npm --version) flags=${{ matrix.flags }}"
+          echo "variant=${{ matrix.variant }} npm=$(npm --version) flags=${{ matrix.flags }} prefix=$(npm config get prefix)"
           start=$(date +%s)
           npm install -g ${{ matrix.flags }} "./$TARBALL"
           code=$?
           echo "TIMING global-install $(( $(date +%s) - start ))s exit=$code"
-          bitsocial --version || echo "bitsocial --version failed (expected for ignore-scripts/offline)"
+          bitsocial --version || echo "bitsocial --version failed"
