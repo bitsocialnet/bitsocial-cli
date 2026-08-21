@@ -1,17 +1,24 @@
-# Temporary measurement harness for issue #136.
+# Temporary measurement harness for issue #136. Delete once #136 is fixed.
 #
-# The windows "Verify global install from pack" step in CI.yml takes 8-13
-# minutes to install a tree that `npm ci` installs in 2.3, and intermittently
-# blows the 20 minute job cap, which silently skips the release workflow.
+# Round 3. Ruled out so far, on windows runners:
+#   - resolution      : dry-run resolve is 11-12s
+#   - postinstalls    : --ignore-scripts is no faster (8.3m)
+#   - npm version     : 12.0.2 is no faster (10.8m)
+#   - network         : --offline SUCCEEDS (exit 0) in 10m, so the whole cost
+#                       is local work against an already-warm cache
 #
-# This runs the candidate variants side by side on windows so the fix is chosen
-# from numbers rather than a guess. Delete once #136 is fixed.
+# Round 2 tried to move the global prefix to D: but `npm config set prefix`
+# silently lost to setup-node's npm_config_prefix env var - the log shows
+# "prefix now: C:\npm\prefix". So that theory is UNTESTED, not disproven.
+# Here the prefix is forced with the --prefix flag and asserted before use.
+#
+# Reference points, same job, same runner:
+#   npm ci               2054 packages -> D: workspace  in ~55s
+#   npm install -g       1386 packages -> C:\npm\prefix in ~10m
 name: CI windows install experiment
 
 on:
   workflow_dispatch:
-  # workflow_dispatch only works from the default branch, and this harness is
-  # deliberately not on master, so drive it from pushes to its own branch.
   push:
     branches:
       - 'ci/windows-global-install-136'
@@ -19,44 +26,25 @@ on:
 jobs:
   measure:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     strategy:
       fail-fast: false
+      # Rounds 1 and 2 each had exactly one job land at ~25.6m while its
+      # siblings sat at 8-11m. Serialise so contention cannot be the story.
+      max-parallel: 1
       matrix:
         include:
-          # Control: exactly what CI.yml does today.
-          - variant: baseline
-            npm: '11.13.0'
-            flags: '--prefer-offline --no-audit --no-fund'
-          # Is this just an old-npm problem? CI.yml pins 11.13.0; 12.0.2 is current.
-          - variant: npm12
-            npm: '12.0.2'
-            flags: '--prefer-offline --no-audit --no-fund'
-          # Diagnostic: how much of the silent ~6m reify gap is postinstall
-          # scripts (kubo binary download, native prebuilds) vs. extraction?
-          # `bitsocial --version` is expected to fail here - we want the timing.
-          - variant: ignore-scripts
-            npm: '11.13.0'
-            flags: '--prefer-offline --no-audit --no-fund --ignore-scripts'
-          # Diagnostic: hard cache-only. Quantifies how much is network. Expected
-          # to fail with ENOTCACHED, which itself measures the cache-miss claim.
-          - variant: offline
-            npm: '11.13.0'
-            flags: '--offline --no-audit --no-fund'
-          # Round 2. Round 1 killed the resolution and postinstall theories:
-          # dry-run resolution is 12s on windows, and --ignore-scripts was no
-          # faster. What is left is reify - writing ~1386 packages to disk. The
-          # global prefix lives on C:, while the workspace (where npm ci writes
-          # the same tree in ~1m) is on D:, the runner's fast volume. Move the
-          # prefix to D: and see if the whole gap disappears.
-          - variant: prefix-on-d
-            npm: '11.13.0'
-            flags: '--prefer-offline --no-audit --no-fund'
-            prefix: 'D:\npm-global'
-          - variant: prefix-on-d-npm12
-            npm: '12.0.2'
-            flags: '--prefer-offline --no-audit --no-fund'
-            prefix: 'D:\npm-global'
+          # Control.
+          - variant: control
+            mode: global-default
+          # Does the destination volume explain it? C: is the default prefix;
+          # D: is where npm ci writes the same tree in under a minute.
+          - variant: prefix-d
+            mode: global-prefix-d
+          # Isolates "global install" from "installing a tarball spec". Same
+          # tarball, same resolve, ordinary project install on D:.
+          - variant: local-d
+            mode: local-d
 
     steps:
       - uses: actions/checkout@v6
@@ -64,9 +52,7 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
-      - run: corepack enable npm && corepack prepare npm@${{ matrix.npm }} --activate
-        shell: bash
-      - run: npm --version
+      - run: corepack enable npm && corepack prepare npm@11.13.0 --activate
         shell: bash
 
       - name: npm ci (with retry)
@@ -83,49 +69,53 @@ jobs:
       - run: npm run build
       - run: npx oclif manifest
 
-      # How much of the tree does the unlockfiled resolve actually change?
-      # Printed per variant so the drift is visible on the runner, not just locally.
-      - name: Measure resolution drift
+      - name: Pack
         shell: bash
-        continue-on-error: true
         run: |
           TARBALL=$(npm pack --silent | tail -1)
-          echo "TARBALL=$TARBALL"
-          start=$(date +%s)
-          npm install -g --prefer-offline --no-audit --no-fund --dry-run "./$TARBALL" > dryrun.txt 2>&1 || true
-          echo "TIMING dry-run-resolve $(( $(date +%s) - start ))s"
-          grep -c '^add ' dryrun.txt || true
-          tail -3 dryrun.txt
-
-      # Which volume is each path on? npm ci writes to the workspace on D:,
-      # the global install writes to the prefix - confirm where that is.
-      - name: Report paths
-        shell: bash
-        run: |
-          echo "prefix=$(npm config get prefix)"
+          echo "TARBALL=$TARBALL" >> $GITHUB_ENV
+          echo "packed $TARBALL"
+          echo "default prefix=$(npm config get prefix)"
           echo "cache=$(npm config get cache)"
-          echo "workspace=$PWD"
+          echo "npm_config_prefix env=${npm_config_prefix:-<unset>}"
 
-      - name: "Point npm prefix at D: (round 2 variants only)"
-        if: matrix.prefix != ''
-        shell: bash
-        run: |
-          mkdir -p "/d/npm-global"
-          npm config set prefix "${{ matrix.prefix }}"
-          echo "prefix now: $(npm config get prefix)"
-          echo "D:\npm-global" >> $GITHUB_PATH
-
-      - name: Verify global install from pack (timed)
+      - name: Install (timed)
         shell: bash
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-          TARBALL=$(ls -1 bitsocial-bitsocial-cli-*.tgz | tail -1)
-          echo "variant=${{ matrix.variant }} npm=$(npm --version) flags=${{ matrix.flags }} prefix=$(npm config get prefix)"
-          start=$(date +%s)
-          npm install -g ${{ matrix.flags }} "./$TARBALL"
-          code=$?
-          echo "TIMING global-install $(( $(date +%s) - start ))s exit=$code"
-          bitsocial --version || echo "bitsocial --version failed"
+          FLAGS="--prefer-offline --no-audit --no-fund"
+          case "${{ matrix.mode }}" in
+            global-default)
+              TARGET="default C:\\npm\\prefix"
+              start=$(date +%s)
+              npm install -g $FLAGS "./$TARBALL"; code=$?
+              ;;
+            global-prefix-d)
+              mkdir -p /d/npm-global
+              # --prefix on the command line beats npm_config_prefix, which is
+              # what defeated round 2. Assert it actually moved before timing.
+              echo "asserting prefix: $(npm config get prefix --prefix /d/npm-global)"
+              TARGET="D:\\npm-global"
+              start=$(date +%s)
+              npm install -g --prefix /d/npm-global $FLAGS "./$TARBALL"; code=$?
+              ;;
+            local-d)
+              mkdir -p /d/localinst && cd /d/localinst
+              npm init -y >/dev/null 2>&1
+              TARGET="D: local project"
+              start=$(date +%s)
+              npm install $FLAGS "$GITHUB_WORKSPACE/$TARBALL"; code=$?
+              ;;
+          esac
+          echo "TIMING install variant=${{ matrix.variant }} target=$TARGET $(( $(date +%s) - start ))s exit=$code"
+
+      - name: Where did it land
+        if: always()
+        shell: bash
+        run: |
+          echo "C:\\npm\\prefix  : $(ls -1 /c/npm/prefix/node_modules 2>/dev/null | wc -l) entries"
+          echo "D:\\npm-global   : $(ls -1 /d/npm-global/node_modules 2>/dev/null | wc -l) entries"
+          echo "D:\\localinst    : $(ls -1 /d/localinst/node_modules 2>/dev/null | wc -l) entries"
