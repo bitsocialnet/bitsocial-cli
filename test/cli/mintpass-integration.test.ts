@@ -178,7 +178,20 @@ describe.skipIf(process.platform === "win32")("@bitsocial/mintpass-challenge int
         const sub = await pkc.createCommunity();
         await sub.edit({
             settings: {
-                challenges: [{ name: "@bitsocial/mintpass-challenge" }]
+                challenges: [
+                    {
+                        name: "@bitsocial/mintpass-challenge",
+                        // pkc-js >= 0.0.85 validates settings.challenges against each challenge file's
+                        // optionInputs, and mintpass marks these three `required`. `default` there is a UI
+                        // hint that core never applies, so they have to be passed explicitly. The values
+                        // match the package's own runtime fallbacks, so challenge behaviour is unchanged.
+                        options: {
+                            chainTicker: "base",
+                            contractAddress: "0x13d41d6B8EA5C86096bb7a94C3557FCF184491b9",
+                            requiredTokenType: "0"
+                        }
+                    }
+                ]
             }
         });
         await sub.start();
