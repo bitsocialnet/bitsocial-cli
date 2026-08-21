@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.93 (2026-08-21)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.83 -> 0.0.85 ([f4eeb66](https://github.com/bitsocialnet/bitsocial-cli/commit/f4eeb66))
+* docs(changelog): warn to back up community DBs before the 0.19.92 migration ([5810493](https://github.com/bitsocialnet/bitsocial-cli/commit/5810493))
+
 ## <small>0.19.92 (2026-08-17)</small>
 
 > [!WARNING]
