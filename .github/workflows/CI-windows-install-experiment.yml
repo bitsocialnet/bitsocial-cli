@@ -1,0 +1,93 @@
+# Temporary measurement harness for issue #136.
+#
+# The windows "Verify global install from pack" step in CI.yml takes 8-13
+# minutes to install a tree that `npm ci` installs in 2.3, and intermittently
+# blows the 20 minute job cap, which silently skips the release workflow.
+#
+# This runs the candidate variants side by side on windows so the fix is chosen
+# from numbers rather than a guess. Delete once #136 is fixed.
+name: CI windows install experiment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  measure:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Control: exactly what CI.yml does today.
+          - variant: baseline
+            npm: '11.13.0'
+            flags: '--prefer-offline --no-audit --no-fund'
+          # Is this just an old-npm problem? CI.yml pins 11.13.0; 12.0.2 is current.
+          - variant: npm12
+            npm: '12.0.2'
+            flags: '--prefer-offline --no-audit --no-fund'
+          # Diagnostic: how much of the silent ~6m reify gap is postinstall
+          # scripts (kubo binary download, native prebuilds) vs. extraction?
+          # `bitsocial --version` is expected to fail here - we want the timing.
+          - variant: ignore-scripts
+            npm: '11.13.0'
+            flags: '--prefer-offline --no-audit --no-fund --ignore-scripts'
+          # Diagnostic: hard cache-only. Quantifies how much is network. Expected
+          # to fail with ENOTCACHED, which itself measures the cache-miss claim.
+          - variant: offline
+            npm: '11.13.0'
+            flags: '--offline --no-audit --no-fund'
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+      - run: corepack enable npm && corepack prepare npm@${{ matrix.npm }} --activate
+        shell: bash
+      - run: npm --version
+        shell: bash
+
+      - name: npm ci (with retry)
+        shell: bash
+        run: |
+          start=$(date +%s)
+          for attempt in 1 2 3; do
+            npm ci && break
+            echo "npm ci attempt $attempt failed; retrying in 15s..."
+            sleep 15
+          done
+          echo "TIMING npm-ci $(( $(date +%s) - start ))s"
+
+      - run: npm run build
+      - run: npx oclif manifest
+
+      # How much of the tree does the unlockfiled resolve actually change?
+      # Printed per variant so the drift is visible on the runner, not just locally.
+      - name: Measure resolution drift
+        shell: bash
+        continue-on-error: true
+        run: |
+          TARBALL=$(npm pack --silent | tail -1)
+          echo "TARBALL=$TARBALL"
+          start=$(date +%s)
+          npm install -g --prefer-offline --no-audit --no-fund --dry-run "./$TARBALL" > dryrun.txt 2>&1 || true
+          echo "TIMING dry-run-resolve $(( $(date +%s) - start ))s"
+          grep -c '^add ' dryrun.txt || true
+          tail -3 dryrun.txt
+
+      - name: Verify global install from pack (timed)
+        shell: bash
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARBALL=$(ls -1 bitsocial-bitsocial-cli-*.tgz | tail -1)
+          echo "variant=${{ matrix.variant }} npm=$(npm --version) flags=${{ matrix.flags }}"
+          start=$(date +%s)
+          npm install -g ${{ matrix.flags }} "./$TARBALL"
+          code=$?
+          echo "TIMING global-install $(( $(date +%s) - start ))s exit=$code"
+          bitsocial --version || echo "bitsocial --version failed (expected for ignore-scripts/offline)"
