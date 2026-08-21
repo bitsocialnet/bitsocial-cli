@@ -52,11 +52,11 @@ jobs:
           - variant: prefix-on-d
             npm: '11.13.0'
             flags: '--prefer-offline --no-audit --no-fund'
-            prefix: 'D:\\npm-global'
+            prefix: 'D:\npm-global'
           - variant: prefix-on-d-npm12
             npm: '12.0.2'
             flags: '--prefer-offline --no-audit --no-fund'
-            prefix: 'D:\\npm-global'
+            prefix: 'D:\npm-global'
 
     steps:
       - uses: actions/checkout@v6
@@ -106,14 +106,14 @@ jobs:
           echo "cache=$(npm config get cache)"
           echo "workspace=$PWD"
 
-      - name: Point npm prefix at D:: (round 2 variants only)
+      - name: "Point npm prefix at D: (round 2 variants only)"
         if: matrix.prefix != ''
         shell: bash
         run: |
           mkdir -p "/d/npm-global"
           npm config set prefix "${{ matrix.prefix }}"
           echo "prefix now: $(npm config get prefix)"
-          echo "D:\\npm-global" >> $GITHUB_PATH
+          echo "D:\npm-global" >> $GITHUB_PATH
 
       - name: Verify global install from pack (timed)
         shell: bash
