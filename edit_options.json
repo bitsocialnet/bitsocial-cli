@@ -1,0 +1,54 @@
+{
+    "settings": {
+        "challenges": [
+            {
+                "name": "publication-match",
+                "options": {
+                    "matches": "[{\"propertyName\":\"author.name\",\"regexp\":\"\\\\.(bso)$\"}]",
+                    "error": "Posting in this community requires a name that ends with .bso Go to the settings to set your username."
+                },
+                "exclude": [
+                    { "role": ["moderator", "admin", "owner"] },
+                    {
+                        "postScore": 3,
+                        "replyScore": 0,
+                        "firstCommentTimestamp": 2592000,
+                        "rateLimit": 2
+                    },
+                    { "challenges": [1] },
+                    { "challenges": [2] }
+                ],
+                "pendingApproval": false
+            },
+            {
+                "name": "whitelist",
+                "options": {
+                    "urls": "https://raw.githubusercontent.com/bitsocialnet/lists/refs/heads/master/whitelist-challenge.json",
+                    "error": "Or posting in this community requires being whitelisted. Go to https://t.me/bitsocialnet and ask to be whitelisted."
+                },
+                "exclude": [{ "role": ["moderator", "admin", "owner"] }, { "challenges": [0] }, { "challenges": [2] }],
+                "pendingApproval": false
+            },
+            {
+                "name": "@bitsocial/spam-blocker-challenge",
+                "options": {
+                    "serverUrl": "https://spamblocker.bitsocial.net/api/v1",
+                    "autoAcceptThreshold": "0.2",
+                    "autoRejectThreshold": "0.8"
+                },
+                "exclude": [
+                    { "challenges": [0] },
+                    { "challenges": [1] },
+                    { "role": ["owner", "admin", "moderator"] },
+                    {
+                        "publicationType": {
+                            "commentModeration": true,
+                            "communityEdit": true
+                        }
+                    }
+                ],
+                "pendingApproval": true
+            }
+        ]
+    }
+}

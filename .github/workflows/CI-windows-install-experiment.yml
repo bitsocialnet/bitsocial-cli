@@ -10,6 +10,11 @@ name: CI windows install experiment
 
 on:
   workflow_dispatch:
+  # workflow_dispatch only works from the default branch, and this harness is
+  # deliberately not on master, so drive it from pushes to its own branch.
+  push:
+    branches:
+      - 'ci/windows-global-install-136'
 
 jobs:
   measure:
