@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.94 (2026-08-22)</small>
+
+* ci: install the packed tarball to the fast volume on windows (#136) ([a2231d0](https://github.com/bitsocialnet/bitsocial-cli/commit/a2231d0)), closes [#136](https://github.com/bitsocialnet/bitsocial-cli/issues/136)
+
 ## <small>0.19.93 (2026-08-21)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js 0.0.83 -> 0.0.85 ([f4eeb66](https://github.com/bitsocialnet/bitsocial-cli/commit/f4eeb66))
