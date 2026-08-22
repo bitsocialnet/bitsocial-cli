@@ -11,6 +11,7 @@
 -   [What is Bitsocial?](#what-is-bitsocial)
 -   [What is bitsocial-cli?](#what-is-bitsocial-cli)
 -   [Install](#install)
+-   [Use 5chan in your normal browser](#use-5chan-in-your-normal-browser)
 -   [Docker](#docker)
 -   [Usage](#usage)
 -   [Commands](#commands)
@@ -28,7 +29,7 @@ Bitsocial is p2p and decentralized social media protocol built completely with I
 -   Runs an IPFS and Bitsocial node
 -   Command Line interface to manage Bitsocial communities
 -   WebSocket RPC to access and control your communities and publications
--   Includes Web UIs like Seedit where you can browse the network and manage your community
+-   Includes Web UIs like 5chan and Seedit where you can browse the network and manage your community
 
 ## Install
 
@@ -65,6 +66,16 @@ npm run ci:download-web-uis
 ```
 
 After running the last command you should be able to run commands directly against `./bin/run`, for example `./bin/run daemon`
+
+## Use 5chan in your normal browser
+
+`bitsocial-cli` includes the 5chan Web UI. If you want to run the full P2P Bitsocial/IPFS node but open 5chan in your normal browser, start the daemon:
+
+```sh-session
+bitsocial daemon
+```
+
+The daemon prints a `WebUI (5chan - Imageboard-style UI)` URL. Open that URL in your browser to use 5chan through your local node. You do not need the separate 5chan desktop app or a local checkout of the 5chan repository.
 
 ## Docker
 
@@ -108,10 +119,11 @@ The output will include lines like:
 
 ```
 pkc rpc: listening on ws://localhost:9138/<auth-key> (secret auth key for remote connections)
+WebUI (5chan - Imageboard-style UI): http://<your-ip>:9138/<auth-key>/5chan (secret auth key for remote connections)
 WebUI (seedit - Similar to old reddit UI): http://<your-ip>:9138/<auth-key>/seedit (secret auth key for remote connections)
 ```
 
-Open the WebUI URL in your browser to start using Bitsocial.
+Open the 5chan or Seedit WebUI URL in your browser to start using Bitsocial.
 
 #### Viewing logs
 
