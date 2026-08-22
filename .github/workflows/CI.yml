@@ -12,6 +12,7 @@ on:
       - 'config/**'
       - 'ci-bin/**'
       - 'ci-bin/*'
+      - '.github/**'
       - 'package.json'
       - 'package-lock.json'
       - 'Dockerfile'
@@ -69,18 +70,42 @@ jobs:
       - run: npm run build
       - run: npx oclif manifest
 
+      # Windows defaults the npm global prefix to C:\npm\prefix, on the OS
+      # volume. Installing this package's ~1386 dependencies there took ~9m,
+      # while `npm ci` writes a larger tree (2054 packages) to the workspace on
+      # D:, the runner's fast volume, in ~55s. That gap repeatedly pushed the
+      # job past timeout-minutes, and a cancelled CI run on master silently
+      # skips CI-build.yml, so no release is published (issue #136).
+      #
+      # Measured on windows-latest, same warm cache, only the destination
+      # differing: C: 9.1m, D: 1.4m, and a plain non-global install on D: 1.0m.
+      # Resolution (12s), postinstall scripts, npm version and the network were
+      # each ruled out first - `--offline` succeeds in ~10m, so none of the cost
+      # was registry traffic.
+      #
+      # setup-node exports npm_config_prefix, which takes precedence over
+      # `npm config set prefix`, so the env var itself has to be overridden.
+      - name: Put the npm global prefix on the fast volume (windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p /d/npm-global
+          echo 'npm_config_prefix=D:\npm-global' >> $GITHUB_ENV
+          echo 'D:\npm-global' >> $GITHUB_PATH
+
       - name: Verify global install from pack
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "npm global prefix: $(npm config get prefix)"
           TARBALL=$(npm pack | tail -1)
           # Retry: the kubo postinstall downloads its binary from dist.ipfs.tech,
           # which intermittently returns 5xx and aborts the install with no retry
           # of its own (issue #110).
-          # --prefer-offline reuses the cache primed by `npm ci` above, which
-          # skips the registry round trips that made this step take 17m on
-          # Windows and blow the job timeout.
+          # --prefer-offline reuses the cache primed by `npm ci` above. Note it
+          # is not what makes this step fast - see #136; the destination volume
+          # is. Kept because reusing the cache is still the right default.
           for attempt in 1 2 3; do
             npm install -g --prefer-offline --no-audit --no-fund "./$TARBALL" && break
             echo "global install attempt $attempt failed; retrying in 15s..."
