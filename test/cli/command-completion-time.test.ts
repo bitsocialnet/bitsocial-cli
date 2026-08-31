@@ -21,11 +21,21 @@ let KUBO_API_PORT: number;
 let GATEWAY_PORT: number;
 let rpcWsUrl: string;
 
-// Generic subprocess runner with timeout
+// Cap diagnostic dumps so a timeout error stays readable
+const tailOf = (text: string, maxChars = 8_000): string =>
+    text.length > maxChars ? `...(truncated)...${text.slice(-maxChars)}` : text;
+
+// Generic subprocess runner with timeout.
+//
+// The vitest per-test timeouts below are intentionally LARGER than timeoutMs:
+// this rejection (which carries the child's stdout/stderr and any extra
+// diagnostics) must fire before vitest's generic "Test timed out", otherwise a
+// hang in CI produces no information at all (issue #140).
 const runBitsocialCommand = (
     args: string[],
     env?: Record<string, string>,
-    timeoutMs = 10_000
+    timeoutMs = 10_000,
+    collectTimeoutDiagnostics?: () => Promise<string>
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> => {
     return new Promise((resolve, reject) => {
         const proc = spawn("node", ["./bin/run", ...args], {
@@ -41,11 +51,24 @@ const runBitsocialCommand = (
         proc.stderr.on("data", (data: Buffer) => {
             stderr += data.toString();
         });
-        const timer = setTimeout(() => {
+        // Once the timeout fires, the SIGKILL below triggers "close" while we
+        // are still awaiting the diagnostics collection — the close handler
+        // must not resolve then, or the informative rejection would be lost.
+        let timedOut = false;
+        const timer = setTimeout(async () => {
+            timedOut = true;
             proc.kill("SIGKILL");
-            reject(new Error(`Command timed out after ${timeoutMs}ms: bitsocial ${args.join(" ")}\nstdout: ${stdout}\nstderr: ${stderr}`));
+            let extraDiagnostics = "";
+            if (collectTimeoutDiagnostics)
+                extraDiagnostics = await collectTimeoutDiagnostics().catch((e) => `failed to collect diagnostics: ${e}`);
+            reject(
+                new Error(
+                    `Command timed out after ${timeoutMs}ms: bitsocial ${args.join(" ")}\nstdout: ${tailOf(stdout)}\nstderr: ${tailOf(stderr)}\n${extraDiagnostics}`
+                )
+            );
         }, timeoutMs);
         proc.on("close", (exitCode) => {
+            if (timedOut) return;
             clearTimeout(timer);
             resolve({ stdout, stderr, exitCode });
         });
@@ -81,6 +104,27 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
     let communityAddress: string;
     let stateHome: string;
     let logDir: string;
+
+    // Daemon-side context for command timeouts: the daemon's captured output
+    // plus the tail of its log files, which otherwise live in a temp dir CI
+    // never surfaces (issue #140).
+    const collectDaemonDiagnostics = async (): Promise<string> => {
+        const parts: string[] = [
+            `daemon stdout (tail): ${tailOf(daemonProcess?.capturedStdout ?? "<none>")}`,
+            `daemon stderr (tail): ${tailOf(daemonProcess?.capturedStderr ?? "<none>")}`
+        ];
+        try {
+            const logFiles = (await fsPromise.readdir(logDir)).filter((f) => f.endsWith(".log"));
+            for (const logFile of logFiles) {
+                const content = await fsPromise.readFile(path.join(logDir, logFile), "utf8");
+                parts.push(`daemon log ${logFile} (tail): ${tailOf(content)}`);
+            }
+            if (logFiles.length === 0) parts.push(`daemon log dir ${logDir} contains no .log files`);
+        } catch (e) {
+            parts.push(`failed to read daemon log dir ${logDir}: ${e}`);
+        }
+        return parts.join("\n");
+    };
 
     beforeAll(async () => {
         stateHome = randomDirectory();
@@ -119,93 +163,124 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         ]);
     }, 60_000);
 
-    it("community create completes within 10s", { timeout: 10_000 }, async () => {
+    it("community create completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "create", "--description", "test community", "--pkcRpcUrl", rpcWsUrl]
+            ["community", "create", "--description", "test community", "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         communityAddress = result.stdout.trim();
         expect(communityAddress.length).toBeGreaterThan(0);
     });
 
-    it("community list -q completes within 10s", { timeout: 10_000 }, async () => {
+    it("community list -q completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "list", "-q", "--pkcRpcUrl", rpcWsUrl]
+            ["community", "list", "-q", "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain(communityAddress);
     });
 
-    it("community list (table) completes within 10s", { timeout: 10_000 }, async () => {
+    it("community list (table) completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "list", "--pkcRpcUrl", rpcWsUrl]
+            ["community", "list", "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain(communityAddress);
     });
 
-    it("community get completes within 10s", { timeout: 10_000 }, async () => {
+    it("community get completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "get", communityAddress, "--pkcRpcUrl", rpcWsUrl]
+            ["community", "get", communityAddress, "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         const json = JSON.parse(result.stdout);
         expect(json).toHaveProperty("address");
     });
 
-    it("community edit completes within 10s", { timeout: 10_000 }, async () => {
+    it("community edit completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "edit", communityAddress, "--title", "new title", "--pkcRpcUrl", rpcWsUrl]
+            ["community", "edit", communityAddress, "--title", "new title", "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
-    it("community stop completes within 10s", { timeout: 10_000 }, async () => {
+    it("community stop completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl]
+            ["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
-    it("community start completes within 10s", { timeout: 10_000 }, async () => {
+    it("community start completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "start", communityAddress, "--pkcRpcUrl", rpcWsUrl]
+            ["community", "start", communityAddress, "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
-    it("community stop (before delete) completes within 10s", { timeout: 10_000 }, async () => {
+    it("community stop (before delete) completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl]
+            ["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
-    it("community delete completes within 30s", { timeout: 30_000 }, async () => {
+    it("community delete completes within 30s", { timeout: 60_000 }, async () => {
         const result = await runBitsocialCommand(
             ["community", "delete", communityAddress, "--pkcRpcUrl", rpcWsUrl],
             undefined,
-            30_000
+            30_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).toBe(communityAddress);
     });
 
-    it("community list -q shows no communities after delete", { timeout: 10_000 }, async () => {
+    it("community list -q shows no communities after delete", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["community", "list", "-q", "--pkcRpcUrl", rpcWsUrl]
+            ["community", "list", "-q", "--pkcRpcUrl", rpcWsUrl],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.trim()).not.toContain(communityAddress);
     });
 
-    it("logs --tail 1 completes within 10s", { timeout: 10_000 }, async () => {
+    it("logs --tail 1 completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
-            ["logs", "--tail", "1", "--logPath", logDir]
+            ["logs", "--tail", "1", "--logPath", logDir],
+            undefined,
+            10_000,
+            collectDaemonDiagnostics
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout.length).toBeGreaterThan(0);
@@ -226,7 +301,7 @@ describe("challenge commands complete within 10s", () => {
         dataPath = randomDirectory();
     });
 
-    it("challenge list (empty) completes within 10s", { timeout: 10_000 }, async () => {
+    it("challenge list (empty) completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
             ["challenge", "list", "--pkcOptions.dataPath", dataPath]
         );
@@ -234,7 +309,7 @@ describe("challenge commands complete within 10s", () => {
         expect(result.stdout).toContain("No challenge packages installed");
     });
 
-    it("challenge install completes within 10s", { timeout: 10_000 }, async () => {
+    it("challenge install completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
             ["challenge", "install", challengeSrcDir, "--pkcOptions.dataPath", dataPath]
         );
@@ -242,7 +317,7 @@ describe("challenge commands complete within 10s", () => {
         expect(result.stdout).toContain("added test-challenge@1.0.0 in");
     });
 
-    it("challenge list (after install) completes within 10s", { timeout: 10_000 }, async () => {
+    it("challenge list (after install) completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
             ["challenge", "list", "--pkcOptions.dataPath", dataPath]
         );
@@ -250,7 +325,7 @@ describe("challenge commands complete within 10s", () => {
         expect(result.stdout).toContain("test-challenge");
     });
 
-    it("challenge remove completes within 10s", { timeout: 10_000 }, async () => {
+    it("challenge remove completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
             ["challenge", "remove", "test-challenge", "--pkcOptions.dataPath", dataPath]
         );
@@ -258,7 +333,7 @@ describe("challenge commands complete within 10s", () => {
         expect(result.stdout).toContain("removed test-challenge@1.0.0");
     });
 
-    it("challenge list (after remove) completes within 10s", { timeout: 10_000 }, async () => {
+    it("challenge list (after remove) completes within 10s", { timeout: 30_000 }, async () => {
         const result = await runBitsocialCommand(
             ["challenge", "list", "--pkcOptions.dataPath", dataPath]
         );
