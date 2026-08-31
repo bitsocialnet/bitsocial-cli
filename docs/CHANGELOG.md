@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.95 (2026-08-31)</small>
+
+* test: surface diagnostics when a completion-time command times out (#140) ([c4c40e5](https://github.com/bitsocialnet/bitsocial-cli/commit/c4c40e5)), closes [#140](https://github.com/bitsocialnet/bitsocial-cli/issues/140)
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.85 -> 0.0.89 ([a639363](https://github.com/bitsocialnet/bitsocial-cli/commit/a639363))
+
 ## <small>0.19.94 (2026-08-22)</small>
 
 * ci: install the packed tarball to the fast volume on windows (#136) ([a2231d0](https://github.com/bitsocialnet/bitsocial-cli/commit/a2231d0)), closes [#136](https://github.com/bitsocialnet/bitsocial-cli/issues/136)
