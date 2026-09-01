@@ -85,6 +85,58 @@ export async function ensureIpnsPubsubEnabled(log: any, ipfsConfigPath: string) 
     log("Enabled Ipns.UsePubsub in IPFS config (replaces deprecated --enable-namesys-pubsub flag).", ipfsConfigPath);
 }
 
+// pkc-js (>= 0.0.46) rewrites the connected kubo node's Routing config during its init from the
+// httpRoutersOptions we pass it, and POSTs /shutdown to kubo when the router endpoint set changed
+// — always true on a repo pkc-js hasn't configured yet — expecting the daemon to restart kubo
+// (which keepKuboUp does). That restart opens a multi-second window right after the daemon's
+// ready banner where kubo's API refuses connections (issue #143). Writing the equivalent config
+// before kubo spawns makes pkc-js's endpoint comparison a no-op, so the shutdown never happens.
+//
+// This must mirror pkc-js's setupKuboHttpRouters exactly — including the HttpRouterNotSupported
+// sentinel, whose endpoint participates in the comparison. If a pkc-js upgrade changes that
+// mapping, behavior degrades back to a one-time restart; the regression test in
+// test/cli/daemon-no-kubo-restart-on-fresh-start.test.ts catches that on upgrade.
+export function buildKuboRoutingConfigForHttpRouters(httpRoutersOptions: string[]) {
+    const httpRouterUrls = [...httpRoutersOptions].sort();
+    const parallelRouters: { RouterName: string; IgnoreErrors: boolean; Timeout: string }[] = [];
+    const routers: Record<string, any> = {
+        HttpRoutersParallel: { Type: "parallel", Parameters: { Routers: parallelRouters } },
+        HttpRouterNotSupported: { Type: "http", Parameters: { Endpoint: "http://kubohttprouternotsupported" } }
+    };
+    for (const [i, httpRouterUrl] of httpRouterUrls.entries()) {
+        const RouterName = `HttpRouter${i + 1}`;
+        routers[RouterName] = { Type: "http", Parameters: { Endpoint: httpRouterUrl } };
+        parallelRouters[i] = { RouterName, IgnoreErrors: true, Timeout: "10s" };
+    }
+    return {
+        Type: "custom",
+        Methods: {
+            "find-providers": { RouterName: "HttpRoutersParallel" },
+            provide: { RouterName: "HttpRoutersParallel" },
+            "find-peers": { RouterName: "HttpRouterNotSupported" },
+            "get-ipns": { RouterName: "HttpRouterNotSupported" },
+            "put-ipns": { RouterName: "HttpRouterNotSupported" }
+        },
+        Routers: routers
+    };
+}
+
+// Runs on every start (not just fresh init): a release or flag change can alter the router list
+// on an existing repo, which would otherwise re-trigger pkc-js's shutdown. Routing is effectively
+// owned by pkc-js — it overwrites the section unconditionally at init — so replacing it here
+// preserves no less user state than pkc-js itself would. pkc-js also sets
+// Provide.DHT.SweepEnabled=false alongside; seed it too so kubo boots with its final config.
+export async function ensureKuboRoutingConfigMatchesHttpRouters(log: any, ipfsConfigPath: string, httpRoutersOptions: string[]) {
+    if (!Array.isArray(httpRoutersOptions) || httpRoutersOptions.length === 0) return;
+    const config = JSON.parse((await fsPromises.readFile(ipfsConfigPath)).toString());
+    const desiredRouting = buildKuboRoutingConfigForHttpRouters(httpRoutersOptions);
+    if (remeda.isDeepEqual(config.Routing, desiredRouting) && config.Provide?.DHT?.SweepEnabled === false) return;
+    config.Routing = desiredRouting;
+    config.Provide = { ...(config.Provide ?? {}), DHT: { ...(config.Provide?.DHT ?? {}), SweepEnabled: false } };
+    await fsPromises.writeFile(ipfsConfigPath, JSON.stringify(config, null, 4));
+    log("Pre-seeded kubo Routing config for the configured http routers so pkc-js init does not restart kubo.", ipfsConfigPath);
+}
+
 // use this custom function instead of spawnSync for better logging
 // also spawnSync might have been causing crash on start on windows
 
@@ -221,7 +273,8 @@ export async function startKuboNode(
     apiUrl: URL,
     gatewayUrl: URL,
     dataPath: string,
-    onSpawn?: (process: ChildProcessWithoutNullStreams) => void
+    onSpawn?: (process: ChildProcessWithoutNullStreams) => void,
+    httpRoutersOptions?: string[]
 ): Promise<ChildProcessWithoutNullStreams> {
     // Preparation phase runs as plain awaits so any failure rejects the returned promise.
     // It must NOT live inside the new Promise() executor below: an async executor swallows
@@ -261,6 +314,8 @@ export async function startKuboNode(
 
     // Replaces the deprecated `--enable-namesys-pubsub` daemon flag; must run for existing repos too.
     await ensureIpnsPubsubEnabled(log, ipfsConfigPath);
+
+    if (httpRoutersOptions) await ensureKuboRoutingConfigMatchesHttpRouters(log, ipfsConfigPath, httpRoutersOptions);
 
     try {
         await _spawnAsync(log, kuboExePath, ["repo", "migrate"], { env, hideWindows: true });

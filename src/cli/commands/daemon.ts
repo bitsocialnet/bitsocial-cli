@@ -429,7 +429,8 @@ export default class Daemon extends Command {
                             liveKuboPids.add(pid);
                             process.once("exit", () => liveKuboPids.delete(pid));
                         }
-                    }
+                    },
+                    mergedPkcOptions.httpRoutersOptions
                 );
                 pendingKuboStart = startPromise;
                 let startedProcess: ChildProcessWithoutNullStreams | undefined;
