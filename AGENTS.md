@@ -73,7 +73,8 @@ When the user gives a prompt to implement a feature or bug fix in this repositor
 
 1. **MUST** create a GitHub issue for the feature before starting work (`gh issue create`).
 2. **MUST** keep the issue updated with the current plan and progress as work proceeds.
-3. **MUST** ask the user whether to close the issue after the feature is fully implemented and verified — do not close it automatically or via `Closes #N` in commit messages.
+3. **MUST** put `Closes #N` in the PR body so the issue auto-closes when the PR merges. Closing keywords go in the PR body only, never in commit messages.
+4. **MUST** ask the user before closing an issue manually (`gh issue close`); auto-close via PR merge needs no ask.
 
 Routine live operations are not repository feature work:
 
