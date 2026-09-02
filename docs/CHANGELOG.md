@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.96 (2026-09-02)</small>
+
+* fix: pre-seed kubo Routing config so pkc-js init does not restart kubo ([65f3c58](https://github.com/bitsocialnet/bitsocial-cli/commit/65f3c58))
+* docs: require Closes #N in PR bodies so issues auto-close on merge ([776daaa](https://github.com/bitsocialnet/bitsocial-cli/commit/776daaa)), closes [#N](https://github.com/bitsocialnet/bitsocial-cli/issues/N)
+
 ## <small>0.19.95 (2026-08-31)</small>
 
 * test: surface diagnostics when a completion-time command times out (#140) ([c4c40e5](https://github.com/bitsocialnet/bitsocial-cli/commit/c4c40e5)), closes [#140](https://github.com/bitsocialnet/bitsocial-cli/issues/140)
