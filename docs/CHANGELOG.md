@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.97 (2026-09-06)</small>
+
+* chore: upgrade @pkcprotocol/pkc-js from 0.0.89 to 0.0.99 ([46546c5](https://github.com/bitsocialnet/bitsocial-cli/commit/46546c5))
+
 ## <small>0.19.96 (2026-09-02)</small>
 
 * fix: pre-seed kubo Routing config so pkc-js init does not restart kubo ([65f3c58](https://github.com/bitsocialnet/bitsocial-cli/commit/65f3c58))
