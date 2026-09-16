@@ -677,7 +677,7 @@ DESCRIPTION
   - Arrays are replaced entirely (RFC 7396 JSON Merge Patch semantics).
   - When both --jsonFile and CLI flags are provided, CLI flags take priority.
 
-  For modifying complex settings like challenges, consider using a web UI instead: https://bitsocial.net/apps
+  For modifying complex settings like challenges, consider using a web UI instead: https://bitsocial.net/projects?category=apps
 
 EXAMPLES
   Change the name of the community
