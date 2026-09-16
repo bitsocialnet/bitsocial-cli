@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.98 (2026-09-16)</small>
+
+* docs: point the community edit web UI hint at bitsocial.net/projects ([cb36821](https://github.com/bitsocialnet/bitsocial-cli/commit/cb36821))
+
 ## <small>0.19.97 (2026-09-06)</small>
 
 * chore: upgrade @pkcprotocol/pkc-js from 0.0.89 to 0.0.99 ([46546c5](https://github.com/bitsocialnet/bitsocial-cli/commit/46546c5))
