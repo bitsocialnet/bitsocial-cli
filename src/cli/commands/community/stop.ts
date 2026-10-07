@@ -34,7 +34,12 @@ export default class Stop extends BaseCommand {
         for (const address of addresses) {
             try {
                 const community = await pkc.createCommunity({ address });
-                await community.stop();
+                // stop() only asks the RPC server to stop a community this instance started, so on a fresh
+                // instance it does nothing. start() on a running community attaches to the daemon's instance.
+                if (community.started) {
+                    await community.start();
+                    await community.stop();
+                }
                 this.log(address);
             } catch (e) {
                 const error = e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e));
