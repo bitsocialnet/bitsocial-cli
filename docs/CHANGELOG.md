@@ -1,5 +1,22 @@
 # Changelog
 
+## <small>0.19.114 (2026-10-27)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.126 ([bbbf81b](https://github.com/bitsocialnet/bitsocial-cli/commit/bbbf81b))
+  * pkc-js [0.0.126](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.126) (2026-10-27)
+    * fix: deflake state-order, startup-burst and RPC-timeout tests ([#435](https://github.com/pkcprotocol/pkc-js/issues/435) [#437](https://github.com/pkcprotocol/pkc-js/issues/437) [#265](https://github.com/pkcprotocol/pkc-js/issues/265) [#266](https://github.com/pkcprotocol/pkc-js/issues/266) [#253](https://github.com/pkcprotocol/pkc-js/issues/253)) ([#449](https://github.com/pkcprotocol/pkc-js/issues/449)) ([00d4231](https://github.com/pkcprotocol/pkc-js/commit/00d4231e0a702c4e6935604aedda7a50e36b9a92)), closes [#330](https://github.com/pkcprotocol/pkc-js/issues/330) [#456](https://github.com/pkcprotocol/pkc-js/issues/456)
+  * pkc-js [0.0.125](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.125) (2026-10-27)
+    * feat(community-list): add CommunityList, immutable signed lists of curated communities ([#309](https://github.com/pkcprotocol/pkc-js/issues/309)) ([b619f17](https://github.com/pkcprotocol/pkc-js/commit/b619f17c9b12e7c650aacde532943a1adb1ffb5d)), closes [#21](https://github.com/pkcprotocol/pkc-js/issues/21) [#342](https://github.com/pkcprotocol/pkc-js/issues/342) [#353](https://github.com/pkcprotocol/pkc-js/issues/353)
+    * fix(deps): bump undici, zod, ws, uuid and probe-image-size for security advisories ([#452](https://github.com/pkcprotocol/pkc-js/issues/452)) ([f65551c](https://github.com/pkcprotocol/pkc-js/commit/f65551c080ee79689859b7d3188ec4de285a4fae))
+  * pkc-js [0.0.124](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.124) (2026-10-23)
+    * fix(community): match author names across .bso/.eth and letter case ([#424](https://github.com/pkcprotocol/pkc-js/issues/424)) ([#445](https://github.com/pkcprotocol/pkc-js/issues/445)) ([88dbac3](https://github.com/pkcprotocol/pkc-js/commit/88dbac3d1de69084d2c48c84641db3a7b1e8fd9e))
+  * pkc-js [0.0.123](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.123) (2026-10-23)
+    * fix(community): reject publications whose author.name has an uppercase letter ([#447](https://github.com/pkcprotocol/pkc-js/issues/447)) ([#448](https://github.com/pkcprotocol/pkc-js/issues/448)) ([134cacc](https://github.com/pkcprotocol/pkc-js/commit/134cacc15ae443a7b2a050dc059bdc105617faa4))
+  * pkc-js [0.0.122](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.122) (2026-10-23)
+    * fix(helia): turn off the delegated-routing Cache API cache and delete leftovers ([#442](https://github.com/pkcprotocol/pkc-js/issues/442)) ([f49e396](https://github.com/pkcprotocol/pkc-js/commit/f49e39648794ffd7177344e21ac438d4f5ddebfd)), closes [ipfs/helia-delegated-routing-v1-http-api#208](https://github.com/ipfs/helia-delegated-routing-v1-http-api/issues/208)
+  * pkc-js [0.0.121](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.121) (2026-10-23)
+    * fix(signer): reject AES-GCM decryption when the authentication tag does not match ([#418](https://github.com/pkcprotocol/pkc-js/issues/418)) ([#441](https://github.com/pkcprotocol/pkc-js/issues/441)) ([6cdd530](https://github.com/pkcprotocol/pkc-js/commit/6cdd5301c0a28f40e56c7c23b80461ab47bcb605))
+
 ## <small>0.19.113 (2026-10-23)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.120 ([bbf3b50](https://github.com/bitsocialnet/bitsocial-cli/commit/bbf3b50))
