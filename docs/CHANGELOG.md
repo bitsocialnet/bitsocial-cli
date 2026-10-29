@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.115 (2026-10-29)</small>
+
+* ci: add Claude Code review workflow ([607cba2](https://github.com/bitsocialnet/bitsocial-cli/commit/607cba2))
+* ci: add Claude Code review workflow [skip github-alerts] ([5cece64](https://github.com/bitsocialnet/bitsocial-cli/commit/5cece64))
+* ci: add Claude Code review workflow [skip github-alerts] ([3e79639](https://github.com/bitsocialnet/bitsocial-cli/commit/3e79639))
+* ci: check earlier Claude comments before the no-issues summary [skip github-alerts] ([b42b8bb](https://github.com/bitsocialnet/bitsocial-cli/commit/b42b8bb))
+
 ## <small>0.19.114 (2026-10-27)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.126 ([bbbf81b](https://github.com/bitsocialnet/bitsocial-cli/commit/bbbf81b))
