@@ -53,4 +53,19 @@ describe("undici global-dispatcher hoisting (issue #84)", () => {
         // Same major => same global-dispatcher symbol => pkc-js polyfill governs this path.
         expect(httpMajor).toBe(topMajor);
     });
+
+    it("resolves pkc-js's undici (the copy its polyfill patches) to the same major as @libp2p/http's", () => {
+        // Since pkc-js 0.0.132 declares undici@8 itself, the copy its polyfill imports is whatever
+        // resolves from inside the pkc-js package dir: a nested copy if this repo's pin drifts to a
+        // different 8.x (or lower) than pkc-js wants, else the hoisted top-level one. Either way it
+        // must share @libp2p/http's major, or the two sides read different global-dispatcher slots.
+        const fromRoot = createRequire(join(projectRoot, "package.json"));
+        const pkcMain = fromRoot.resolve("@pkcprotocol/pkc-js");
+        const pkcUndiciPkg = createRequire(pkcMain).resolve("undici/package.json");
+        const httpMain = fromRoot.resolve("@libp2p/http");
+        const httpUndiciPkg = createRequire(httpMain).resolve("undici/package.json");
+
+        expect(majorOf(pkcUndiciPkg)).toBeGreaterThanOrEqual(8);
+        expect(majorOf(pkcUndiciPkg)).toBe(majorOf(httpUndiciPkg));
+    });
 });
