@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.118 (2026-10-30)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.131 ([141f09a](https://github.com/bitsocialnet/bitsocial-cli/commit/141f09a))
+  * pkc-js [0.0.131](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.131) (2026-10-30)
+    * fix(pkc): fail createCommunity after an early invalid communities list, contain lock check errors ([#465](https://github.com/pkcprotocol/pkc-js/issues/465)) ([15f6708](https://github.com/pkcprotocol/pkc-js/commit/15f670859efa0807835a9c342964259f3406e966))
+  * pkc-js [0.0.130](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.130) (2026-10-30)
+
 ## <small>0.19.117 (2026-10-30)</small>
 
 * chore(deps): upgrade seedit web UI v0.5.10 -> v0.6.0, 5chan v0.9.17 -> v0.10.2 ([8891960](https://github.com/bitsocialnet/bitsocial-cli/commit/8891960))
