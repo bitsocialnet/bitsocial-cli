@@ -22,7 +22,7 @@ describe("bitsocial community edit", () => {
                 ...currentSubProps,
                 toJSONInternalRpc: () => JSON.parse(JSON.stringify(currentSubProps))
             }),
-            communities: ["plebbit.bso"],
+            communities: [{ address: "plebbit.bso", publicKey: "12D3KooWFake", started: true }],
             destroy: () => {}
         });
         setPkcRpcConnectOverride(pkcInstanceFake);

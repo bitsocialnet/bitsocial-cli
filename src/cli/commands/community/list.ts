@@ -12,7 +12,7 @@ export default class List extends BaseCommand {
     static override flags = {
         quiet: Flags.boolean({
             char: "q",
-            summary: "Only display community addresses (much faster: skips the per-community 'started' lookup)"
+            summary: "Only display community addresses, one per line"
         })
     };
 
@@ -22,17 +22,12 @@ export default class List extends BaseCommand {
         const log = PKCLogger("bitsocial-cli:commands:community:list");
         log(`flags: `, flags);
         const pkc = await this._connectToPkcRpc(flags.pkcRpcUrl.toString());
-        const communities = pkc.communities;
+        // pkc.communities entries carry `started` (pkc-js >= 0.0.129), so no per-community lookup is needed
+        const communities = pkc.communities.map(({ address, started }) => ({ address, started }));
         if (flags.quiet) {
-            this.log(communities.join(EOL));
+            this.log(communities.map(({ address }) => address).join(EOL));
         } else {
-            const communitiesWithStarted = await Promise.all(
-                communities.map(async (address: string) => {
-                    const community = await pkc.createCommunity({ address });
-                    return { address: community.address, started: community.started };
-                })
-            );
-            printTable({ data: communitiesWithStarted, sort: { started: "desc" } });
+            printTable({ data: communities, sort: { started: "desc" } });
         }
         await pkc.destroy();
     }

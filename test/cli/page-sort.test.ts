@@ -212,7 +212,7 @@ describe("bitsocial page-sort remove: in-use check against the daemon", () => {
     const fakeDaemon = (settings: Record<string, unknown>) =>
         setPkcRpcConnectOverride(
             sandbox.fake.resolves({
-                communities: Object.keys(settings),
+                communities: Object.keys(settings).map((address) => ({ address, publicKey: address, started: true })),
                 createCommunity: async ({ address }: { address: string }) => ({ address, settings: settings[address] }),
                 destroy: async () => {}
             })

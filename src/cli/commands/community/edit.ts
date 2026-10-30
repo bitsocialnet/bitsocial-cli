@@ -112,8 +112,7 @@ For modifying complex settings like challenges, consider using a web UI instead:
         }
         log("Final edit options:", editOptions);
 
-        const localCommunities = pkc.communities;
-        if (!localCommunities.includes(args.address))
+        if (!pkc.communities.some((community) => community.address === args.address))
             this.error("Can't edit a remote community, make sure you're editing a local community");
 
         try {
