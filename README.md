@@ -836,7 +836,7 @@ USAGE
   $ bitsocial community list --pkcRpcUrl <value> [-q]
 
 FLAGS
-  -q, --quiet              Only display community addresses (much faster: skips the per-community 'started' lookup)
+  -q, --quiet              Only display community addresses, one per line
       --pkcRpcUrl=<value>  (required) [default: ws://localhost:9138/] URL to PKC RPC
 
 DESCRIPTION

@@ -300,7 +300,7 @@ export async function removePackage(kind: PackageKind, { name, dataPath }: { nam
 
 /** The part of a connected pkc-js RPC client that collectPackageUsages reads. */
 export interface PackageUsageSource {
-    communities: string[];
+    communities: { address: string }[];
     createCommunity(options: { address: string }): Promise<{ settings?: unknown }>;
     destroy(): Promise<void>;
 }
@@ -313,7 +313,7 @@ export interface PackageUsageSource {
 export async function collectPackageUsages(pkc: PackageUsageSource, findUsages: (settings: any) => string[]): Promise<string[]> {
     const usages: string[] = [];
     try {
-        for (const address of pkc.communities) {
+        for (const { address } of pkc.communities) {
             const community = await pkc.createCommunity({ address });
             for (const usage of findUsages(community.settings)) usages.push(`${address} ${usage}`);
         }

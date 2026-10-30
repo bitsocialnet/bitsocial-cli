@@ -212,5 +212,6 @@ export async function startDaemonServer(
         daemonServerDestroyed = true;
     };
 
-    return { rpcAuthKey, listedSub: rpcServer.pkc.communities, webuis, destroy: cleanupDaemonServer };
+    const listedSub = rpcServer.pkc.communities.map((community) => community.address);
+    return { rpcAuthKey, listedSub, webuis, destroy: cleanupDaemonServer };
 }

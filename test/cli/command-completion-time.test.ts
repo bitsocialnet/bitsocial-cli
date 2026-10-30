@@ -195,6 +195,10 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         );
         expect(result.exitCode, `stderr: ${result.stderr}\nstdout: ${result.stdout}`).toBe(0);
         expect(result.stdout).toContain(communityAddress);
+        // The `started` column comes straight from the pkc.communities entries (pkc-js >= 0.0.129), not
+        // from a per-community lookup — the row must still show the boolean.
+        const row = result.stdout.split(/\r?\n/).find((line) => line.includes(communityAddress));
+        expect(row, `no table row for ${communityAddress} in:\n${result.stdout}`).toMatch(/\b(true|false)\b/);
     });
 
     it("community get completes within 10s", { timeout: 30_000 }, async () => {
