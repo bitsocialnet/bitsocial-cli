@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.119 (2026-10-30)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.132 ([65f0a48](https://github.com/bitsocialnet/bitsocial-cli/commit/65f0a48))
+  * pkc-js [0.0.132](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.132) (2026-10-30)
+    * feat(comment): add comment.gallery for multiple media per comment ([#436](https://github.com/pkcprotocol/pkc-js/issues/436)) ([#457](https://github.com/pkcprotocol/pkc-js/issues/457)) ([f2db558](https://github.com/pkcprotocol/pkc-js/commit/f2db5587bd0a4ee1d1621d0ab4d91c7f08b8765d))
+    * fix(deps): node-forge 1.4.2 (GHSA-86w9-cpqp-85rv), uuid 14, undici 8, libp2p/helia patch bumps ([#467](https://github.com/pkcprotocol/pkc-js/issues/467)) ([321c139](https://github.com/pkcprotocol/pkc-js/commit/321c139a603b2c1b18f238de66e4e3d22ce54c01)), closes [#466](https://github.com/pkcprotocol/pkc-js/issues/466)
+
 ## <small>0.19.118 (2026-10-30)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.131 ([141f09a](https://github.com/bitsocialnet/bitsocial-cli/commit/141f09a))
