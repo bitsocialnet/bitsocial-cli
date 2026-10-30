@@ -139,16 +139,16 @@
     "overrides": {},
     "webuis": [
         {
-            "url": "https://github.com/bitsocialnet/seedit/releases/tag/v0.5.10",
-            "sha256OfHtmlZip": "fd8b3d6cf3ec93055bac01e2e482ee768ff6d6fe1cdddc12f7bcfa0209122deb"
+            "url": "https://github.com/bitsocialnet/seedit/releases/tag/v0.6.0",
+            "sha256OfHtmlZip": "f0f6844886af724b3d29a55e7b55d3e9bcd3f0ffa41bf07889d0a21eb59f0add"
         },
         {
             "url": "https://github.com/plebbit/plebones/releases/tag/v0.1.27",
             "sha256OfHtmlZip": "14653b19e88868fda6fef26601f477947e44251cc52bd95d7d6fec158ae67b6f"
         },
         {
-            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.9.17",
-            "sha256OfHtmlZip": "d7a8ebdd7a437568b828909093b7a881de6b091f6740ef81086427efb1752284"
+            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.2",
+            "sha256OfHtmlZip": "3be034cda93ff854c8d5a99103a955e97a1c56f6e77267cee691f3fc8b1f86ed"
         }
     ]
 }
