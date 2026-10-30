@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.117 (2026-10-30)</small>
+
+* chore(deps): upgrade seedit web UI v0.5.10 -> v0.6.0, 5chan v0.9.17 -> v0.10.2 ([8891960](https://github.com/bitsocialnet/bitsocial-cli/commit/8891960))
+
 ## <small>0.19.116 (2026-10-30)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.129 ([c9e178d](https://github.com/bitsocialnet/bitsocial-cli/commit/c9e178d))
