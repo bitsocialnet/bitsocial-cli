@@ -1,5 +1,16 @@
 # Changelog
 
+## <small>0.19.116 (2026-10-30)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.129 ([c9e178d](https://github.com/bitsocialnet/bitsocial-cli/commit/c9e178d))
+  * pkc-js [0.0.129](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.129) (2026-10-30)
+    * BREAKING CHANGE(pkc): pkc.communities entries are objects instead of address
+    * feat(pkc): list communities as { name, publicKey, address, started } entries ([#460](https://github.com/pkcprotocol/pkc-js/issues/460)) ([276ea3c](https://github.com/pkcprotocol/pkc-js/commit/276ea3c093ed745b78619f90a192cd3625ea8514)), closes [#455](https://github.com/pkcprotocol/pkc-js/issues/455) [#141](https://github.com/pkcprotocol/pkc-js/issues/141)
+  * pkc-js [0.0.128](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.128) (2026-10-29)
+    * perf(comment): skip a post's unchanged CommentUpdate by its postUpdates file cid ([#312](https://github.com/pkcprotocol/pkc-js/issues/312)) ([#459](https://github.com/pkcprotocol/pkc-js/issues/459)) ([a101ed7](https://github.com/pkcprotocol/pkc-js/commit/a101ed7b7126a9ce40ed20cd5f3e21d8b0f48ace))
+  * pkc-js [0.0.127](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.127) (2026-10-29)
+    * fix(pages): stop page doubling at 32 MiB so a large sort no longer throws RangeError ([#360](https://github.com/pkcprotocol/pkc-js/issues/360)) ([#458](https://github.com/pkcprotocol/pkc-js/issues/458)) ([08c2c9d](https://github.com/pkcprotocol/pkc-js/commit/08c2c9d4b01af646a2800f46c6a47f630be9e71f))
+
 ## <small>0.19.115 (2026-10-29)</small>
 
 * ci: add Claude Code review workflow ([607cba2](https://github.com/bitsocialnet/bitsocial-cli/commit/607cba2))
