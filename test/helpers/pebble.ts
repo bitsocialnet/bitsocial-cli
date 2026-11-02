@@ -57,43 +57,54 @@ export interface RunningPebble {
 export async function startPebble(workDirectory: string, { validateOn }: { validateOn?: { httpPort: number; tlsPort: number } } = {}): Promise<RunningPebble> {
     await fs.mkdir(workDirectory, { recursive: true });
     const binaryPath = await ensurePebbleBinary(workDirectory);
-    const [acmePort, managementPort] = await Promise.all([allocateFreePort(), allocateFreePort()]);
     const configPath = path.join(workDirectory, "pebble.json");
-    await fs.writeFile(
-        configPath,
-        JSON.stringify({
-            pebble: {
-                listenAddress: `127.0.0.1:${acmePort}`,
-                managementListenAddress: `127.0.0.1:${managementPort}`,
-                certificate: LISTENER_CERT,
-                privateKey: LISTENER_KEY,
-                httpPort: validateOn?.httpPort ?? 5002,
-                tlsPort: validateOn?.tlsPort ?? 5001,
-                externalAccountBindingRequired: false,
-                profiles: {
-                    default: { description: "default", validityPeriod: 7_776_000 },
-                    shortlived: { description: "matches Let's Encrypt's 160 hours", validityPeriod: 576_000 }
-                }
-            }
-        })
-    );
-    const child: ChildProcess = spawn(binaryPath, ["-config", configPath], {
-        env: { ...process.env, ...(validateOn ? {} : { PEBBLE_VA_ALWAYS_VALID: "1" }), PEBBLE_VA_NOSLEEP: "1", PEBBLE_WFE_NONCEREJECT: "0" },
-        stdio: "ignore"
-    });
-
     const dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
-    const directoryUrl = `https://127.0.0.1:${acmePort}/dir`;
-    const reachable = await waitForCondition(async () => {
-        try {
-            return (await undiciFetch(directoryUrl, { dispatcher })).ok;
-        } catch {
-            return false;
-        }
-    }, 20_000, 200);
-    if (!reachable) {
-        await killChildProcess(child);
-        throw new Error("Pebble did not start");
+    let child: ChildProcess | undefined;
+    let directoryUrl = "";
+    let managementPort = 0;
+    // Retried with fresh ports, because another test file's kubo can take these first (see #87).
+    for (let attempt = 1; ; attempt++) {
+        const [acmePort, mgmtPort] = await Promise.all([allocateFreePort(), allocateFreePort()]);
+        managementPort = mgmtPort;
+        await fs.writeFile(
+            configPath,
+            JSON.stringify({
+                pebble: {
+                    listenAddress: `127.0.0.1:${acmePort}`,
+                    managementListenAddress: `127.0.0.1:${managementPort}`,
+                    certificate: LISTENER_CERT,
+                    privateKey: LISTENER_KEY,
+                    httpPort: validateOn?.httpPort ?? 5002,
+                    tlsPort: validateOn?.tlsPort ?? 5001,
+                    externalAccountBindingRequired: false,
+                    profiles: {
+                        default: { description: "default", validityPeriod: 7_776_000 },
+                        shortlived: { description: "matches Let's Encrypt's 160 hours", validityPeriod: 576_000 }
+                    }
+                }
+            })
+        );
+        let output = "";
+        const started: ChildProcess = spawn(binaryPath, ["-config", configPath], {
+            env: { ...process.env, ...(validateOn ? {} : { PEBBLE_VA_ALWAYS_VALID: "1" }), PEBBLE_VA_NOSLEEP: "1", PEBBLE_WFE_NONCEREJECT: "0" },
+            stdio: ["ignore", "pipe", "pipe"]
+        });
+        started.stdout!.on("data", (data: Buffer) => (output += data.toString()));
+        started.stderr!.on("data", (data: Buffer) => (output += data.toString()));
+        child = started;
+        directoryUrl = `https://127.0.0.1:${acmePort}/dir`;
+        const url = directoryUrl;
+        const reachable = await waitForCondition(async () => {
+            if (started.exitCode !== null) return true;
+            try {
+                return (await undiciFetch(url, { dispatcher })).ok;
+            } catch {
+                return false;
+            }
+        }, 20_000, 200);
+        if (reachable && started.exitCode === null) break;
+        await killChildProcess(started);
+        if (attempt === 4 || !/address already in use|only one usage of each socket address/i.test(output)) throw new Error(`Pebble did not start: ${output}`);
     }
     // Generated fresh on every Pebble start, so it has to be fetched rather than committed.
     const rootResponse = await undiciFetch(`https://127.0.0.1:${managementPort}/roots/0`, { dispatcher });
@@ -101,5 +112,5 @@ export async function startPebble(workDirectory: string, { validateOn }: { valid
     await fs.writeFile(issuingRootPath, await rootResponse.text());
     await dispatcher.close();
 
-    return { directoryUrl, listenerRootPath: LISTENER_CERT, issuingRootPath, stop: () => killChildProcess(child) };
+    return { directoryUrl, listenerRootPath: LISTENER_CERT, issuingRootPath, stop: () => killChildProcess(child!) };
 }

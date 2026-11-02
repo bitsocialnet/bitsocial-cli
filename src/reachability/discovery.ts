@@ -102,13 +102,28 @@ const probeTcpHost = (port: number, host: string): Promise<PortState> =>
         server.listen({ port, host, exclusive: true }, () => server.close(() => resolve("free")));
     });
 
-// Windows lets a bind on 0.0.0.0 succeed while another program listens on [::], so one family proves nothing.
+const acceptsConnections = (port: number, host: string): Promise<boolean> =>
+    new Promise((resolve) => {
+        const socket = net.connect({ port, host, timeout: 1000 });
+        const finish = (result: boolean) => {
+            socket.destroy();
+            resolve(result);
+        };
+        socket.once("connect", () => finish(true));
+        socket.once("timeout", () => finish(false));
+        socket.once("error", () => finish(false));
+    });
+
 export const worstPortState = (states: PortState[]): PortState => (states.includes("busy") ? "busy" : states.includes("no-permission") ? "no-permission" : "free");
 
+// A successful bind proves nothing alone: Windows allows one on a wildcard address while another program
+// listens on it. Something accepting on loopback is held, whatever the OS's bind rules are.
 export const probeTcpPort = async (port: number, host?: string): Promise<PortState> => {
-    if (host) return probeTcpHost(port, host);
+    const hosts = host ? [host] : ["0.0.0.0", "::"];
     const states: PortState[] = [];
-    for (const wildcard of ["0.0.0.0", "::"]) states.push(await probeTcpHost(port, wildcard));
+    for (const candidate of hosts) states.push(await probeTcpHost(port, candidate));
+    const loopbacks = host ? [toConnectableHostname(host)] : ["127.0.0.1", "::1"];
+    for (const loopback of loopbacks) if (await acceptsConnections(port, loopback)) states.push("busy");
     return worstPortState(states);
 };
 
