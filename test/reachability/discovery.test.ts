@@ -64,6 +64,14 @@ it("publicIpsFromMultiaddrs keeps public IPs, skips private, dns and garbage", (
     ).toEqual(["93.184.216.34", "2606:4700::1"]);
 });
 
+it("publicIpsFromMultiaddrs does not let our own announced address confirm itself", () => {
+    const own = "/ip4/93.184.216.34/tcp/443/tls/ws";
+    const peer = "12D3KooWHFrmLWTTDD4NodngtRMEVYgxrLDNS3uwHkpTKm5PkvY7";
+    expect(publicIpsFromMultiaddrs([`${own}/p2p/${peer}`], [own])).toEqual([]);
+    expect(publicIpsFromMultiaddrs([`${own}/p2p/${peer}`, `/ip4/93.184.216.34/tcp/4001/p2p/${peer}`], [own])).toEqual(["93.184.216.34"]);
+    expect(publicIpsFromMultiaddrs([`/ip4/93.184.216.35/tcp/4001/p2p/${peer}`, `${own}/p2p/${peer}`], [own])).toEqual(["93.184.216.35"]);
+});
+
 describe("port holder parsing", () => {
     it("reads ss output", () => {
         expect(parseSsHolder('LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=1,fd=6))')).toBe("nginx");

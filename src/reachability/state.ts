@@ -6,9 +6,18 @@ import type { KuboEditRecord } from "./kubo-config.js";
 
 export const REACHABILITY_CONFIG_VERSION = 1;
 
-export type ReachabilityMode = "webtransport-only" | "ip" | "domain" | "ip+domain" | "reverse-proxy" | "ip+reverse-proxy";
+const REACHABILITY_MODES = [
+    "webtransport-only",
+    "ip",
+    "domain",
+    "ip+domain",
+    "reverse-proxy",
+    "ip+reverse-proxy",
+    "domain+reverse-proxy",
+    "ip+domain+reverse-proxy"
+] as const;
 
-const REACHABILITY_MODES: readonly ReachabilityMode[] = ["webtransport-only", "ip", "domain", "ip+domain", "reverse-proxy", "ip+reverse-proxy"];
+export type ReachabilityMode = (typeof REACHABILITY_MODES)[number];
 
 // Written by setup, enable and disable, and by the daemon when an IP change alters the addresses.
 export interface ReachabilityConfig {
@@ -114,7 +123,7 @@ async function readJsonIfExists(filePath: string): Promise<unknown> {
 export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    await fs.writeFile(temporaryPath, JSON.stringify(value, null, 4) + "\n");
+    await fs.writeFile(temporaryPath, JSON.stringify(value, null, 4));
     await fs.rename(temporaryPath, filePath);
 }
 

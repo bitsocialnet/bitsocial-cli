@@ -8,6 +8,7 @@ import {
     ensureCaddyBinary,
     generateCaddyfile,
     LETS_ENCRYPT_DIRECTORY,
+    waitForCertificates,
     type CaddyfileSpec
 } from "../../src/reachability/caddy.js";
 
@@ -64,6 +65,17 @@ describe("ensureCaddyBinary", () => {
         const fetchImpl = vi.fn() as unknown as typeof fetch;
         expect(await ensureCaddyBinary(dataPath, { fetchImpl })).toBe(caddyBinaryPath(dataPath));
         expect(fetchImpl).not.toHaveBeenCalled();
+    });
+});
+
+describe("waitForCertificates", () => {
+    it("stops polling as soon as it is aborted, so a dead Caddy cannot hold the CLI open", async () => {
+        const stop = new AbortController();
+        const started = Date.now();
+        const waiting = waitForCertificates(randomDirectory(), LETS_ENCRYPT_DIRECTORY, ["93.184.216.34"], 60_000, stop.signal);
+        stop.abort();
+        expect(await waiting).toEqual({ issued: [], missing: ["93.184.216.34"] });
+        expect(Date.now() - started).toBeLessThan(5_000);
     });
 });
 

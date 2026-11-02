@@ -240,7 +240,7 @@ export class ReachabilityRuntime {
         }
     }
 
-    private async derivePublicIps(): Promise<string[]> {
+    private async derivePublicIps(config: ReachabilityConfig): Promise<string[]> {
         if (this.deps.derivePublicIps) return this.deps.derivePublicIps();
         const override = process.env["BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS"];
         if (override) return override.split(",");
@@ -253,7 +253,7 @@ export class ReachabilityRuntime {
         }
         // Peers' reports of our address are the noisiest source, so they only fill in a missing family.
         const identity = await kuboIdentity(this.deps.kuboRpcUrl);
-        const observed = identity ? publicIpsFromMultiaddrs(identity.addresses) : [];
+        const observed = identity ? publicIpsFromMultiaddrs(identity.addresses, config.announce) : [];
         for (const isFamily of [net.isIPv4, net.isIPv6])
             if (![...ips].some((ip) => isFamily(ip))) for (const ip of observed.filter((candidate) => isFamily(candidate))) ips.add(ip);
         return [...ips];
@@ -365,7 +365,7 @@ export class ReachabilityRuntime {
         let config = await this.readConfig();
         if (!config?.enabled) return;
         const status: ReachabilityRuntimeStatus = (await readReachabilityRuntimeStatus(this.deps.dataPath)) ?? { updatedAt: "" };
-        const derived = await this.derivePublicIps();
+        const derived = await this.derivePublicIps(config);
         const nowIso = new Date(this.now()).toISOString();
         status.lastIpCheck = { at: nowIso, publicIps: derived };
 

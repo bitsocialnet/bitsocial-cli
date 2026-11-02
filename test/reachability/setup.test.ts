@@ -33,6 +33,8 @@ describe("ACME directory", () => {
 it.each([
     [{ ip: true, domain: true, proxy: false }, "ip+domain"],
     [{ ip: true, domain: false, proxy: true }, "ip+reverse-proxy"],
+    [{ ip: false, domain: true, proxy: true }, "domain+reverse-proxy"],
+    [{ ip: true, domain: true, proxy: true }, "ip+domain+reverse-proxy"],
     [{ ip: true, domain: false, proxy: false }, "ip"],
     [{ ip: false, domain: true, proxy: false }, "domain"],
     [{ ip: false, domain: false, proxy: true }, "reverse-proxy"],

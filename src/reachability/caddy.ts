@@ -201,13 +201,14 @@ export async function waitForCertificates(
     dataPath: string,
     acmeDirectory: string,
     names: string[],
-    timeoutMs = 90_000
+    timeoutMs = 90_000,
+    signal?: AbortSignal
 ): Promise<{ issued: string[]; missing: string[] }> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
         const unexpired = (await readIssuedCertificates(dataPath)).filter((certificate) => certificate.hoursLeft > 0);
         const issued = names.filter((name) => currentCertificates(unexpired, acmeDirectory, [name]).length > 0);
-        if (issued.length === names.length || Date.now() >= deadline) return { issued, missing: names.filter((name) => !issued.includes(name)) };
+        if (issued.length === names.length || Date.now() >= deadline || signal?.aborted) return { issued, missing: names.filter((name) => !issued.includes(name)) };
         await new Promise((resolve) => setTimeout(resolve, 500));
     }
 }

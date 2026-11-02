@@ -11,7 +11,7 @@ const runStatus = (args: string[]): Promise<{ stdout: string; stderr: string; ex
         proc.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
         proc.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
         proc.on("error", reject);
-        proc.on("close", (exitCode) => resolve({ stdout, stderr, exitCode }));
+        proc.on("close", (exitCode) => resolve({ stdout, stderr: stderr.replace(/[\s›]+/g, " "), exitCode }));
     });
 
 describe("bitsocial reachability status", () => {

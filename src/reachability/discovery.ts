@@ -56,10 +56,12 @@ export function lanIpv4FromInterfaces(interfaces: NodeJS.Dict<os.NetworkInterfac
         .find((info) => !info.internal && info.family === "IPv4" && !isPublicIp(info.address))?.address;
 }
 
-// kubo's view of how others reach it; the IPs from its addresses that are public.
-export function publicIpsFromMultiaddrs(addresses: string[]): string[] {
+// kubo's view of how others reach it; the IPs from its addresses that are public. kubo's address list also
+// echoes what we told it to announce, so pass that as ownAnnounce or an old IP would confirm itself forever.
+export function publicIpsFromMultiaddrs(addresses: string[], ownAnnounce: string[] = []): string[] {
     const ips = new Set<string>();
     for (const address of addresses) {
+        if (ownAnnounce.includes(address.replace(/\/p2p\/[^/]+$/, ""))) continue;
         try {
             const host = multiaddr(address)
                 .getComponents()

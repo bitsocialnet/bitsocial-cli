@@ -135,12 +135,8 @@ export function chooseAcmeDirectory(options: Pick<SetupOptions, "staging" | "ove
 const announceForIp = (ip: string, httpsPort: number) => `/${net.isIPv6(ip) ? "ip6" : "ip4"}/${ip}/tcp/${httpsPort}/tls/ws`;
 
 export function deriveMode(parts: { ip: boolean; domain: boolean; proxy: boolean }): ReachabilityMode {
-    if (parts.ip && parts.domain) return "ip+domain";
-    if (parts.ip && parts.proxy) return "ip+reverse-proxy";
-    if (parts.ip) return "ip";
-    if (parts.domain) return "domain";
-    if (parts.proxy) return "reverse-proxy";
-    return "webtransport-only";
+    const enabled = [parts.ip && "ip", parts.domain && "domain", parts.proxy && "reverse-proxy"].filter(Boolean);
+    return (enabled.join("+") || "webtransport-only") as ReachabilityMode;
 }
 
 const freePort = (host = "127.0.0.1"): Promise<number> =>
@@ -169,12 +165,13 @@ const adminUp = async (adminPort: number) => {
 
 export async function discoverPublicIps(
     options: SetupOptions,
-    deps: SetupDependencies
+    deps: SetupDependencies,
+    ownAnnounce: string[] = []
 ): Promise<{ publicIps: string[]; router?: NatRouter; refused: string[]; sawCgnat: boolean }> {
     if (options.overrides?.publicIps) return { publicIps: options.overrides.publicIps, refused: [], sawCgnat: false };
     const fromInterfaces = deps.publicIpsFromInterfaces();
     const identity = await kuboIdentity(options.kuboRpcUrl);
-    const fromKubo = identity ? publicIpsFromMultiaddrs(identity.addresses) : [];
+    const fromKubo = identity ? publicIpsFromMultiaddrs(identity.addresses, ownAnnounce) : [];
     const ips = new Set([...fromInterfaces, ...fromKubo]);
     let sawCgnat = false;
     let router: NatRouter | undefined;
@@ -223,10 +220,12 @@ async function issueCertificates(
         const exited = new Promise<void>((resolve) => (caddy as ChildProcess).once("exit", () => resolve()));
         let exitedEarly = false;
         void exited.then(() => (exitedEarly = true));
+        const stopWaiting = new AbortController();
         const wait = await Promise.race([
-            waitForCertificates(options.dataPath, spec.acmeDirectory, names, timeoutMs),
+            waitForCertificates(options.dataPath, spec.acmeDirectory, names, timeoutMs, stopWaiting.signal),
             exited.then(() => undefined)
         ]);
+        stopWaiting.abort(); // its poll timer would otherwise keep the CLI alive for the full timeout
         if (!exitedEarly) {
             await stopCaddy(spec.adminPort).catch(() => caddy.kill());
             await exited;
@@ -294,7 +293,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     let domain = options.domain ?? previous?.domain;
     if (domain && !isValidDomain(domain)) throw new SetupRefusedError(`Not a valid domain name: ${domain}`);
 
-    const { publicIps, refused, sawCgnat } = await discoverPublicIps(options, deps);
+    const { publicIps, refused, sawCgnat } = await discoverPublicIps(options, deps, previous?.announce);
     if (publicIps.length > 0) deps.log(`Public addresses: ${publicIps.join(", ")}`);
 
     const ourCaddyRunning = await adminUp(caddyAdminPort);
@@ -304,11 +303,14 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     if (portBusy) deps.warn(busyPortMessage(holder));
 
     // Path B is what is left when the IP certificate cannot work, so that is when it is worth asking.
-    if (!domain && !options.announce && deps.ask && (portBusy || publicIps.length === 0)) {
+    // Without a public IP there is nothing to match an answer against, so --domain --force is the way there.
+    let domainAskedForNow = options.domain !== undefined;
+    if (!domain && !options.announce && deps.ask && portBusy && publicIps.length > 0) {
         const answer = (await deps.ask("Domain name pointing at this machine (Enter to skip):")).trim();
         if (answer) {
             if (!isValidDomain(answer)) throw new SetupRefusedError(`Not a valid domain name: ${answer}`);
             domain = answer;
+            domainAskedForNow = true;
         }
     }
 
@@ -320,7 +322,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             const message = dnsMismatchMessage(domain, [...records.v4, ...records.v6], publicIps);
             // Refuse what the operator asked for now. A stored name going stale must not block repairing
             // the rest, so it only sits out this run, and is still stored for when its DNS is fixed.
-            if (options.domain && !options.force) throw new SetupRefusedError(message);
+            if (domainAskedForNow && !options.force) throw new SetupRefusedError(message);
             deps.warn(message);
             if (options.force) deps.warn("Continuing because of --force.");
             else domainUsable = false;
@@ -414,7 +416,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     }
 
     deps.log("WebTransport on UDP 443 is configured. No WSS address is announced.");
-    if (portBusy && domain) {
+    if (portBusy && domain && domainUsable) {
         deps.log(reverseProxySnippet(holder, domain, wsPort));
         if (!deps.confirm) throw new NeedsAnswerError(`Set up the reverse proxy above, then rerun setup with --announce. kubo is listening on 127.0.0.1:${wsPort}.`);
         return config;

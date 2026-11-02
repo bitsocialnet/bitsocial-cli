@@ -18,7 +18,7 @@ const runCli = (args: string[], env: Record<string, string>): Promise<{ stdout: 
         child.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
         child.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
         child.once("error", reject);
-        child.once("close", (exitCode) => resolve({ stdout, stderr, exitCode }));
+        child.once("close", (exitCode) => resolve({ stdout, stderr: stderr.replace(/[\s›]+/g, " "), exitCode }));
     });
 
 describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
@@ -95,7 +95,7 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
             });
             let stderr = "";
             proc.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
-            proc.once("close", (code) => resolve({ code, stderr }));
+            proc.once("close", (code) => resolve({ code, stderr: stderr.replace(/[\s›]+/g, " ") }));
         });
         expect(child.code).not.toBe(0);
         expect(child.stderr).toContain("from CI");
