@@ -272,6 +272,8 @@ It finds this machine's public addresses, asks the router to forward ports throu
 - **Windows:** setup prints the firewall rules to add.
 - **Testing:** `--staging` uses the Let's Encrypt staging CA, whose certificates browsers do not trust.
 
+See [docs/reachability.md](docs/reachability.md) for how it works, choosing a path and troubleshooting.
+
 Caddy is downloaded on the first `setup` from its GitHub release and checked against a hash pinned in this repository. State lives in `<data path>/reachability/`. Running `setup` means accepting the [Let's Encrypt Subscriber Agreement](https://letsencrypt.org/repository/); no email address is sent.
 
 #### Creating your first community

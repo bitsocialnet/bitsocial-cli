@@ -77,6 +77,7 @@ Topic docs live flat under `docs/`; [docs/README.md](docs/README.md) is the inde
 | `src/cli/commands/page-sort/`, `src/page-sort-packages/`                 | [docs/page-sorts.md](docs/page-sorts.md)   |
 | `src/common-utils/package-registry.ts`, package reload endpoints in `src/webui/daemon-server.ts` | both of the above |
 | `settings.challenges` / `settings.pages` examples in `src/cli/commands/community/edit.ts` | the matching doc above |
+| `src/reachability/`, `src/cli/commands/reachability/`                    | [docs/reachability.md](docs/reachability.md) |
 
 When a change alters behavior a doc describes (commands, flags, paths, endpoints, output), update the doc in the same PR.
 

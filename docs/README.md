@@ -8,4 +8,5 @@ When you add a topic doc under `docs/`, add a row here.
 | --- | --- |
 | [challenges.md](challenges.md) | Challenge packages: `bitsocial challenge install/list/remove`, where they are installed, how the daemon loads and hot-reloads them, shadowing a pkc-js built-in, configuring them with `community edit` |
 | [page-sorts.md](page-sorts.md) | Page sort packages: `bitsocial page-sort install/list/remove`, `sortName` vs package name and the upgrade warning, the in-use refusal on remove, configuring `settings.pages` with `community edit` |
+| [reachability.md](reachability.md) | Making a node dialable from browsers: `bitsocial reachability setup/status/enable/disable`, choosing a path, what changes in the kubo config, what the daemon keeps doing, troubleshooting |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes (generated on release; do not edit by hand) |

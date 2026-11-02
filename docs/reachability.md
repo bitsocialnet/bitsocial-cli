@@ -1,0 +1,179 @@
+# Reachability
+
+`bitsocial reachability` makes this machine's kubo dialable from browsers, checks that it worked, and keeps it working from the daemon. A browser can only dial a node two ways:
+
+- **WebSocket Secure (WSS):** needs a certificate browsers trust. kubo cannot load a certificate itself, so a TLS terminator sits in front of it.
+- **WebTransport:** needs no certificate authority, but only works for browsers that support it, and only if inbound UDP reaches the machine. Some ISPs filter UDP 4001, so kubo also listens on UDP 443.
+
+## Commands
+
+```bash
+bitsocial reachability setup     # discover, configure, get a certificate, verify; safe to rerun
+bitsocial reachability status    # mode, addresses, certificate expiry, last checks, requirements; --json for scripts
+bitsocial reachability enable    # repair and turn back on from the stored choices, never asks anything
+bitsocial reachability disable   # stop serving and restore the kubo config; --purge also moves the state to a backup
+```
+
+All take `--pkcOptions.dataPath`. `setup` also takes:
+
+| Flag | Meaning |
+| --- | --- |
+| `--domain <name>` | A domain pointing at this machine, to get a certificate for or to forward through your own server |
+| `--announce <multiaddr>` | An address your own server serves. Announced only after a real libp2p handshake through it succeeds |
+| `--force` | Continue when the domain does not resolve to this machine, for a proxy in front of it. Remembered for later runs |
+| `--staging` | Use the Let's Encrypt staging CA, whose certificates browsers do not trust |
+| `--non-interactive` | Never ask. Prompts already only appear when stdin is a TTY |
+
+Exit codes: `0` done (read the output, since this can still mean no WSS, e.g. no public address was found), `1` refused (a domain that does not point here, a failed `--announce`), `2` you have to act first, and nobody could be asked.
+
+## How it works
+
+```
+browser ──wss://<ip or domain>:443──▶ Caddy ──ws://127.0.0.1:<wsPort>──▶ kubo
+browser ──WebTransport, UDP 443──────────────────────────────────────▶ kubo
+```
+
+`setup` runs these steps in order:
+
+1. **Read the kubo config**, creating the repo the way the daemon does if it does not exist yet.
+2. **Find public addresses:** from interfaces and kubo's addresses, excluding the addresses we told kubo to announce, so an old IP cannot confirm itself. With no public IPv4 on an interface, it also asks the router over UPnP for its external IP and to forward TCP 443, TCP 80 and UDP 443. No third-party "what is my IP" service is used.
+3. **Report requirements** (see [Troubleshooting](#troubleshooting)). It reports and carries on: each path below says what it managed.
+4. **Choose a path** and get certificates, waiting up to 90 s. Issuance succeeding is the proof that the internet reached this machine.
+5. **Apply the kubo config** and restart kubo through `POST /api/v0/shutdown`, only if the config changed. The daemon's watchdog brings kubo back.
+6. **Check what kubo really listens on**, because kubo keeps running and logs nothing when it cannot bind a port.
+
+Reruns keep the stored choices and only add or repair. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
+
+## Choosing a path
+
+| Your situation | What to run | Result |
+| --- | --- | --- |
+| TCP 443 is free, no domain | `setup` | Let's Encrypt certificate for the IP (`shortlived` profile, 160 h, renewed by Caddy). Follows IP changes by itself |
+| TCP 443 is free, you have a domain | `setup --domain node.example` | IP certificate where possible, plus a 90-day certificate for the name. Browsers get two independent paths |
+| Another Caddy holds TCP 443 | `setup`, then add the printed site to that Caddy, then `setup --announce /ip4/<ip>/tcp/443/tls/ws` | That Caddy gets the IP certificate and forwards to kubo |
+| nginx, Apache or IIS holds TCP 443 | `setup --domain node.example`, then add the printed snippet, then `setup --domain node.example --announce /dns4/node.example/tcp/443/tls/ws` | Your server terminates TLS. These cannot get an IP certificate by themselves |
+| No public address, no UPnP | Nothing here will help | `setup` states what would change that |
+
+`setup` never stops or edits a server it does not own. To replace one with bitsocial-cli's own Caddy, remove your hand-added address from `Addresses.AppendAnnounce` in the kubo config, stop the other server, then run `setup`. An existing `/ip4/127.0.0.1/tcp/<port>/ws` listener is reused.
+
+Until something can terminate WSS, kubo only gets its UDP 443 listeners. AutoTLS and the loopback filter stay as they were, so a failed attempt costs nothing.
+
+### IP changes with your own proxy
+
+A proxy serving an IP address has that address hard-coded in its config and in `--announce`. **If the IP changes, you must update both.** The daemon does not check `/ip4` addresses served by your own proxy, so an old one stays announced. On a dynamic IP, use a domain instead. The daemon does check `/dns4` names, as described below.
+
+## What changes in the kubo config
+
+All of it comes from one pure function, `computeKuboConfig` in `src/reachability/kubo-config.ts`. `disable` restores these fields byte for byte, which is a tested property.
+
+| Field | Change | Why |
+| --- | --- | --- |
+| `Addresses.Swarm` | Adds UDP 443 `quic-v1` and `quic-v1/webtransport` for IPv4 and IPv6 | WebTransport past filtered UDP 4001 |
+| `Addresses.Swarm` | Adds `/ip4/127.0.0.1/tcp/<wsPort>/ws`, 4002 unless taken | What the terminator forwards to |
+| `Addresses.AppendAnnounce` | One entry per verified address | What peers and routers hand out |
+| `Swarm.AddrFilters` | Removes `/ip4/127.0.0.0/ipcidr/8` | The `server` profile adds it, and it rejects connections from a local terminator |
+| `AutoTLS.Enabled` | `false` | Flip it back by editing the kubo config. Repairs and `disable` keep your choice |
+
+Only the first row applies until something can terminate WSS.
+
+`config.json` records exactly what was changed (`kuboEdits`). That tells our entries apart from identical ones you wrote, so `disable` leaves yours alone, along with anything you added while enabled. One exception: a loopback filter you put back is removed again on the next apply, because it blocks the terminator.
+
+## Where things live
+
+```
+<dataPath>/reachability/
+├── config.json           # your choices, versioned; a newer version than this CLI understands is refused
+├── runtime-status.json   # the daemon's last checks; only the daemon writes it
+├── Caddyfile             # generated, do not edit
+├── bin/caddy-<version>   # downloaded on first setup
+├── caddy-data/           # certificates and the ACME account
+└── caddy-config/
+```
+
+`disable` keeps all of this, so `enable` reuses the ACME account and certificates and spends no rate limit. `disable --purge` moves it to `<dataPath>/reachability.bak-<timestamp>/`. It is moved rather than deleted because it holds private keys.
+
+Caddy is downloaded from its GitHub release and checked against a sha256 pinned in source. No email is sent to Let's Encrypt; running `setup` means accepting their Subscriber Agreement.
+
+## What the daemon does
+
+When `config.json` exists and is enabled, the daemon runs Caddy as a child process. This is skipped when you point the daemon at an external kubo with `--pkcOptions.kuboRpcClientsOptions`. A failure here logs a warning and never stops the daemon.
+
+| When | What |
+| --- | --- |
+| At start | Logs browser addresses and certificate expiry. With nothing configured, prints one line naming `setup` |
+| Every 5 s | Starts, reloads or stops Caddy to match the stored state, so `setup`, `enable` and `disable` apply to a running daemon and a crashed Caddy comes back |
+| Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
+| At start and every 20 min | Renews router forwards when there is no public IPv4 on an interface. They are released on shutdown or once disabled |
+
+**IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued, it keeps the stored addresses and tries again on later checks.
+
+**Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
+
+**Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
+
+The daemon sends stderr only to its log file, so these messages go to stdout where operators can see them.
+
+## Troubleshooting
+
+`bitsocial reachability status` lists each requirement with its fix (`checks` in `--json`).
+
+| Check | Meaning |
+| --- | --- |
+| `public-address` | No public address on an interface. `setup` also tries the router and kubo |
+| `tcp-443` | Held by another program, or Caddy may not bind it |
+| `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen |
+| `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
+| `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |
+| `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to |
+| `certificate` | Under 24 hours left |
+| `inbound` | Always `unknown`. Nothing on the machine can prove inbound traffic arrives, or see a cloud provider's firewall |
+
+**Linux, not root.** Both Caddy (TCP) and kubo (UDP) need permission for port 443, and `setcap` on one does not help the other. The sysctl covers both:
+
+```bash
+sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443   # persist it in /etc/sysctl.d/
+```
+
+Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. On kubo this is lost whenever kubo updates.
+
+**Docker.** Add `cap_add: [NET_BIND_SERVICE]`, and publish `443:443/tcp`, `443:443/udp` and `80:80/tcp`. The image sets `KUBO_RPC_URL` and `IPFS_GATEWAY_URL`, and these beat the kubo config.
+
+**Windows.** `setup` prints the `netsh advfirewall` rules to add. HTTP.sys and IIS show up as holding TCP 443.
+
+**Testing from outside.** `setup` prints a `curl` command that performs a real WebSocket upgrade. Run it from another network and expect `101`. Add `-k` for `--staging`. `curl` may then appear to hang or report a timeout, because the WebSocket stays open.
+
+## Known limits
+
+- **Staging to production on a running Caddy.** `setup` reloads a running Caddy, which keeps serving the cached staging certificate and orders nothing. Until this is fixed, run `disable` first, then `setup` without `--staging`.
+- **NAT-PMP is not supported**, only UPnP, and a machine forwarded by hand may not find its public IP. See [#210](https://github.com/bitsocialnet/bitsocial-cli/issues/210).
+- **IPv4 and IPv6 get separate certificates**, because Caddy obtains one per address.
+
+## For maintainers
+
+**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages.
+
+**Bumping Caddy.** Change `CADDY_VERSION` and all six entries of `CADDY_RELEASE_SHA256` in `src/reachability/caddy.ts`, in one commit. Compute the sha256 of each archive, and check the archives against the SHA-512 `checksums.txt` on the release first. Pinning in source matters because that file shares the download's origin.
+
+**Caddyfile settings that matter**, all learned by running it (`generateCaddyfile`):
+
+| Setting | Why |
+| --- | --- |
+| `protocols h1 h2` | Caddy's default HTTP/3 would take UDP 443 from kubo |
+| `auto_https disable_redirects` | Otherwise Caddy binds TCP 80 and fails to start if anything holds it |
+| `default_sni <ip>` | Browsers send no SNI for an IP, and behind NAT the local address is not the public IP |
+| Explicit `issuer acme { dir }` | Let's Encrypt only, with no implicit fallback CA |
+
+**Whose Caddy is it?** Something answering on the stored admin port is not proof. `isOurCaddyRunning` checks that Caddy reports storing in this node's data directory, and we never stop or reload anything else.
+
+**Tests.** Integration tests use [Pebble](https://github.com/letsencrypt/pebble), Let's Encrypt's test CA, pinned in `test/helpers/pebble.ts`. These environment variables replace the real CA and public address, and exist only for tests:
+
+| Variable | Replaces |
+| --- | --- |
+| `BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY` | Let's Encrypt. The others are ignored without it |
+| `BITSOCIAL_TEST_REACHABILITY_ACME_ROOT` | The CA root Caddy trusts |
+| `BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS` | Public address discovery |
+| `BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT`, `_HTTP_PORT`, `_WS_PORT` | Ports 443, 80 and 4002 |
+
+- `setup` refuses the production Let's Encrypt directory when `CI` is set.
+- Node's global `WebSocket`, which libp2p uses, ignores TLS options. To trust Pebble, run the dial in a child process with `NODE_EXTRA_CA_CERTS`.
+- Other test files' kubos bind random ports, so a port chosen by a test can be taken before it is used (#87). Retry with a fresh port when that happens, and do not check "is this UDP port free" as a test assertion.
