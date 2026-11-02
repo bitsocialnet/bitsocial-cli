@@ -120,6 +120,10 @@
     },
     "dependencies": {
         "@bitsocial/bso-resolver": "0.0.10",
+        "@libp2p/identify": "4.1.18",
+        "@libp2p/noise": "17.0.7",
+        "@libp2p/websockets": "10.1.25",
+        "@libp2p/yamux": "8.0.7",
         "@multiformats/multiaddr": "13.0.1",
         "@oclif/core": "4.8.0",
         "@oclif/plugin-help": "6.2.36",
@@ -132,6 +136,7 @@
         "exit-hook": "4.0.0",
         "express": "4.19.2",
         "kubo": "0.43.1",
+        "libp2p": "3.5.1",
         "p-limit": "7.3.0",
         "strip-json-comments": "5.0.3",
         "tcp-port-used": "1.0.2",
