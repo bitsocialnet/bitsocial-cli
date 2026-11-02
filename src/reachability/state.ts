@@ -21,6 +21,11 @@ export interface ReachabilityConfig {
     domain?: string;
     staging: boolean;
     acmeDirectory: string;
+    caddyAdminPort: number;
+    // Stored so the daemon regenerates the same Caddyfile. Non-default only in tests.
+    httpsPort?: number;
+    httpPort?: number;
+    acmeTrustedRootsPath?: string;
     kuboEdits?: KuboEditRecord;
 }
 
@@ -77,6 +82,7 @@ function assertValidConfig(parsed: any, configPath: string): asserts parsed is R
     if (parsed.domain !== undefined && typeof parsed.domain !== "string") fail("domain must be a string");
     if (typeof parsed.staging !== "boolean") fail("staging must be a boolean");
     if (typeof parsed.acmeDirectory !== "string") fail("acmeDirectory must be a URL");
+    if (!Number.isInteger(parsed.caddyAdminPort)) fail("caddyAdminPort must be a port number");
 }
 
 async function readJsonIfExists(filePath: string): Promise<unknown> {
@@ -96,7 +102,7 @@ async function readJsonIfExists(filePath: string): Promise<unknown> {
 
 // Write then rename, so a crash or a concurrent reader never sees a half-written file. The temp name
 // is unique per process because the daemon and a CLI command can both be writing.
-async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
+export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
     await fs.writeFile(temporaryPath, JSON.stringify(value, null, 4) + "\n");

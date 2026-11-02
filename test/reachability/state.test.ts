@@ -38,7 +38,8 @@ const validConfig = (): ReachabilityConfig => ({
     announce: ["/ip4/203.0.113.7/tcp/443/tls/ws"],
     publicIps: ["203.0.113.7"],
     staging: false,
-    acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory"
+    acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory",
+    caddyAdminPort: 2019
 });
 
 const writeRawConfig = async (dataPath: string, content: string) => {
@@ -92,7 +93,8 @@ describe("reachability config file", () => {
         ["publicIps holding a number", { publicIps: [1] }],
         ["domain not a string", { domain: 5 }],
         ["staging missing", { staging: undefined }],
-        ["acmeDirectory missing", { acmeDirectory: undefined }]
+        ["acmeDirectory missing", { acmeDirectory: undefined }],
+        ["caddyAdminPort missing", { caddyAdminPort: undefined }]
     ])("rejects %s", async (_label, overrides) => {
         const dataPath = randomDirectory();
         await writeRawConfig(dataPath, JSON.stringify({ ...validConfig(), ...overrides }));

@@ -24,7 +24,7 @@ describe("bitsocial reachability status", () => {
     it("--json reflects the stored config", async () => {
         const dataPath = randomDirectory();
         const announce = ["/ip4/203.0.113.7/tcp/443/tls/ws"];
-        await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "ip", wsPort: 4002, announce, publicIps: ["203.0.113.7"], staging: true, acmeDirectory: "https://acme-staging-v02.api.letsencrypt.org/directory" });
+        await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "ip", wsPort: 4002, announce, publicIps: ["203.0.113.7"], staging: true, acmeDirectory: "https://acme-staging-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019 });
         const { stdout, exitCode } = await runStatus(["--json", "--pkcOptions.dataPath", dataPath]);
         expect(exitCode).toBe(0);
         expect(JSON.parse(stdout)).toMatchObject({ configured: true, mode: "ip", addresses: announce, wsPort: 4002, staging: true });
@@ -32,7 +32,7 @@ describe("bitsocial reachability status", () => {
 
     it("prints domain and Caddy checks for a person", async () => {
         const dataPath = randomDirectory();
-        await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "domain", wsPort: 4002, announce: [], publicIps: [], domain: "node.example", staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory" });
+        await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "domain", wsPort: 4002, announce: [], publicIps: [], domain: "node.example", staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019 });
         await writeReachabilityRuntimeStatus(dataPath, {
             updatedAt: "2026-11-02T00:00:00.000Z",
             domains: { "node.example": { lastCheckAt: "2026-11-02T00:00:00.000Z", ok: false, failingSince: "2026-11-01T00:00:00.000Z" } },

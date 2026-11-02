@@ -68,6 +68,12 @@ export async function loadKuboConfigFile(pkcDataPath: string): Promise<any | und
     return kuboConfig;
 }
 
+// Which kubo RPC this data path talks to, for commands that have no daemon flags to consider.
+export async function resolveKuboRpcUrl(pkcDataPath: string, envValue: string | undefined, fallback: URL): Promise<URL> {
+    if (envValue) return new URL(envValue);
+    return (await kuboRpcUrlFromKuboConfig(await loadKuboConfigFile(pkcDataPath))) ?? fallback;
+}
+
 async function parseMultiAddr(multiAddrString: string) {
     const module = await import("@multiformats/multiaddr");
     return module.multiaddr(multiAddrString);

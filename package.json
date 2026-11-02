@@ -119,6 +119,7 @@
         "wait-on": "6.0.1"
     },
     "dependencies": {
+        "@achingbrain/nat-port-mapper": "4.0.5",
         "@bitsocial/bso-resolver": "0.0.10",
         "@libp2p/identify": "4.1.18",
         "@libp2p/noise": "17.0.7",
