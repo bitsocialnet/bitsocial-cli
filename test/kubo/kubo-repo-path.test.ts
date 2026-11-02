@@ -70,6 +70,23 @@ describe("kubo endpoints from the kubo config", () => {
         expect((await parseMultiAddrIpfsGatewayToUrl("/ip6/::1/tcp/8080")).toString()).toBe("http://[::1]:8080/");
     });
 
+    // A wildcard bind address says where kubo listens, not what a client can dial: macOS refuses
+    // connect() to 0.0.0.0 (commit 4652547). These URLs go to pkc-js and the GC scheduler as they
+    // are, so they must already be on loopback.
+    it.each([
+        ["/ip4/0.0.0.0/tcp/5001", "http://127.0.0.1:5001/api/v0"],
+        ["/ip6/::/tcp/5001", "http://[::1]:5001/api/v0"]
+    ])("maps the wildcard bind %s to a loopback RPC URL", async (multiAddr, expected) => {
+        expect((await parseMultiAddrKuboRpcToUrl(multiAddr)).toString()).toBe(expected);
+    });
+
+    it.each([
+        ["/ip4/0.0.0.0/tcp/8080", "http://127.0.0.1:8080/"],
+        ["/ip6/::/tcp/8080", "http://[::1]:8080/"]
+    ])("maps the wildcard bind %s to a loopback gateway URL", async (multiAddr, expected) => {
+        expect((await parseMultiAddrIpfsGatewayToUrl(multiAddr)).toString()).toBe(expected);
+    });
+
     it("reads a single-string Addresses.API and Addresses.Gateway", async () => {
         const config = { Addresses: { API: "/ip4/127.0.0.1/tcp/5001", Gateway: "/ip4/127.0.0.1/tcp/8080" } };
         expect((await kuboRpcUrlFromKuboConfig(config))?.toString()).toBe("http://127.0.0.1:5001/api/v0");

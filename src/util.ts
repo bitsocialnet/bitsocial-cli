@@ -85,8 +85,9 @@ function multiAddrToHostPort(multiAddrObj: { getComponents: () => { name: string
 
 export const hostForUrl = (host: string) => (host.includes(":") && !host.startsWith("[") ? `[${host}]` : host);
 
-/** The host to dial for a connectivity check. Sockets need IPv6 hosts without the brackets a URL keeps,
- * and a wildcard bind address is reached over loopback (macOS rejects connect to 0.0.0.0 with EINVAL). */
+/** The host to dial, for a connectivity check or a client URL. Sockets need IPv6 hosts without the
+ * brackets a URL keeps, and a wildcard bind address is reached over loopback (macOS rejects connect to
+ * 0.0.0.0 with EINVAL). */
 export function toConnectableHostname(hostname: string): string {
     const bare = hostname.replace(/^\[(.*)\]$/, "$1");
     if (bare === "0.0.0.0") return "127.0.0.1";
@@ -98,14 +99,14 @@ export async function parseMultiAddrKuboRpcToUrl(kuboMultiAddrString: string) {
     const multiAddrObj = await parseMultiAddr(kuboMultiAddrString);
     const parsed = multiAddrToHostPort(multiAddrObj);
     if (!parsed) throw new Error(`Unable to parse kubo RPC multiaddr: ${kuboMultiAddrString}`);
-    return new URL(`http://${hostForUrl(parsed.host)}:${parsed.port}/api/v0`);
+    return new URL(`http://${hostForUrl(toConnectableHostname(parsed.host))}:${parsed.port}/api/v0`);
 }
 
 export async function parseMultiAddrIpfsGatewayToUrl(ipfsGatewaymultiAddrString: string) {
     const multiAddrObj = await parseMultiAddr(ipfsGatewaymultiAddrString);
     const parsed = multiAddrToHostPort(multiAddrObj);
     if (!parsed) throw new Error(`Unable to parse IPFS gateway multiaddr: ${ipfsGatewaymultiAddrString}`);
-    return new URL(`http://${hostForUrl(parsed.host)}:${parsed.port}`);
+    return new URL(`http://${hostForUrl(toConnectableHostname(parsed.host))}:${parsed.port}`);
 }
 
 // Kubo accepts Addresses.API and Addresses.Gateway as a string or a list, and either can be empty

@@ -213,4 +213,19 @@ describe("kubo endpoint precedence (issue #200)", () => {
         // The daemon adopted the running kubo instead of starting the one described by the config.
         expect(await isKuboListening(handle.configKuboApiUrl), "the daemon started the kubo from the config anyway").toBe(false);
     });
+
+    // Linux connects to 0.0.0.0 as loopback, so a wildcard URL handed to pkc-js works there by
+    // accident. macOS refuses it (commit 4652547), which is why the daemon's own checks go through
+    // toConnectableHostname. pkc-js and the GC scheduler must get a dialable URL too.
+    it.skipIf(process.platform !== "darwin")(
+        "connects pkc-js to a kubo whose config binds the wildcard address (macOS)",
+        { timeout: 180_000 },
+        async () => {
+            const handle = await startDaemon({ bindHost: "0.0.0.0" });
+            await handle.waitForReady();
+
+            const address = await createCommunityThroughDaemon(handle.rpcWsUrl);
+            expect(await kuboKeyNames(handle.configKuboApiUrl), "the community key did not land in kubo").toContain(address);
+        }
+    );
 });
