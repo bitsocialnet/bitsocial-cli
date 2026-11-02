@@ -6,7 +6,7 @@ import * as remeda from "remeda";
 import assert from "assert";
 import tcpPortUsed from "tcp-port-used";
 import { path as ipfsExePathFunc } from "kubo";
-import { PKCLogger } from "../util.js";
+import { PKCLogger, resolveKuboRepoPath } from "../util.js";
 
 async function getKuboExePath(): Promise<string> {
     return ipfsExePathFunc();
@@ -281,7 +281,7 @@ export async function startKuboNode(
     // throws as unhandledRejections and the promise never settles, which wedges the daemon's
     // pendingKuboStart tracking and hangs its shutdown (issue #70).
     const log = PKCLogger("bitsocial-cli:ipfs:startKuboNode");
-    const ipfsDataPath = process.env["IPFS_PATH"] || path.join(dataPath, ".bitsocial-cli.ipfs");
+    const ipfsDataPath = resolveKuboRepoPath(dataPath);
     await fs.promises.mkdir(ipfsDataPath, { recursive: true });
     const ipfsConfigPath = path.join(ipfsDataPath, "config");
 
