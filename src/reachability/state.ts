@@ -26,6 +26,8 @@ export interface ReachabilityConfig {
     mode: ReachabilityMode;
     wsPort: number;
     announce: string[];
+    // False while kubo has only its UDP 443 listeners, because nothing can terminate WSS yet.
+    serveWss?: boolean;
     publicIps: string[];
     domain?: string;
     // Set by --force: a proxy answers for this name, so its records are not expected to match our IPs.
@@ -93,6 +95,7 @@ function assertValidConfig(parsed: any, configPath: string): asserts parsed is R
     if (typeof parsed.enabled !== "boolean") fail("enabled must be a boolean");
     if (!REACHABILITY_MODES.includes(parsed.mode)) fail(`unknown mode ${JSON.stringify(parsed.mode)}`);
     if (!Number.isInteger(parsed.wsPort) || parsed.wsPort < 1 || parsed.wsPort > 65535) fail("wsPort must be a port number");
+    if (parsed.serveWss !== undefined && typeof parsed.serveWss !== "boolean") fail("serveWss must be a boolean");
     if (!isStringArray(parsed.announce)) fail("announce must be a list of multiaddrs");
     if (!isStringArray(parsed.publicIps)) fail("publicIps must be a list of IP addresses");
     if (parsed.domain !== undefined && typeof parsed.domain !== "string") fail("domain must be a string");

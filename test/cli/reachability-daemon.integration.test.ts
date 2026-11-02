@@ -50,6 +50,11 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
     beforeAll(async () => {
         dataPath = randomDirectory();
         pebble = await startPebble(randomDirectory());
+        daemon = await startPkcDaemonWithDynamicPorts(
+            (e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl],
+            () => ({ BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1" })
+        );
+        // Chosen after the slow daemon start, to leave other test files' kubos little time to take them (#87).
         httpsPort = await allocateFreePort("0.0.0.0");
         env = {
             BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: pebble.directoryUrl,
@@ -58,10 +63,6 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
             BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(httpsPort),
             BITSOCIAL_TEST_REACHABILITY_HTTP_PORT: String(await allocateFreePort("0.0.0.0"))
         };
-        daemon = await startPkcDaemonWithDynamicPorts(
-            (e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl],
-            () => env
-        );
         // The helper stops collecting stdout at the ready banner, and the warning comes right after it.
         daemonStdout = daemon.daemonProcess.capturedStdout!;
         daemon.daemonProcess.stdout!.on("data", (data: Buffer) => (daemonStdout += data.toString()));

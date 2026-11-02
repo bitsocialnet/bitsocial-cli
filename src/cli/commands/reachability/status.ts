@@ -35,6 +35,7 @@ export default class Status extends Command {
                 certificates: status.certificates,
                 ...(override ? { publicIps: override.split(",") } : config?.publicIps.length ? { publicIps: config.publicIps } : {}),
                 ...(config?.httpsPort ? { httpsPort: config.httpsPort } : {}),
+                ...(config?.httpPort ? { httpPort: config.httpPort } : {}),
                 ...(config ? { wsPort: config.wsPort, caddyAdminPort: config.caddyAdminPort } : {})
             })
         );

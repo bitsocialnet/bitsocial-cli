@@ -75,6 +75,7 @@ export interface CheckFacts {
     daemonRunning: boolean;
     publicIps: string[];
     httpsPort: number;
+    httpPort?: number;
     wsPort: number | undefined;
     caddyPath: string;
     kuboPath: string;
@@ -137,7 +138,7 @@ export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
     else checks.push({ id: "udp-443", status: "ok", detail: "UDP 443 is free and kubo may bind it" });
 
     if (facts.tcp80 === "busy" && !facts.ourCaddyRunning)
-        checks.push({ id: "tcp-80", status: "warn", detail: `TCP 80 is held by ${facts.tcp80Holder ?? "another program"}. Let's Encrypt can still validate over TCP 443, but HTTP validation is unavailable` });
+        checks.push({ id: "tcp-80", status: "warn", detail: `TCP ${facts.httpPort ?? 80} is held by ${facts.tcp80Holder ?? "another program"}. Let's Encrypt can still validate over TCP 443, but HTTP validation is unavailable` });
     else if (facts.tcp80 === "no-permission" && facts.caddyBind === "denied") checks.push({ id: "tcp-80", status: "warn", detail: "Caddy has no permission to bind TCP 80, so only TCP 443 validation is available" });
     else checks.push({ id: "tcp-80", status: "ok", detail: "TCP 80 is available for certificate validation" });
 
@@ -246,12 +247,14 @@ export async function gatherCheckFacts(input: {
     enabled: boolean;
     publicIps?: string[];
     httpsPort?: number;
+    httpPort?: number;
     wsPort?: number;
     caddyAdminPort?: number;
     certificates?: CertificateInfo[];
 }): Promise<CheckFacts> {
     const platform = process.platform;
     const httpsPort = input.httpsPort ?? 443;
+    const httpPort = input.httpPort ?? 80;
     const caddyPath = caddyBinaryPath(input.dataPath);
     const { unprivilegedPortStart, effectiveCapabilities } = await readLinuxBindInputs(platform);
     const permissionFor = async (binaryPath: string, port: number) =>
@@ -267,7 +270,7 @@ export async function gatherCheckFacts(input: {
             /* not running */
         }
     }
-    const [tcp443, tcp80, udp443] = await Promise.all([probeTcpPort(httpsPort), probeTcpPort(80), probeUdpPort(443)]);
+    const [tcp443, tcp80, udp443] = await Promise.all([probeTcpPort(httpsPort), probeTcpPort(httpPort), probeUdpPort(443)]);
     return {
         platform,
         inContainer: await detectContainer(),
@@ -275,6 +278,7 @@ export async function gatherCheckFacts(input: {
         daemonRunning: kuboListen !== undefined,
         publicIps: input.publicIps ?? publicIpsFromInterfaces(),
         httpsPort,
+        httpPort,
         wsPort: input.wsPort,
         caddyPath,
         kuboPath: input.kuboPath,
@@ -282,7 +286,7 @@ export async function gatherCheckFacts(input: {
         tcp443,
         tcp443Holder: tcp443 === "busy" ? await findTcpHolderName(httpsPort) : undefined,
         tcp80,
-        tcp80Holder: tcp80 === "busy" ? await findTcpHolderName(80) : undefined,
+        tcp80Holder: tcp80 === "busy" ? await findTcpHolderName(httpPort) : undefined,
         udp443,
         udp443Holder: udp443 === "busy" ? await findUdpHolder(443, platform) : undefined,
         caddyBind: await permissionFor(caddyPath, httpsPort),

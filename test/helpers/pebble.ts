@@ -52,8 +52,9 @@ export interface RunningPebble {
     stop: () => Promise<void>;
 }
 
-// Skip-validation mode: orders succeed without dialling back, since CI cannot be reached on 80 or 443.
-export async function startPebble(workDirectory: string): Promise<RunningPebble> {
+// Skip-validation mode by default: orders succeed without dialling back, since CI cannot be reached on 80
+// or 443. With `validateOn`, Pebble really dials those local ports, so a challenge has to succeed.
+export async function startPebble(workDirectory: string, { validateOn }: { validateOn?: { httpPort: number; tlsPort: number } } = {}): Promise<RunningPebble> {
     await fs.mkdir(workDirectory, { recursive: true });
     const binaryPath = await ensurePebbleBinary(workDirectory);
     const [acmePort, managementPort] = await Promise.all([allocateFreePort(), allocateFreePort()]);
@@ -66,8 +67,8 @@ export async function startPebble(workDirectory: string): Promise<RunningPebble>
                 managementListenAddress: `127.0.0.1:${managementPort}`,
                 certificate: LISTENER_CERT,
                 privateKey: LISTENER_KEY,
-                httpPort: 5002,
-                tlsPort: 5001,
+                httpPort: validateOn?.httpPort ?? 5002,
+                tlsPort: validateOn?.tlsPort ?? 5001,
                 externalAccountBindingRequired: false,
                 profiles: {
                     default: { description: "default", validityPeriod: 7_776_000 },
@@ -77,7 +78,7 @@ export async function startPebble(workDirectory: string): Promise<RunningPebble>
         })
     );
     const child: ChildProcess = spawn(binaryPath, ["-config", configPath], {
-        env: { ...process.env, PEBBLE_VA_ALWAYS_VALID: "1", PEBBLE_VA_NOSLEEP: "1", PEBBLE_WFE_NONCEREJECT: "0" },
+        env: { ...process.env, ...(validateOn ? {} : { PEBBLE_VA_ALWAYS_VALID: "1" }), PEBBLE_VA_NOSLEEP: "1", PEBBLE_WFE_NONCEREJECT: "0" },
         stdio: "ignore"
     });
 

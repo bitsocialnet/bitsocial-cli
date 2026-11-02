@@ -108,6 +108,32 @@ describe("computeKuboConfig when enabled", () => {
     });
 });
 
+describe("computeKuboConfig when no WSS is served", () => {
+    const webTransportOnly = (overrides: Partial<ReachabilityKuboInput> = {}) => reachability({ announce: [], serveWss: false, ...overrides });
+
+    it("adds only the UDP 443 listeners", () => {
+        const result = computeKuboConfig(serverProfileConfig(), webTransportOnly(), true);
+        expect(result.Addresses.Swarm).toEqual([...DEFAULT_SWARM, ...WEBTRANSPORT_SWARM_ADDRESSES]);
+    });
+
+    it("leaves AddrFilters and AutoTLS exactly as they were", () => {
+        const result = computeKuboConfig(serverProfileConfig(), webTransportOnly(), true);
+        expect(result.Swarm.AddrFilters).toEqual(SERVER_ADDR_FILTERS);
+        expect(result.AutoTLS.Enabled).toBe(true);
+    });
+
+    it("gains the WSS edits when a proxy is added, and loses them again when it is removed", () => {
+        const first = enable(serverProfileConfig(), webTransportOnly());
+        const withProxy = enable(first.kubo, { ...first.input, announce: [ANNOUNCE_V4], serveWss: true });
+        expect(withProxy.kubo.Addresses.Swarm).toContain(localWsSwarmAddress(4002));
+        expect(withProxy.kubo.Swarm.AddrFilters).not.toContain(LOOPBACK_ADDR_FILTER);
+        expect(withProxy.kubo.AutoTLS.Enabled).toBe(false);
+
+        const back = enable(withProxy.kubo, { ...withProxy.input, announce: [], serveWss: false });
+        expect(bytes(back.kubo)).toBe(bytes(first.kubo));
+    });
+});
+
 describe("computeKuboConfig when disabled", () => {
     it("changes nothing if reachability was never applied", () => {
         const input = serverProfileConfig();
@@ -180,6 +206,19 @@ describe("disable/enable byte-for-byte round trip", () => {
         const reenabled = enable(disabled.kubo, disabled.input);
         expect(bytes(reenabled.kubo)).toBe(bytes(enabled.kubo));
         expect(reenabled.input.kuboEdits).toEqual(enabled.input.kuboEdits);
+    });
+
+    it.each(fixtures)("%s: a node that serves no WSS also round-trips", (_name, fixture) => {
+        const original = fixture();
+        const enabled = enable(original, reachability({ announce: [], serveWss: false }));
+        expect(bytes(disable(enabled.kubo, enabled.input).kubo)).toBe(bytes(original));
+    });
+
+    it.each(fixtures)("%s: gaining WSS and then disabling round-trips", (_name, fixture) => {
+        const original = fixture();
+        const first = enable(original, reachability({ announce: [], serveWss: false }));
+        const withWss = enable(first.kubo, { ...first.input, announce: [ANNOUNCE_V4], serveWss: true });
+        expect(bytes(disable(withWss.kubo, withWss.input).kubo)).toBe(bytes(original));
     });
 
     it.each(fixtures)("%s: survives an IP change and a port move before disable", (_name, fixture) => {

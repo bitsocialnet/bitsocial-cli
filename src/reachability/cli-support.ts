@@ -66,8 +66,7 @@ export async function cliSetupDependencies(
     return {
         ...realSetupDependencies(),
         ...output,
-        checkRequirements: async ({ publicIps, httpsPort, caddyAdminPort, wsPort }) =>
-            evaluateChecks(await gatherCheckFacts({ ...paths, kuboPath, enabled: false, publicIps, httpsPort, caddyAdminPort, wsPort })),
+        checkRequirements: async (input) => evaluateChecks(await gatherCheckFacts({ ...paths, kuboPath, enabled: false, ...input })),
         ...(canAsk ? { confirm: confirmOnTerminal, ask: askOnTerminal, runSudoSetcap } : {}),
         platform: process.platform,
         inContainer: await detectContainer(),

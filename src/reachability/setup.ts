@@ -35,8 +35,10 @@ import {
     bindDeniedGuidance,
     busyPortMessage,
     dnsMismatchMessage,
+    existingServerGuidance,
     IPV6_ONLY_CAVEAT,
     NO_IPV6_HINT,
+    noWssStatement,
     reverseProxySnippet,
     setcapCommand,
     testCommandHint,
@@ -91,7 +93,7 @@ export interface SetupDependencies {
     resolveDomain: (domain: string) => Promise<ResolvedDomain>;
     dial: (address: string) => Promise<{ peerId: string }>;
     // Requirements to report before changing anything. Absent in tests that drive setup directly.
-    checkRequirements?: (input: { publicIps: string[]; httpsPort: number; caddyAdminPort: number; wsPort: number }) => Promise<ReachabilityCheck[]>;
+    checkRequirements?: (input: { publicIps: string[]; httpsPort: number; httpPort?: number; caddyAdminPort: number; wsPort: number }) => Promise<ReachabilityCheck[]>;
     certificateTimeoutMs?: number;
 }
 
@@ -267,17 +269,24 @@ async function restartAndVerifyKubo(config: ReachabilityConfig, restart: boolean
         deps.log("The daemon is not running. Start it with: bitsocial daemon");
         return;
     }
-    if (restart) await shutdownKubo(options.kuboRpcUrl);
     const deadline = Date.now() + (deps.certificateTimeoutMs ?? 60_000);
-    // Waits for the new kubo: the old one can answer for a moment after the shutdown request.
-    let listen: string[] | undefined;
-    while (Date.now() < deadline) {
-        listen = await kuboListenAddresses(options.kuboRpcUrl);
-        if (listen?.some((address) => address.includes(localWsSwarmAddress(config.wsPort)))) break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
+    if (restart) {
+        await shutdownKubo(options.kuboRpcUrl);
+        // The old kubo can answer for a moment after the request, and its answer says nothing about the new one.
+        const downBy = Date.now() + 10_000;
+        while (Date.now() < downBy && (await kuboIdentity(options.kuboRpcUrl))) await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    if (!listen?.some((address) => address.includes(localWsSwarmAddress(config.wsPort)))) {
-        deps.warn(`kubo has not come back listening on ${localWsSwarmAddress(config.wsPort)}. Check the daemon, then run: bitsocial reachability status`);
+    let listen = await kuboListenAddresses(options.kuboRpcUrl);
+    while (!listen && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        listen = await kuboListenAddresses(options.kuboRpcUrl);
+    }
+    if (!listen) {
+        deps.warn("kubo has not come back after the restart. Check the daemon, then run: bitsocial reachability status");
+        return;
+    }
+    if (config.serveWss !== false && !listen.some((address) => address.includes(localWsSwarmAddress(config.wsPort)))) {
+        deps.warn(`kubo is not listening on ${localWsSwarmAddress(config.wsPort)}. Check the daemon, then run: bitsocial reachability status`);
         return;
     }
     if (!listen.some((address) => address.includes("/udp/443/quic-v1/webtransport")))
@@ -300,7 +309,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     if (publicIps.length > 0) deps.log(`Public addresses: ${publicIps.join(", ")}`);
 
     // Reported, not enforced: setup goes on to do what it can, and each path below says what it managed.
-    for (const check of (await deps.checkRequirements?.({ publicIps, httpsPort, caddyAdminPort, wsPort })) ?? []) {
+    for (const check of (await deps.checkRequirements?.({ publicIps, httpsPort, caddyAdminPort, wsPort, ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}) })) ?? []) {
         if (check.status === "fail" || check.status === "warn") deps.warn(formatCheck(check));
     }
 
@@ -370,7 +379,11 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     if (issuedIps.length > 0 && !publicIps.some((ip) => net.isIPv6(ip))) deps.log(NO_IPV6_HINT);
     if (deps.platform === "win32" && issued.length > 0) deps.log(windowsFirewallGuidance());
 
-    const buildConfig = (externalAnnounce: string[]): ReachabilityConfig => {
+    // WSS needs kubo's loopback listener, the filter removal and AutoTLS off. Without something to terminate it,
+    // or an operator who said they are setting that up, those edits would cost something and buy nothing.
+    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || (portBusy && domain !== undefined && domainUsable);
+
+    const buildConfig = (externalAnnounce: string[], serveWss: boolean): ReachabilityConfig => {
         const announce = [
             ...issuedIps.map((ip) => announceForIp(ip, httpsPort)),
             ...(domain && domainIssued ? [domainAnnounceAddress(domain, httpsPort, records)] : []),
@@ -382,6 +395,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             mode: deriveMode({ ip: issuedIps.length > 0, domain: domainIssued, proxy: externalAnnounce.length > 0 }),
             wsPort,
             announce,
+            ...(serveWss ? {} : { serveWss: false }),
             publicIps: issuedIps,
             ...(domain ? { domain } : {}),
             ...(domain && (options.force || (previous?.domain === domain && previous.domainForced)) ? { domainForced: true } : {}),
@@ -397,7 +411,11 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     // The listeners go first: the operator's proxy has nothing to forward to until kubo has its ws port.
     let externalAnnounce = previous?.externalAnnounce ?? [];
-    let applied = await applyKuboConfig({ ...buildConfig(externalAnnounce), ...(previous?.kuboEdits ? { kuboEdits: previous.kuboEdits } : {}) }, options, true);
+    let applied = await applyKuboConfig(
+        { ...buildConfig(externalAnnounce, wantsWss(externalAnnounce) || options.announce !== undefined), ...(previous?.kuboEdits ? { kuboEdits: previous.kuboEdits } : {}) },
+        options,
+        true
+    );
     await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
 
     if (options.announce) {
@@ -406,11 +424,18 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         try {
             await deps.dial(`${options.announce}/p2p/${identity.peerId}`);
         } catch (error) {
+            // Back to how it was before this attempt, so a failed try does not cost AutoTLS or the filter.
+            applied = await applyKuboConfig(
+                { ...buildConfig(externalAnnounce, wantsWss(externalAnnounce)), ...(applied.config.kuboEdits ? { kuboEdits: applied.config.kuboEdits } : {}) },
+                options,
+                true
+            );
+            await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
             throw new SetupRefusedError(`Could not complete a libp2p handshake with this node through ${options.announce}, so it was not announced: ${(error as Error).message}`);
         }
         deps.log(`Verified ${options.announce} with a libp2p handshake.`);
         externalAnnounce = [...new Set([...externalAnnounce, options.announce])];
-        applied = await applyKuboConfig({ ...buildConfig(externalAnnounce), ...(applied.config.kuboEdits ? { kuboEdits: applied.config.kuboEdits } : {}) }, options, true);
+        applied = await applyKuboConfig({ ...buildConfig(externalAnnounce, true), ...(applied.config.kuboEdits ? { kuboEdits: applied.config.kuboEdits } : {}) }, options, true);
         await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
     }
     const { config } = applied;
@@ -423,19 +448,24 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         return config;
     }
 
-    deps.log("WebTransport on UDP 443 is configured. No WSS address is announced.");
     if (portBusy && domain && domainUsable) {
+        deps.warn(noWssStatement("no reverse proxy has been verified yet"));
         deps.log(reverseProxySnippet(holder, domain, wsPort));
         if (!deps.confirm) throw new NeedsAnswerError(`Set up the reverse proxy above, then rerun setup with --announce. kubo is listening on 127.0.0.1:${wsPort}.`);
         return config;
     }
-    const reason = portBusy
-        ? "TCP 443 is in use by another program and no domain was given"
-        : publicIps.length === 0
-          ? sawCgnat
-              ? "this network is behind carrier-grade NAT and has no global IPv6"
-              : "no public IPv4 or global IPv6 address was found"
-          : (failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443");
-    deps.warn(unreachableStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
+    if (publicIps.length === 0) {
+        const reason = sawCgnat ? "this network is behind carrier-grade NAT and has no global IPv6" : "no public IPv4 or global IPv6 address was found";
+        deps.warn(unreachableStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
+        return config;
+    }
+    if (portBusy) {
+        deps.warn(noWssStatement("another program holds TCP 443"));
+        deps.log(existingServerGuidance(holder, publicIps.find((ip) => net.isIPv4(ip)) ?? publicIps[0]!, wsPort, httpsPort));
+        if (!deps.confirm) throw new NeedsAnswerError("Setting up browser access through the program holding TCP 443 needs you to act, as printed above.");
+        return config;
+    }
+    const reason = failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443";
+    deps.warn(noWssStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
     return config;
 }

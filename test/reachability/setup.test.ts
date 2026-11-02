@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
-import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
+import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, existingServerGuidance, noWssStatement, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
 import {
     assertAcmeDirectoryAllowed,
     assertAnnounceShape,
@@ -167,4 +167,47 @@ describe("reverseProxySnippet", () => {
     it("carries the upgrade headers nginx does not forward by default", () => {
         expect(reverseProxySnippet("nginx", "node.example", 4002)).toContain("proxy_set_header Upgrade $http_upgrade");
     });
+});
+
+describe("existingServerGuidance", () => {
+    it("gives an existing Caddy a site block for the IP, with the shortlived profile", () => {
+        const text = existingServerGuidance("caddy", "93.184.216.34", 4002);
+        expect(text).toContain("https://93.184.216.34 {");
+        expect(text).toContain("profile shortlived");
+        expect(text).toContain("reverse_proxy 127.0.0.1:4002");
+        expect(text).toContain("--announce /ip4/93.184.216.34/tcp/443/tls/ws");
+    });
+
+    it("warns that the operator's Caddy must stay off UDP 443", () => {
+        expect(existingServerGuidance("caddy", "93.184.216.34", 4002)).toContain("protocols h1 h2");
+    });
+
+    it("brackets IPv6, in both the site and the multiaddr form", () => {
+        const text = existingServerGuidance("caddy", "2606:4700::1", 4002);
+        expect(text).toContain("https://[2606:4700::1] {");
+        expect(text).toContain("--announce /ip6/2606:4700::1/tcp/443/tls/ws");
+    });
+
+    it("gives both routes when the server could not be identified", () => {
+        const text = existingServerGuidance(undefined, "93.184.216.34", 4002);
+        expect(text).toContain("profile shortlived");
+        expect(text).toContain("--domain");
+    });
+
+    it.each(["nginx", "apache", "other"] as const)("sends %s to --domain, which cannot get an IP certificate alone", (holder) => {
+        const text = existingServerGuidance(holder, "93.184.216.34", 4002);
+        expect(text).toContain("--domain");
+        expect(text).not.toContain("profile shortlived");
+    });
+
+    it("never tells the operator we will change their server", () => {
+        expect(existingServerGuidance("caddy", "93.184.216.34", 4002)).toContain("will not change");
+    });
+});
+
+it("noWssStatement says WebTransport is configured, not that nothing can reach this machine", () => {
+    const text = noWssStatement("TCP 443 is in use");
+    expect(text).toContain("TCP 443 is in use");
+    expect(text).toContain("WebTransport");
+    expect(text).not.toContain("Neither");
 });

@@ -111,3 +111,39 @@ export const dnsMismatchMessage = (domain: string, resolved: string[], publicIps
         `  This machine's public addresses: ${publicIps.join(", ") || "none found"}`,
         "Fix the DNS record, or pass --force if a proxy in front of this machine is meant to answer for it."
     ].join(EOL);
+
+// For a server we do not own on the HTTPS port, and no domain. We only print: it may be serving other sites.
+export function existingServerGuidance(holder: PortHolder | undefined, ip: string, wsPort: number, httpsPort = 443): string {
+    const site = ip.includes(":") ? `[${ip}]` : ip;
+    const announce = `/${ip.includes(":") ? "ip6" : "ip4"}/${ip}/tcp/${httpsPort}/tls/ws`;
+    const caddyRoute = [
+        "To serve browsers through it, add this site to its Caddyfile and reload it:",
+        "",
+        `https://${site} {`,
+        "    tls {",
+        "        issuer acme {",
+        "            profile shortlived",
+        "        }",
+        "    }",
+        `    reverse_proxy 127.0.0.1:${wsPort}`,
+        "}",
+        "",
+        "Its global options must also keep it off UDP 443, which kubo needs for WebTransport:",
+        "",
+        "{",
+        "    servers {",
+        "        protocols h1 h2",
+        "    }",
+        "}",
+        "",
+        `Then run: bitsocial reachability setup --announce ${announce}`
+    ].join(EOL);
+    const domainRoute = "Point a domain at this machine, then run: bitsocial reachability setup --domain <name>. It prints a forwarding snippet for your server.";
+    const intro = "Setup will not change the program holding TCP 443.";
+    if (holder === "caddy") return [intro, caddyRoute].join(EOL);
+    if (holder === undefined) return [intro, "If it is Caddy:", caddyRoute, "", `Otherwise: ${domainRoute}`].join(EOL);
+    return [intro, `It cannot obtain a certificate for an IP address by itself. ${domainRoute}`].join(EOL);
+}
+
+export const noWssStatement = (reason: string) =>
+    `Browsers cannot reach this node over WSS yet: ${reason}. WebTransport on UDP 443 is configured, for browsers that support it, if inbound UDP reaches this machine.`;

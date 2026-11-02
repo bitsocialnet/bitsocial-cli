@@ -27,12 +27,16 @@ export interface KuboEditRecord {
     addedSwarm: string[];
     addedAppendAnnounce: string[];
     removedAddrFilters: { entry: string; index: number }[];
-    autoTls: { sectionShape: OriginalShape; enabledShape: OriginalShape; enabled?: unknown };
+    // Absent while no WSS is served, because AutoTLS is then left alone.
+    autoTls?: { sectionShape: OriginalShape; enabledShape: OriginalShape; enabled?: unknown };
 }
 
 export interface ReachabilityKuboInput {
     wsPort: number;
     announce: string[];
+    // False when nothing can terminate WSS yet: only the UDP 443 listeners are worth adding then, and
+    // giving up AutoTLS or the loopback filter would cost something and buy nothing.
+    serveWss?: boolean;
     kuboEdits?: KuboEditRecord;
 }
 
@@ -71,7 +75,7 @@ function undoListEdits(config: any, edits: KuboEditRecord) {
 
 // Runs only on disable. If AutoTLS is no longer false the operator flipped it by hand, and we leave
 // their choice alone.
-function restoreAutoTls(config: any, autoTls: KuboEditRecord["autoTls"]) {
+function restoreAutoTls(config: any, autoTls: NonNullable<KuboEditRecord["autoTls"]>) {
     if (config.AutoTLS?.Enabled !== false) return;
     if (autoTls.enabledShape === "absent") delete config.AutoTLS.Enabled;
     else config.AutoTLS.Enabled = autoTls.enabled;
@@ -100,7 +104,7 @@ export function planKuboConfig(
     if (previousEdits) undoListEdits(config, previousEdits);
 
     if (!enabled) {
-        if (previousEdits) restoreAutoTls(config, previousEdits.autoTls);
+        if (previousEdits?.autoTls) restoreAutoTls(config, previousEdits.autoTls);
         return { kuboConfig: config, kuboEdits: undefined };
     }
 
@@ -111,11 +115,15 @@ export function planKuboConfig(
     config.Addresses.Swarm ??= [];
     config.Addresses.AppendAnnounce ??= [];
 
-    const addedSwarm = appendMissing(config.Addresses.Swarm, [localWsSwarmAddress(reachabilityConfig.wsPort), ...WEBTRANSPORT_SWARM_ADDRESSES]);
+    const serveWss = reachabilityConfig.serveWss !== false;
+    const addedSwarm = appendMissing(config.Addresses.Swarm, [
+        ...(serveWss ? [localWsSwarmAddress(reachabilityConfig.wsPort)] : []),
+        ...WEBTRANSPORT_SWARM_ADDRESSES
+    ]);
     const addedAppendAnnounce = appendMissing(config.Addresses.AppendAnnounce, reachabilityConfig.announce);
 
     const removedAddrFilters: KuboEditRecord["removedAddrFilters"] = [];
-    if (Array.isArray(config.Swarm?.AddrFilters)) {
+    if (serveWss && Array.isArray(config.Swarm?.AddrFilters)) {
         config.Swarm.AddrFilters.forEach((entry: unknown, index: number) => {
             if (entry === LOOPBACK_ADDR_FILTER) removedAddrFilters.push({ entry, index });
         });
@@ -124,7 +132,10 @@ export function planKuboConfig(
 
     // Set once per enable. A later repair or IP change must not undo an operator flipping it back on.
     let autoTls = previousEdits?.autoTls;
-    if (!autoTls) {
+    if (!serveWss) {
+        if (autoTls) restoreAutoTls(config, autoTls);
+        autoTls = undefined;
+    } else if (!autoTls) {
         autoTls = {
             sectionShape: shapeOf(config.AutoTLS),
             enabledShape: shapeOf(config.AutoTLS?.Enabled),
@@ -142,7 +153,7 @@ export function planKuboConfig(
             addedSwarm,
             addedAppendAnnounce,
             removedAddrFilters,
-            autoTls
+            ...(autoTls ? { autoTls } : {})
         }
     };
 }
