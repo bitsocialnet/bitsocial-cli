@@ -12,7 +12,9 @@ import {
     setupDebugLogger,
     loadKuboConfigFile,
     kuboRpcUrlFromKuboConfig,
-    ipfsGatewayUrlFromKuboConfig
+    ipfsGatewayUrlFromKuboConfig,
+    hostForUrl,
+    toConnectableHostname
 } from "../../util.js";
 import type { PKCLoggerType } from "../../util.js";
 import { startDaemonServer } from "../../webui/daemon-server.js";
@@ -26,14 +28,6 @@ import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-util
 import fs from "fs";
 import fsPromise from "fs/promises";
 
-/** Replace wildcard bind addresses with loopback for connectivity checks (macOS rejects connect to 0.0.0.0 with EINVAL) */
-function toConnectableHostname(hostname: string): string {
-    if (process.platform === "darwin") {
-        if (hostname === "0.0.0.0") return "127.0.0.1";
-        if (hostname === "::") return "::1";
-    }
-    return hostname;
-}
 import { EOL } from "node:os";
 import { formatWithOptions } from "node:util";
 import { createRequire } from "node:module";
@@ -328,10 +322,14 @@ export default class Daemon extends Command {
             const ipfsConfig = await loadKuboConfigFile(pkcOptionsFromFlag?.dataPath || defaultPkcOptions.dataPath!);
             const kuboRpcEndpoint = pkcOptionsFromFlag?.kuboRpcClientsOptions
                 ? new URL(pkcOptionsFromFlag.kuboRpcClientsOptions[0]!.toString())
-                : ((await kuboRpcUrlFromKuboConfig(ipfsConfig)) ?? defaults.KUBO_RPC_URL);
+                : process.env["KUBO_RPC_URL"]
+                  ? defaults.KUBO_RPC_URL
+                  : ((await kuboRpcUrlFromKuboConfig(ipfsConfig)) ?? defaults.KUBO_RPC_URL);
             const ipfsGatewayEndpoint = pkcOptionsFromFlag?.ipfsGatewayUrls
                 ? new URL(pkcOptionsFromFlag.ipfsGatewayUrls[0])
-                : ((await ipfsGatewayUrlFromKuboConfig(ipfsConfig)) ?? defaults.IPFS_GATEWAY_URL);
+                : process.env["IPFS_GATEWAY_URL"]
+                  ? defaults.IPFS_GATEWAY_URL
+                  : ((await ipfsGatewayUrlFromKuboConfig(ipfsConfig)) ?? defaults.IPFS_GATEWAY_URL);
 
             defaultPkcOptions.kuboRpcClientsOptions = [kuboRpcEndpoint.toString()];
             const mergedPkcOptions = { ...defaultPkcOptions, ...pkcOptionsFromFlag };
@@ -388,7 +386,7 @@ export default class Daemon extends Command {
                 if (mainProcessExited || kuboProcess || pendingKuboStart) return;
                 if (isKuboApiPortTaken) {
                     const connectableEndpoint = new URL(kuboRpcEndpoint.toString());
-                    connectableEndpoint.hostname = connectHostname;
+                    connectableEndpoint.hostname = hostForUrl(connectHostname);
                     const versionUrl = new URL("version", connectableEndpoint);
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 2000);

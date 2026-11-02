@@ -11,7 +11,8 @@ import {
     loadKuboConfigFile,
     parseMultiAddrIpfsGatewayToUrl,
     parseMultiAddrKuboRpcToUrl,
-    resolveKuboRepoPath
+    resolveKuboRepoPath,
+    toConnectableHostname
 } from "../../src/util.js";
 
 describe("kubo repo path resolution", () => {
@@ -89,5 +90,26 @@ describe("kubo endpoints from the kubo config", () => {
     ])("returns undefined so the caller falls back to defaults: %s", async (_label, config) => {
         expect(await kuboRpcUrlFromKuboConfig(config)).toBeUndefined();
         expect(await ipfsGatewayUrlFromKuboConfig(config)).toBeUndefined();
+    });
+});
+
+// A URL keeps IPv6 hosts in brackets, but sockets need them bare.
+describe("toConnectableHostname", () => {
+    it.each([
+        ["0.0.0.0", "127.0.0.1"],
+        ["127.0.0.1", "127.0.0.1"],
+        ["localhost", "localhost"],
+        ["::", "::1"],
+        ["[::]", "::1"],
+        ["[::1]", "::1"],
+        ["::1", "::1"],
+        ["[2001:db8::7]", "2001:db8::7"]
+    ])("%s connects via %s", (hostname, expected) => {
+        expect(toConnectableHostname(hostname)).toBe(expected);
+    });
+
+    it("gives a hostname a socket can connect to from an IPv6 kubo config", async () => {
+        const url = await kuboRpcUrlFromKuboConfig({ Addresses: { API: "/ip6/::1/tcp/5001" } });
+        expect(toConnectableHostname(url!.hostname)).toBe("::1");
     });
 });

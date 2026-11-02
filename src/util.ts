@@ -83,7 +83,16 @@ function multiAddrToHostPort(multiAddrObj: { getComponents: () => { name: string
     return { host, port };
 }
 
-const hostForUrl = (host: string) => (host.includes(":") ? `[${host}]` : host);
+export const hostForUrl = (host: string) => (host.includes(":") && !host.startsWith("[") ? `[${host}]` : host);
+
+/** The host to dial for a connectivity check. Sockets need IPv6 hosts without the brackets a URL keeps,
+ * and a wildcard bind address is reached over loopback (macOS rejects connect to 0.0.0.0 with EINVAL). */
+export function toConnectableHostname(hostname: string): string {
+    const bare = hostname.replace(/^\[(.*)\]$/, "$1");
+    if (bare === "0.0.0.0") return "127.0.0.1";
+    if (bare === "::") return "::1";
+    return bare;
+}
 
 export async function parseMultiAddrKuboRpcToUrl(kuboMultiAddrString: string) {
     const multiAddrObj = await parseMultiAddr(kuboMultiAddrString);
