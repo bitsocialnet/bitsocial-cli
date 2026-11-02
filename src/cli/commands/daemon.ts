@@ -387,7 +387,10 @@ export default class Daemon extends Command {
                 if (isKuboApiPortTaken) {
                     const connectableEndpoint = new URL(kuboRpcEndpoint.toString());
                     connectableEndpoint.hostname = hostForUrl(connectHostname);
-                    const versionUrl = new URL("version", connectableEndpoint);
+                    // Relative to ".../api/v0" a bare "version" resolves to "/api/version", which kubo
+                    // answers 404, so a healthy kubo looked like a foreign listener and startup failed.
+                    const versionPath = `${connectableEndpoint.pathname.replace(/\/$/, "")}/version`;
+                    const versionUrl = new URL(versionPath, connectableEndpoint);
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 2000);
                     let isHealthyKubo = false;
