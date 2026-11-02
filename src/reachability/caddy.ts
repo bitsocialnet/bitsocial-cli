@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import net from "net";
 import path from "path";
 import decompress from "decompress";
-import { caddyDataDir, readIssuedCertificates, reachabilityDir } from "./state.js";
+import { caddyDataDir, currentCertificates, readIssuedCertificates, reachabilityDir } from "./state.js";
 
 // To bump Caddy, change the version and all six hashes in one commit. They are pinned here rather than
 // read from the checksums file next to the download, because that file shares the download's origin.
@@ -195,22 +195,17 @@ export const reloadCaddy = (adminPort: number, caddyfile: string) =>
     adminRequest(adminPort, "/load", { method: "POST", headers: { "Content-Type": "text/caddyfile" }, body: caddyfile });
 
 // Issuance succeeding is the proof that the internet reached us, so this is the real result of setup.
-// Names come back as Caddy prints them, which for IPv6 is not the operator's spelling, so compare as IPs.
-const sameName = (a: string, b: string) => {
-    if (net.isIPv6(a) && net.isIPv6(b)) {
-        const blockList = new net.BlockList();
-        blockList.addAddress(a, "ipv6");
-        return blockList.check(b, "ipv6");
-    }
-    return a.toLowerCase() === b.toLowerCase();
-};
-
-export async function waitForCertificates(dataPath: string, names: string[], timeoutMs = 90_000): Promise<{ issued: string[]; missing: string[] }> {
+// Only certificates from this CA count: a leftover --staging one must not pass for a production result.
+export async function waitForCertificates(
+    dataPath: string,
+    acmeDirectory: string,
+    names: string[],
+    timeoutMs = 90_000
+): Promise<{ issued: string[]; missing: string[] }> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-        const certificates = await readIssuedCertificates(dataPath);
-        const current = certificates.filter((certificate) => certificate.hoursLeft > 0);
-        const issued = names.filter((name) => current.some((certificate) => certificate.names.some((held) => sameName(held, name))));
+        const unexpired = (await readIssuedCertificates(dataPath)).filter((certificate) => certificate.hoursLeft > 0);
+        const issued = names.filter((name) => currentCertificates(unexpired, acmeDirectory, [name]).length > 0);
         if (issued.length === names.length || Date.now() >= deadline) return { issued, missing: names.filter((name) => !issued.includes(name)) };
         await new Promise((resolve) => setTimeout(resolve, 500));
     }

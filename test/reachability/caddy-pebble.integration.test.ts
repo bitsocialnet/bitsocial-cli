@@ -97,12 +97,17 @@ describe("Caddy, Pebble and kubo", { timeout: 240_000 }, () => {
     }, 60_000);
 
     it("issues a shortlived certificate covering 127.0.0.1", async () => {
-        const result = await waitForCertificates(dataPath, ["127.0.0.1"], 60_000);
+        const result = await waitForCertificates(dataPath, pebble.directoryUrl, ["127.0.0.1"], 60_000);
         expect(result.missing, caddyOutput).toEqual([]);
         const [certificate] = await readIssuedCertificates(dataPath);
         expect(certificate!.names).toContain("127.0.0.1");
         expect(certificate!.hoursLeft).toBeGreaterThan(100);
         expect(certificate!.hoursLeft).toBeLessThanOrEqual(160);
+    });
+
+    it("does not count that certificate for a different CA", async () => {
+        const result = await waitForCertificates(dataPath, "https://acme-staging-v02.api.letsencrypt.org/directory", ["127.0.0.1"], 0);
+        expect(result).toEqual({ issued: [], missing: ["127.0.0.1"] });
     });
 
     it("stored a parseable certificate, not only the status summary", async () => {
