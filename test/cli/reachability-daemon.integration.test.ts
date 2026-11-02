@@ -84,7 +84,14 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
     it("picks up setup on a running daemon and serves a libp2p handshake through its own Caddy", async () => {
         const before = JSON.parse(await fs.readFile(path.join(dataPath, ".bitsocial-cli.ipfs", "config"), "utf-8"));
         touchedBeforeSetup = JSON.stringify({ Swarm: before.Addresses.Swarm, AppendAnnounce: before.Addresses.AppendAnnounce, AddrFilters: before.Swarm.AddrFilters, AutoTLS: before.AutoTLS });
-        const result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], { ...env, KUBO_RPC_URL: daemon.kuboRpcUrl, IPFS_GATEWAY_URL: daemon.gatewayUrl });
+        const runSetup = () => runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], { ...env, KUBO_RPC_URL: daemon.kuboRpcUrl, IPFS_GATEWAY_URL: daemon.gatewayUrl });
+        let result = await runSetup();
+        // Another test file's kubo can take the chosen port before Caddy binds it (see #87). Only that retries.
+        for (let attempt = 1; attempt < 3 && /holding TCP 443|address already in use/i.test(`${result.stdout} ${result.stderr}`); attempt++) {
+            httpsPort = await allocateFreePort("0.0.0.0");
+            env["BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT"] = String(httpsPort);
+            result = await runSetup();
+        }
         expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
         const stored = JSON.parse(await fs.readFile(path.join(dataPath, "reachability", "config.json"), "utf-8"));
         adminPort = stored.caddyAdminPort;

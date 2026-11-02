@@ -50,26 +50,35 @@ describe("Caddy, Pebble and kubo", { timeout: 240_000 }, () => {
         dataPath = randomDirectory();
         pebble = await startPebble(randomDirectory());
         [adminPort, httpsPort, wsPort] = await Promise.all([allocateFreePort(), allocateFreePort("0.0.0.0"), allocateFreePort()]);
-        const [apiPort, gatewayPort] = await Promise.all([allocateFreePort(), allocateFreePort()]);
-        kuboApiUrl = `http://127.0.0.1:${apiPort}/api/v0`;
-
+        // Retried with fresh ports, because another test file's kubo can take these first (see #87).
         const repo = path.join(dataPath, ".bitsocial-cli.ipfs");
-        await preInitKuboWithEphemeralSwarm(repo, new URL(kuboApiUrl), new URL(`http://127.0.0.1:${gatewayPort}`));
-        const configPath = path.join(repo, "config");
-        const edited = computeKuboConfig(JSON.parse(await fs.readFile(configPath, "utf-8")), { wsPort, announce: [] }, true);
-        // Only the loopback ws listener: the shared UDP 443 ones cannot bind unprivileged on Linux CI.
-        edited.Addresses.Swarm = [`/ip4/127.0.0.1/tcp/${wsPort}/ws`];
-        await fs.writeFile(configPath, JSON.stringify(edited, null, 4));
-        peerId = edited.Identity.PeerID;
-        kubo = spawn(await resolveKuboBinary(), ["daemon"], { env: { ...process.env, IPFS_PATH: repo }, stdio: "ignore" });
-        const kuboUp = await waitForCondition(async () => {
-            try {
-                return (await fetch(`${kuboApiUrl}/id`, { method: "POST" })).ok;
-            } catch {
-                return false;
-            }
-        }, 60_000, 250);
-        expect(kuboUp, "kubo did not start").toBe(true);
+        let kuboOutput = "";
+        for (let attempt = 1; ; attempt++) {
+            const [apiPort, gatewayPort] = await Promise.all([allocateFreePort(), allocateFreePort()]);
+            kuboApiUrl = `http://127.0.0.1:${apiPort}/api/v0`;
+            await preInitKuboWithEphemeralSwarm(repo, new URL(kuboApiUrl), new URL(`http://127.0.0.1:${gatewayPort}`));
+            const configPath = path.join(repo, "config");
+            const current = JSON.parse(await fs.readFile(configPath, "utf-8"));
+            const edited = attempt === 1 ? computeKuboConfig(current, { wsPort, announce: [] }, true) : current;
+            // Only the loopback ws listener: the shared UDP 443 ones cannot bind unprivileged on Linux CI.
+            edited.Addresses.Swarm = [`/ip4/127.0.0.1/tcp/${wsPort}/ws`];
+            await fs.writeFile(configPath, JSON.stringify(edited, null, 4));
+            peerId = edited.Identity.PeerID;
+            kuboOutput = "";
+            kubo = spawn(await resolveKuboBinary(), ["daemon"], { env: { ...process.env, IPFS_PATH: repo }, stdio: ["ignore", "ignore", "pipe"] });
+            kubo.stderr!.on("data", (data: Buffer) => (kuboOutput += data.toString()));
+            const kuboUp = await waitForCondition(async () => {
+                if (kubo!.exitCode !== null) return true;
+                try {
+                    return (await fetch(`${kuboApiUrl}/id`, { method: "POST" })).ok;
+                } catch {
+                    return false;
+                }
+            }, 60_000, 250);
+            if (kuboUp && kubo.exitCode === null) break;
+            await killChildProcess(kubo);
+            if (attempt === 4 || !/address already in use/i.test(kuboOutput)) throw new Error(`kubo did not start: ${kuboOutput}`);
+        }
 
         const binaryPath = await ensureCaddyBinary(dataPath);
         caddyfile = generateCaddyfile({
@@ -133,14 +142,13 @@ describe("Caddy, Pebble and kubo", { timeout: 240_000 }, () => {
         expect(result.error).toBeTruthy();
     });
 
-    it("binds no UDP socket on the HTTPS port, which kubo needs for WebTransport", async () => {
-        const dgram = await import("dgram");
-        const socket = dgram.createSocket("udp4");
-        await new Promise<void>((resolve, reject) => {
-            socket.once("error", reject);
-            socket.bind(httpsPort, "0.0.0.0", () => resolve());
-        });
-        await new Promise<void>((resolve) => socket.close(() => resolve()));
+    // Asks Caddy rather than binding the port: another test's kubo can hold that UDP port number by chance.
+    it("serves no HTTP/3, which would take kubo's UDP 443", async () => {
+        const origin = `http://127.0.0.1:${adminPort}`;
+        const servers = (await (await fetch(`${origin}/config/apps/http/servers/`, { headers: { Origin: origin } })).json()) as Record<string, { protocols?: string[] }>;
+        const protocols = Object.values(servers).map((server) => server.protocols);
+        expect(protocols.length).toBeGreaterThan(0);
+        for (const serverProtocols of protocols) expect(serverProtocols).toEqual(["h1", "h2"]);
     });
 
     it("reloads through the admin API without re-issuing", async () => {

@@ -193,7 +193,7 @@ describe("another Caddy holds only the HTTP port", { timeout: 300_000 }, () => {
             const startedAt = Date.now();
             run = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], { ...env, KUBO_RPC_URL: daemon.kuboRpcUrl, IPFS_GATEWAY_URL: daemon.gatewayUrl });
             elapsedMs = Date.now() - startedAt;
-            if (attempt === 3 || !/address already in use/i.test(`${run.stdout} ${run.stderr}`)) break;
+            if (attempt === 3 || !/address already in use|holding TCP 443/i.test(`${run.stdout} ${run.stderr}`)) break;
             await pebble.stop();
         }
     }, 300_000);

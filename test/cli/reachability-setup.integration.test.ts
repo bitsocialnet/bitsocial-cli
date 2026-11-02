@@ -53,7 +53,13 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
     }, 60_000);
 
     it("issues a certificate, configures kubo and restarts it", async () => {
-        const result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
+        let result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
+        // Another test file's kubo can take the chosen port before Caddy binds it (see #87). Only that retries.
+        for (let attempt = 1; attempt < 3 && /holding TCP 443|address already in use/i.test(`${result.stdout} ${result.stderr}`); attempt++) {
+            httpsPort = await allocateFreePort("0.0.0.0");
+            env["BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT"] = String(httpsPort);
+            result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
+        }
         expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
         expect(result.stdout).toContain(`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`);
         expect(result.stdout).toContain("Let's Encrypt");
