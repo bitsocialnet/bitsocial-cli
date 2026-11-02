@@ -1,9 +1,13 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
-import { readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
+import { evaluateChecks, formatCheck, gatherCheckFacts, type ReachabilityCheck } from "../../../reachability/checks.js";
+import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
+import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
+import { resolveKuboRpcUrl } from "../../../util.js";
 
 export default class Status extends Command {
-    static override description = "Show whether browsers can reach this node: mode, announced addresses, certificate expiry and last checks";
+    static override description =
+        "Show whether browsers can reach this node: mode, announced addresses, certificate expiry, last checks, and whether each requirement is met, including permission to bind UDP 443";
 
     static override enableJsonFlag = true;
 
@@ -16,13 +20,33 @@ export default class Status extends Command {
 
     static override examples = ["bitsocial reachability status", "bitsocial reachability status --json"];
 
-    async run(): Promise<ReachabilityStatus> {
+    async run(): Promise<ReachabilityStatus & { checks: ReachabilityCheck[] }> {
         const { flags } = await this.parse(Status);
-        const status = await readReachabilityStatus(flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH);
+        const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
+        const status = await readReachabilityStatus(dataPath);
+        const config = await readReachabilityConfig(dataPath);
+        const override = process.env["BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS"];
+        const checks = evaluateChecks(
+            await gatherCheckFacts({
+                dataPath,
+                kuboPath: await resolveKuboBinaryPath(),
+                kuboRpcUrl: await resolveKuboRpcUrl(dataPath, process.env["KUBO_RPC_URL"], defaults.KUBO_RPC_URL),
+                enabled: status.enabled,
+                certificates: status.certificates,
+                ...(override ? { publicIps: override.split(",") } : config?.publicIps.length ? { publicIps: config.publicIps } : {}),
+                ...(config?.httpsPort ? { httpsPort: config.httpsPort } : {}),
+                ...(config ? { wsPort: config.wsPort, caddyAdminPort: config.caddyAdminPort } : {})
+            })
+        );
+        const printChecks = () => {
+            this.log("Requirements:");
+            for (const check of checks) this.log(formatCheck(check));
+        };
 
         if (!status.configured) {
             this.log("Reachability is not configured. Browsers cannot reach this node. Run: bitsocial reachability setup");
-            return status;
+            printChecks();
+            return { ...status, checks };
         }
         this.log(`Enabled: ${status.enabled ? "yes" : "no"}`);
         this.log(`Mode: ${status.mode}${status.staging ? " (Let's Encrypt staging)" : ""}`);
@@ -41,6 +65,7 @@ export default class Status extends Command {
             this.log(`Domain check ${domain}: ${state}${check.droppedFromAnnounce ? ", no longer announced" : ""} (checked ${check.lastCheckAt})`);
         }
         if (status.lastChecks?.caddy) this.log(`Caddy: ${status.lastChecks.caddy.running ? "running" : "not running"}`);
-        return status;
+        printChecks();
+        return { ...status, checks };
     }
 }

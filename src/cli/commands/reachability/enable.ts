@@ -23,7 +23,7 @@ export default class Enable extends Command {
         try {
             await runReachabilitySetup(
                 { ...paths, staging: stored.staging, nonInteractive: true, force: stored.domainForced === true, ...(overrides ? { overrides } : {}) },
-                await cliSetupDependencies({ log: (message) => this.log(message), warn: (message) => this.logToStderr(message) }, false)
+                await cliSetupDependencies({ log: (message) => this.log(message), warn: (message) => this.logToStderr(message) }, false, paths)
             );
         } catch (error) {
             if (error instanceof NeedsAnswerError) this.error(error.message, { exit: 2 });

@@ -44,6 +44,7 @@ import {
     webTransportNotListeningGuidance,
     windowsFirewallGuidance
 } from "./guidance.js";
+import { formatCheck, type ReachabilityCheck } from "./checks.js";
 import { localWsSwarmAddress, planKuboConfig } from "./kubo-config.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
 import { dialWithLibp2p } from "./libp2p-dial.js";
@@ -89,6 +90,8 @@ export interface SetupDependencies {
     ensureCaddy: (dataPath: string) => Promise<string>;
     resolveDomain: (domain: string) => Promise<ResolvedDomain>;
     dial: (address: string) => Promise<{ peerId: string }>;
+    // Requirements to report before changing anything. Absent in tests that drive setup directly.
+    checkRequirements?: (input: { publicIps: string[]; httpsPort: number; caddyAdminPort: number; wsPort: number }) => Promise<ReachabilityCheck[]>;
     certificateTimeoutMs?: number;
 }
 
@@ -295,6 +298,11 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     const { publicIps, refused, sawCgnat } = await discoverPublicIps(options, deps, previous?.announce);
     if (publicIps.length > 0) deps.log(`Public addresses: ${publicIps.join(", ")}`);
+
+    // Reported, not enforced: setup goes on to do what it can, and each path below says what it managed.
+    for (const check of (await deps.checkRequirements?.({ publicIps, httpsPort, caddyAdminPort, wsPort })) ?? []) {
+        if (check.status === "fail" || check.status === "warn") deps.warn(formatCheck(check));
+    }
 
     const ourCaddyRunning = await adminUp(caddyAdminPort);
     const portState = ourCaddyRunning ? "free" : await deps.probePort(httpsPort);

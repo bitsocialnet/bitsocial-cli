@@ -3,6 +3,7 @@ import readline from "readline/promises";
 import defaults from "../common-utils/defaults.js";
 import { initKuboRepoIfNeeded, resolveKuboBinaryPath } from "../ipfs/startIpfs.js";
 import { loadKuboConfigFile, PKCLogger, resolveKuboRepoPath, resolveKuboRpcUrl } from "../util.js";
+import { evaluateChecks, gatherCheckFacts } from "./checks.js";
 import { detectContainer } from "./discovery.js";
 import { realSetupDependencies, type SetupDependencies, type SetupOptions } from "./setup.js";
 
@@ -56,14 +57,21 @@ export async function ensureKuboRepo(dataPath: string, kuboRpcUrl: URL) {
     if (!(await loadKuboConfigFile(dataPath))) await initKuboRepoIfNeeded(log, dataPath, kuboRpcUrl, defaults.IPFS_GATEWAY_URL);
 }
 
-export async function cliSetupDependencies(output: { log: (message: string) => void; warn: (message: string) => void }, canAsk: boolean): Promise<SetupDependencies> {
+export async function cliSetupDependencies(
+    output: { log: (message: string) => void; warn: (message: string) => void },
+    canAsk: boolean,
+    paths: { dataPath: string; kuboRpcUrl: URL }
+): Promise<SetupDependencies> {
+    const kuboPath = await resolveKuboBinaryPath();
     return {
         ...realSetupDependencies(),
         ...output,
+        checkRequirements: async ({ publicIps, httpsPort, caddyAdminPort, wsPort }) =>
+            evaluateChecks(await gatherCheckFacts({ ...paths, kuboPath, enabled: false, publicIps, httpsPort, caddyAdminPort, wsPort })),
         ...(canAsk ? { confirm: confirmOnTerminal, ask: askOnTerminal, runSudoSetcap } : {}),
         platform: process.platform,
         inContainer: await detectContainer(),
         isCi: Boolean(process.env["CI"]),
-        kuboBinaryPath: await resolveKuboBinaryPath()
+        kuboBinaryPath: kuboPath
     };
 }

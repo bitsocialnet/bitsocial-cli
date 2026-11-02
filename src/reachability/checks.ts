@@ -1,0 +1,300 @@
+import { execFile } from "child_process";
+import dgram from "dgram";
+import { promises as fs } from "fs";
+import os from "os";
+import { promisify } from "util";
+import { caddyBinaryPath } from "./caddy.js";
+import { detectContainer, findPortHolder, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type PortState } from "./discovery.js";
+import { setcapCommand, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
+import type { CertificateInfo } from "./state.js";
+
+const execFileAsync = promisify(execFile);
+
+export type CheckStatus = "ok" | "warn" | "fail" | "unknown";
+
+export interface ReachabilityCheck {
+    id: string;
+    status: CheckStatus;
+    detail: string;
+    fix?: string;
+}
+
+const CAP_NET_BIND_SERVICE_BIT = 10n;
+
+export interface BindPermissionInput {
+    platform: string;
+    port: number;
+    uid: number | undefined;
+    // /proc/self/status CapEff, which is what actually counts for root in a container that dropped it.
+    effectiveCapabilities: bigint | undefined;
+    unprivilegedPortStart: number | undefined;
+    // `getcap` output for the binary; undefined when getcap could not be run.
+    fileCapabilities: string | undefined;
+}
+
+export type BindPermission = "allowed" | "denied" | "unknown";
+
+// Whether a binary we spawn may bind this port. Asking Node to bind proves nothing: setcap on Caddy or
+// kubo does not apply to Node, and the reverse is just as true.
+export function bindPermission(input: BindPermissionInput): BindPermission {
+    if (input.platform !== "linux" || input.port >= 1024) return "allowed"; // macOS since 10.14, and Windows
+    if (input.unprivilegedPortStart !== undefined && input.unprivilegedPortStart <= input.port) return "allowed";
+    if (input.uid === 0) {
+        if (input.effectiveCapabilities === undefined) return "allowed";
+        return (input.effectiveCapabilities >> CAP_NET_BIND_SERVICE_BIT) & 1n ? "allowed" : "denied";
+    }
+    if (input.fileCapabilities === undefined) return "unknown";
+    return input.fileCapabilities.includes("cap_net_bind_service") ? "allowed" : "denied";
+}
+
+export interface FirewallState {
+    name: "ufw" | "firewalld";
+    active: boolean;
+    allowsTcp443: boolean;
+    allowsUdp443: boolean;
+}
+
+export const parseUfwStatus = (output: string): FirewallState | undefined => {
+    if (!/^Status:/m.test(output)) return undefined;
+    const active = /^Status: active/m.test(output);
+    const allows = (protocol: string) => new RegExp(`^(443|443/${protocol}|Anywhere)(\\s|\\(v6\\)).*ALLOW`, "m").test(output) || /^(Caddy|Nginx|Apache)\b.*ALLOW/m.test(output);
+    return { name: "ufw", active, allowsTcp443: allows("tcp"), allowsUdp443: new RegExp("^(443|443/udp)(\\s|\\(v6\\)).*ALLOW", "m").test(output) };
+};
+
+export const parseFirewalldState = (state: string, ports: string, services: string): FirewallState => ({
+    name: "firewalld",
+    active: state.trim() === "running",
+    allowsTcp443: /\b443\/tcp\b/.test(ports) || /\bhttps\b/.test(services),
+    allowsUdp443: /\b443\/udp\b/.test(ports) || /\bhttp3\b/.test(services)
+});
+
+export interface CheckFacts {
+    platform: string;
+    inContainer: boolean;
+    enabled: boolean;
+    daemonRunning: boolean;
+    publicIps: string[];
+    httpsPort: number;
+    wsPort: number | undefined;
+    caddyPath: string;
+    kuboPath: string;
+    ourCaddyRunning: boolean;
+    tcp443: PortState;
+    tcp443Holder: string | undefined;
+    tcp80: PortState;
+    tcp80Holder: string | undefined;
+    udp443: PortState;
+    udp443Holder: string | undefined;
+    caddyBind: BindPermission;
+    kuboBind: BindPermission;
+    kuboListen: string[] | undefined;
+    firewall: FirewallState | undefined;
+    certificates: CertificateInfo[];
+}
+
+const bindFix = (facts: CheckFacts, binaryPath: string) => {
+    if (facts.inContainer) return "Add cap_add: [NET_BIND_SERVICE] to your compose file";
+    return `Run ${UNPRIVILEGED_PORT_SYSCTL} (persist it in /etc/sysctl.d/) or ${setcapCommand(binaryPath)}`;
+};
+
+export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
+    const checks: ReachabilityCheck[] = [];
+    const port = facts.httpsPort;
+
+    checks.push(
+        facts.publicIps.length > 0
+            ? { id: "public-address", status: "ok", detail: `Public addresses: ${facts.publicIps.join(", ")}` }
+            : {
+                  id: "public-address",
+                  status: "warn",
+                  detail: "No public address on this machine's interfaces. Setup also asks the router and kubo",
+                  fix: "A public IPv4 address, global IPv6, or a router allowing UPnP or manual forwarding is needed"
+              }
+    );
+
+    if (facts.ourCaddyRunning) checks.push({ id: "tcp-443", status: "ok", detail: `TCP ${port} is served by this node's Caddy` });
+    else if (facts.tcp443 === "busy")
+        checks.push({
+            id: "tcp-443",
+            status: "fail",
+            detail: `TCP ${port} is held by ${facts.tcp443Holder ?? "another program"}, so this node cannot serve its own certificate`,
+            fix: "Free the port, or use --domain with your existing server as a reverse proxy"
+        });
+    else if (facts.caddyBind === "denied")
+        checks.push({ id: "tcp-443", status: "fail", detail: `Caddy has no permission to bind TCP ${port}`, fix: bindFix(facts, facts.caddyPath) });
+    else if (facts.caddyBind === "unknown")
+        checks.push({ id: "tcp-443", status: "unknown", detail: `TCP ${port} is free, but getcap is not installed so Caddy's permission could not be read` });
+    else checks.push({ id: "tcp-443", status: "ok", detail: `TCP ${port} is free and Caddy may bind it` });
+
+    const kuboHoldsUdp = facts.kuboListen?.some((address) => address.includes("/udp/443/quic-v1/webtransport")) === true;
+    if (kuboHoldsUdp) checks.push({ id: "udp-443", status: "ok", detail: "kubo is listening for WebTransport on UDP 443" });
+    else if (facts.udp443 === "busy")
+        checks.push({ id: "udp-443", status: "fail", detail: `UDP 443 is held by ${facts.udp443Holder ?? "another program"}, so kubo cannot listen there`, fix: "Stop whatever holds it. WebTransport then falls back to UDP 4001, which some ISPs filter" });
+    else if (facts.kuboBind === "denied")
+        checks.push({ id: "udp-443", status: "fail", detail: "kubo has no permission to bind UDP 443. It would start normally and silently not listen", fix: bindFix(facts, facts.kuboPath) });
+    else if (facts.kuboBind === "unknown") checks.push({ id: "udp-443", status: "unknown", detail: "getcap is not installed, so kubo's permission to bind UDP 443 could not be read" });
+    else if (facts.enabled && facts.daemonRunning) checks.push({ id: "udp-443", status: "fail", detail: "kubo should be listening on UDP 443 but is not", fix: "Check the daemon log, then run: bitsocial reachability enable" });
+    else checks.push({ id: "udp-443", status: "ok", detail: "UDP 443 is free and kubo may bind it" });
+
+    if (facts.tcp80 === "busy" && !facts.ourCaddyRunning)
+        checks.push({ id: "tcp-80", status: "warn", detail: `TCP 80 is held by ${facts.tcp80Holder ?? "another program"}. Let's Encrypt can still validate over TCP 443, but HTTP validation is unavailable` });
+    else if (facts.tcp80 === "no-permission" && facts.caddyBind === "denied") checks.push({ id: "tcp-80", status: "warn", detail: "Caddy has no permission to bind TCP 80, so only TCP 443 validation is available" });
+    else checks.push({ id: "tcp-80", status: "ok", detail: "TCP 80 is available for certificate validation" });
+
+    if (facts.firewall?.active) {
+        const closed = [!facts.firewall.allowsTcp443 && "TCP 443", !facts.firewall.allowsUdp443 && "UDP 443"].filter(Boolean);
+        if (closed.length > 0) {
+            const openCommand = facts.firewall.name === "ufw" ? "sudo ufw allow 443" : "sudo firewall-cmd --permanent --add-port=443/tcp --add-port=443/udp && sudo firewall-cmd --reload";
+            checks.push({ id: "firewall", status: "warn", detail: `${facts.firewall.name} is active and does not appear to allow ${closed.join(" or ")}`, fix: openCommand });
+        } else checks.push({ id: "firewall", status: "ok", detail: `${facts.firewall.name} allows port 443` });
+    }
+
+    if (facts.enabled) {
+        if (!facts.daemonRunning) checks.push({ id: "daemon", status: "warn", detail: "The daemon is not running, so nothing is being served", fix: "Run: bitsocial daemon" });
+        else if (facts.wsPort !== undefined) {
+            const listening = facts.kuboListen?.some((address) => address.includes(`/tcp/${facts.wsPort}/ws`)) === true;
+            checks.push(
+                listening
+                    ? { id: "kubo-ws", status: "ok", detail: `kubo is listening on 127.0.0.1:${facts.wsPort} for the terminator` }
+                    : { id: "kubo-ws", status: "fail", detail: `kubo is not listening on 127.0.0.1:${facts.wsPort}, so WSS cannot reach it`, fix: "Run: bitsocial reachability enable" }
+            );
+        }
+        for (const certificate of facts.certificates)
+            if (certificate.hoursLeft < 24)
+                checks.push({ id: "certificate", status: "warn", detail: `The certificate for ${certificate.names.join(", ")} has ${certificate.hoursLeft} hours left`, fix: "Check that TCP 80 or 443 still reaches this machine" });
+    }
+
+    // Nothing on this machine can prove this, including a cloud provider's firewall, which is invisible from here.
+    checks.push({ id: "inbound", status: "unknown", detail: "Only a connection from another network can prove inbound traffic reaches this machine. A provider firewall cannot be seen from here" });
+    return checks;
+}
+
+export const probeUdpPort = (port: number, host = "0.0.0.0"): Promise<PortState> =>
+    new Promise((resolve) => {
+        const socket = dgram.createSocket("udp4");
+        socket.once("error", (error: NodeJS.ErrnoException) => {
+            socket.close();
+            resolve(error.code === "EACCES" ? "no-permission" : "busy");
+        });
+        socket.bind({ port, address: host, exclusive: true }, () => socket.close(() => resolve("free")));
+    });
+
+async function readLinuxBindInputs(platform: string) {
+    if (platform !== "linux") return { unprivilegedPortStart: undefined, effectiveCapabilities: undefined };
+    const unprivileged = await fs.readFile("/proc/sys/net/ipv4/ip_unprivileged_port_start", "utf-8").catch(() => undefined);
+    const status = await fs.readFile("/proc/self/status", "utf-8").catch(() => undefined);
+    const capabilities = status?.match(/^CapEff:\s*([0-9a-f]+)/m)?.[1];
+    return {
+        unprivilegedPortStart: unprivileged === undefined ? undefined : Number(unprivileged.trim()),
+        effectiveCapabilities: capabilities ? BigInt(`0x${capabilities}`) : undefined
+    };
+}
+
+const fileCapabilities = async (binaryPath: string): Promise<string | undefined> => {
+    try {
+        return (await execFileAsync("getcap", [binaryPath])).stdout;
+    } catch (error) {
+        // A missing binary has no capabilities yet, which is different from not being able to ask.
+        return (error as NodeJS.ErrnoException).code === "ENOENT" ? undefined : "";
+    }
+};
+
+async function readFirewall(platform: string): Promise<FirewallState | undefined> {
+    if (platform !== "linux") return undefined;
+    try {
+        const parsed = parseUfwStatus((await execFileAsync("ufw", ["status"])).stdout);
+        if (parsed?.active) return parsed;
+    } catch {
+        /* not installed, or not root */
+    }
+    try {
+        const [state, ports, services] = await Promise.all([
+            execFileAsync("firewall-cmd", ["--state"]),
+            execFileAsync("firewall-cmd", ["--list-ports"]),
+            execFileAsync("firewall-cmd", ["--list-services"])
+        ]);
+        return parseFirewalldState(state.stdout, ports.stdout, services.stdout);
+    } catch {
+        return undefined;
+    }
+}
+
+const findUdpHolder = async (port: number, platform: string): Promise<string | undefined> => {
+    if (platform !== "linux") return undefined;
+    try {
+        return parseSsHolder((await execFileAsync("ss", ["-lunpH", `sport = :${port}`])).stdout);
+    } catch {
+        return undefined;
+    }
+};
+
+const findTcpHolderName = async (port: number): Promise<string | undefined> => {
+    if (process.platform === "linux") {
+        try {
+            return parseSsHolder((await execFileAsync("ss", ["-ltnpH", `sport = :${port}`])).stdout);
+        } catch {
+            return undefined;
+        }
+    }
+    return findPortHolder(port);
+};
+
+export async function gatherCheckFacts(input: {
+    dataPath: string;
+    kuboPath: string;
+    kuboRpcUrl: URL;
+    enabled: boolean;
+    publicIps?: string[];
+    httpsPort?: number;
+    wsPort?: number;
+    caddyAdminPort?: number;
+    certificates?: CertificateInfo[];
+}): Promise<CheckFacts> {
+    const platform = process.platform;
+    const httpsPort = input.httpsPort ?? 443;
+    const caddyPath = caddyBinaryPath(input.dataPath);
+    const { unprivilegedPortStart, effectiveCapabilities } = await readLinuxBindInputs(platform);
+    const permissionFor = async (binaryPath: string, port: number) =>
+        bindPermission({ platform, port, uid: process.getuid?.(), effectiveCapabilities, unprivilegedPortStart, fileCapabilities: await fileCapabilities(binaryPath) });
+
+    const kuboListen = await kuboListenAddresses(input.kuboRpcUrl);
+    let ourCaddyRunning = false;
+    if (input.caddyAdminPort) {
+        try {
+            await fetch(`http://127.0.0.1:${input.caddyAdminPort}/config/`, { headers: { Origin: `http://127.0.0.1:${input.caddyAdminPort}` }, signal: AbortSignal.timeout(1000) });
+            ourCaddyRunning = true;
+        } catch {
+            /* not running */
+        }
+    }
+    const [tcp443, tcp80, udp443] = await Promise.all([probeTcpPort(httpsPort), probeTcpPort(80), probeUdpPort(443)]);
+    return {
+        platform,
+        inContainer: await detectContainer(),
+        enabled: input.enabled,
+        daemonRunning: kuboListen !== undefined,
+        publicIps: input.publicIps ?? publicIpsFromInterfaces(),
+        httpsPort,
+        wsPort: input.wsPort,
+        caddyPath,
+        kuboPath: input.kuboPath,
+        ourCaddyRunning,
+        tcp443,
+        tcp443Holder: tcp443 === "busy" ? await findTcpHolderName(httpsPort) : undefined,
+        tcp80,
+        tcp80Holder: tcp80 === "busy" ? await findTcpHolderName(80) : undefined,
+        udp443,
+        udp443Holder: udp443 === "busy" ? await findUdpHolder(443, platform) : undefined,
+        caddyBind: await permissionFor(caddyPath, httpsPort),
+        kuboBind: await permissionFor(input.kuboPath, 443),
+        kuboListen,
+        firewall: await readFirewall(platform),
+        certificates: input.certificates ?? []
+    };
+}
+
+export const formatCheck = (check: ReachabilityCheck) => {
+    const mark: Record<CheckStatus, string> = { ok: "ok", warn: "warning", fail: "problem", unknown: "unknown" };
+    return `  [${mark[check.status]}] ${check.detail}${check.fix ? `${os.EOL}      Fix: ${check.fix}` : ""}`;
+};
+

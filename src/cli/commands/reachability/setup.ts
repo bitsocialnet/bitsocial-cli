@@ -41,7 +41,7 @@ export default class Setup extends Command {
                     ...(flags.announce ? { announce: flags.announce } : {}),
                     ...(overrides ? { overrides } : {})
                 },
-                await cliSetupDependencies({ log: (message) => this.log(message), warn: (message) => this.logToStderr(message) }, canAsk)
+                await cliSetupDependencies({ log: (message) => this.log(message), warn: (message) => this.logToStderr(message) }, canAsk, paths)
             );
         } catch (error) {
             if (error instanceof NeedsAnswerError) this.error(error.message, { exit: 2 });

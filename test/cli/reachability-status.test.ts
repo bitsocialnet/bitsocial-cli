@@ -5,7 +5,11 @@ import { writeReachabilityConfig, writeReachabilityRuntimeStatus } from "../../s
 
 const runStatus = (args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null }> =>
     new Promise((resolve, reject) => {
-        const proc = spawn("node", ["./bin/run", "reachability", "status", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+        // A dead kubo port, so these never read from a kubo that happens to be running on this machine.
+        const proc = spawn("node", ["./bin/run", "reachability", "status", ...args], {
+            stdio: ["ignore", "pipe", "pipe"],
+            env: { ...process.env, KUBO_RPC_URL: "http://127.0.0.1:9/api/v0" }
+        });
         let stdout = "";
         let stderr = "";
         proc.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
@@ -41,6 +45,18 @@ describe("bitsocial reachability status", () => {
         const { stdout } = await runStatus(["--pkcOptions.dataPath", dataPath]);
         expect(stdout).toContain("Domain check node.example: failing since 2026-11-01T00:00:00.000Z");
         expect(stdout).toContain("Caddy: not running");
+    });
+
+    it("--json lists each requirement it checked, including UDP 443", async () => {
+        const { stdout } = await runStatus(["--json", "--pkcOptions.dataPath", randomDirectory()]);
+        const ids = JSON.parse(stdout).checks.map((check: { id: string }) => check.id);
+        expect(ids).toEqual(expect.arrayContaining(["public-address", "tcp-443", "udp-443", "tcp-80", "inbound"]));
+    });
+
+    it("prints requirements for a person even when not configured", async () => {
+        const { stdout } = await runStatus(["--pkcOptions.dataPath", randomDirectory()]);
+        expect(stdout).toContain("Requirements:");
+        expect(stdout).toMatch(/UDP 443/);
     });
 
     it("names the setup command for a person when not configured", async () => {
