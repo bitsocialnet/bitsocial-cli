@@ -14,6 +14,7 @@ import {
     kuboRpcUrlFromKuboConfig,
     ipfsGatewayUrlFromKuboConfig,
     hostForUrl,
+    resolveKuboRepoPath,
     toConnectableHostname
 } from "../../util.js";
 import type { PKCLoggerType } from "../../util.js";
@@ -556,6 +557,7 @@ export default class Daemon extends Command {
             };
 
             let keepKuboUpInterval: NodeJS.Timeout | undefined;
+            let reachabilityRuntime: import("../../reachability/runtime.js").ReachabilityRuntime | undefined;
             let stopRepoGcScheduler: (() => void) | undefined;
             const { asyncExitHook } = await import("exit-hook");
             const killKuboProcessGroup = (pid: number, signal: NodeJS.Signals) => {
@@ -648,6 +650,7 @@ export default class Daemon extends Command {
                 // Start killing Kubo immediately, in parallel with daemon server destroy.
                 // This way Kubo receives SIGINT right away, even if daemonServer.destroy() hangs.
                 const kuboKillPromise = killKuboProcess();
+                const reachabilityStopPromise = reachabilityRuntime?.stop().catch((error) => log.error("Error stopping reachability", error));
 
                 if (daemonServer)
                     try {
@@ -658,6 +661,7 @@ export default class Daemon extends Command {
                     }
 
                 await kuboKillPromise;
+                await reachabilityStopPromise;
             };
             // Run kubo/daemon cleanup on SIGINT/SIGTERM/beforeExit. Capture the unsubscribe handle
             // and the shutdown fn so the startup-failure catch (and the force-quit guard below) can
@@ -675,6 +679,7 @@ export default class Daemon extends Command {
             // synchronously SIGKILL every live kubo's process group. This is a no-op if
             // killKuboProcess() already ran (it clears kuboProcess and liveKuboPids).
             process.on("exit", () => {
+                reachabilityRuntime?.killCaddySync();
                 if (kuboProcess?.pid) {
                     killKuboProcessGroup(kuboProcess.pid, "SIGKILL");
                 }
@@ -735,6 +740,33 @@ export default class Daemon extends Command {
             // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
             await createOrConnectRpc();
+
+            // Only for a kubo this daemon runs. Failing here must never take the node down: browsers
+            // being unable to dial it is a far smaller problem than it being offline.
+            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) {
+                try {
+                    const { ReachabilityRuntime } = await import("../../reachability/runtime.js");
+                    const reachabilityLog = PKCLogger("bitsocial-cli:reachability");
+                    reachabilityRuntime = new ReachabilityRuntime({
+                        dataPath: mergedPkcOptions.dataPath!,
+                        kuboRepoPath: resolveKuboRepoPath(mergedPkcOptions.dataPath!),
+                        kuboRpcUrl: kuboRpcEndpoint,
+                        log: (message) => {
+                            console.log(message);
+                            reachabilityLog(message);
+                        },
+                        // stdout, because stderr goes only to the log file and operators need to see these.
+                        warn: (message) => {
+                            console.log(`Warning: ${message}`);
+                            reachabilityLog.error(message);
+                        }
+                    });
+                    await reachabilityRuntime.start();
+                } catch (error) {
+                    log.error("Reachability failed to start", error);
+                    console.log(`Warning: reachability failed to start: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
 
             // Runs against whichever kubo the daemon ends up talking to, including one started by
             // another program (--pkcOptions.kuboRpcClientsOptions). pkc-js also GCs, but only from

@@ -242,7 +242,7 @@ async function issueCertificates(
     }
 }
 
-async function applyKuboConfig(
+export async function applyKuboConfig(
     config: ReachabilityConfig,
     options: Pick<SetupOptions, "kuboRepoPath" | "dataPath">,
     enabled: boolean
@@ -374,6 +374,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             announce,
             publicIps: issuedIps,
             ...(domain ? { domain } : {}),
+            ...(domain && (options.force || (previous?.domain === domain && previous.domainForced)) ? { domainForced: true } : {}),
             ...(externalAnnounce.length > 0 ? { externalAnnounce } : {}),
             staging: options.staging,
             acmeDirectory,

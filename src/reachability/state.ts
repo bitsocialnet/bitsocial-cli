@@ -19,8 +19,12 @@ export interface ReachabilityConfig {
     announce: string[];
     publicIps: string[];
     domain?: string;
+    // Set by --force: a proxy answers for this name, so its records are not expected to match our IPs.
+    domainForced?: boolean;
     // Addresses served by the operator's own proxy, each verified by a libp2p dial.
     externalAnnounce?: string[];
+    // Names the daemon stopped announcing after 24 hours of failure, restored when they recover.
+    droppedAnnounce?: string[];
     staging: boolean;
     acmeDirectory: string;
     caddyAdminPort: number;
@@ -62,6 +66,7 @@ export interface ReachabilityStatus {
 export const reachabilityDir = (dataPath: string) => path.join(dataPath, "reachability");
 export const reachabilityConfigPath = (dataPath: string) => path.join(reachabilityDir(dataPath), "config.json");
 export const reachabilityRuntimeStatusPath = (dataPath: string) => path.join(reachabilityDir(dataPath), "runtime-status.json");
+export const readReachabilityRuntimeStatus = (dataPath: string) => readRuntimeStatus(dataPath);
 export const caddyDataDir = (dataPath: string) => path.join(reachabilityDir(dataPath), "caddy-data");
 
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === "string");
@@ -83,6 +88,7 @@ function assertValidConfig(parsed: any, configPath: string): asserts parsed is R
     if (!isStringArray(parsed.publicIps)) fail("publicIps must be a list of IP addresses");
     if (parsed.domain !== undefined && typeof parsed.domain !== "string") fail("domain must be a string");
     if (parsed.externalAnnounce !== undefined && !isStringArray(parsed.externalAnnounce)) fail("externalAnnounce must be a list of multiaddrs");
+    if (parsed.droppedAnnounce !== undefined && !isStringArray(parsed.droppedAnnounce)) fail("droppedAnnounce must be a list of multiaddrs");
     if (typeof parsed.staging !== "boolean") fail("staging must be a boolean");
     if (typeof parsed.acmeDirectory !== "string") fail("acmeDirectory must be a URL");
     if (!Number.isInteger(parsed.caddyAdminPort)) fail("caddyAdminPort must be a port number");
