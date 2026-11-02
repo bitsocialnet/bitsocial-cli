@@ -132,6 +132,35 @@ export function ipfsGatewayUrlFromKuboConfig(kuboConfig: any): Promise<URL | und
     return firstUsableKuboAddress(kuboConfig?.Addresses?.Gateway, parseMultiAddrIpfsGatewayToUrl);
 }
 
+const urlPort = (url: URL) => Number(url.port || (url.protocol === "https:" ? 443 : 80));
+
+/** For a locally managed kubo the daemon never rewrites Addresses.* of an existing repo, so an env
+ * override that differs from the config leaves kubo on one port and the daemon dialling another.
+ * Returns the warning to print, or undefined when the override reaches the configured listener. */
+export function describeKuboEndpointMismatch({
+    envVar,
+    configField,
+    configPath,
+    configured,
+    chosen
+}: {
+    envVar: string;
+    configField: string;
+    configPath: string;
+    configured: URL | undefined;
+    chosen: URL;
+}): string | undefined {
+    if (!configured) return undefined;
+    const sameListener =
+        urlPort(configured) === urlPort(chosen) && toConnectableHostname(configured.hostname) === toConnectableHostname(chosen.hostname);
+    if (sameListener) return undefined;
+    return (
+        `${envVar} is ${chosen} but ${configField} in ${configPath} is ${configured}. ` +
+        `The daemon starts kubo from that config and dials ${envVar}, so it will not reach kubo. ` +
+        `Unset ${envVar} to follow the config, or edit ${configField} to match.`
+    );
+}
+
 /** Recursively replaces all `null` values with `undefined`.
  * Used before calling community.edit() since pkc-js expects `undefined` for removal,
  * but JSON/CLI input produces `null`. */

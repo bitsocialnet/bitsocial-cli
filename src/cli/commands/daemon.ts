@@ -14,7 +14,9 @@ import {
     kuboRpcUrlFromKuboConfig,
     ipfsGatewayUrlFromKuboConfig,
     hostForUrl,
-    toConnectableHostname
+    toConnectableHostname,
+    resolveKuboRepoPath,
+    describeKuboEndpointMismatch
 } from "../../util.js";
 import type { PKCLoggerType } from "../../util.js";
 import { startDaemonServer } from "../../webui/daemon-server.js";
@@ -368,6 +370,7 @@ export default class Daemon extends Command {
             // Every kubo we've spawned that hasn't exited yet. Exit cleanup kills all of these,
             // so a kubo that slipped out of kuboProcess tracking still dies with the daemon (issue #70)
             const liveKuboPids = new Set<number>();
+            let warnedAboutKuboConfigMismatch = false;
             const keepKuboUpOnce = async () => {
                 if (mainProcessExited) return;
                 const kuboApiPort = Number(kuboRpcEndpoint.port);
@@ -413,6 +416,34 @@ export default class Daemon extends Command {
                             kuboRpcEndpoint.hostname
                         }:${kuboApiPort} (configured as ${kuboRpcEndpoint.toString()}) is already in use.`
                     );
+                }
+                // The daemon starts kubo from the repo's config, which it never rewrites for an existing
+                // repo, so an env override naming other ports than Addresses.* is dialled but never served.
+                if (!warnedAboutKuboConfigMismatch) {
+                    warnedAboutKuboConfigMismatch = true;
+                    const kuboConfigPath = path.join(resolveKuboRepoPath(mergedPkcOptions.dataPath!), "config");
+                    const mismatches = [
+                        process.env["KUBO_RPC_URL"] && !pkcOptionsFromFlag?.kuboRpcClientsOptions
+                            ? describeKuboEndpointMismatch({
+                                  envVar: "KUBO_RPC_URL",
+                                  configField: "Addresses.API",
+                                  configPath: kuboConfigPath,
+                                  configured: await kuboRpcUrlFromKuboConfig(ipfsConfig),
+                                  chosen: kuboRpcEndpoint
+                              })
+                            : undefined,
+                        process.env["IPFS_GATEWAY_URL"] && !pkcOptionsFromFlag?.ipfsGatewayUrls
+                            ? describeKuboEndpointMismatch({
+                                  envVar: "IPFS_GATEWAY_URL",
+                                  configField: "Addresses.Gateway",
+                                  configPath: kuboConfigPath,
+                                  configured: await ipfsGatewayUrlFromKuboConfig(ipfsConfig),
+                                  chosen: ipfsGatewayEndpoint
+                              })
+                            : undefined
+                    ];
+                    // stdout: the daemon routes stderr to its log file only, and this is for the operator.
+                    for (const message of mismatches) if (message) console.log(`Warning: ${message}`);
                 }
                 let spawnedProcess: ChildProcessWithoutNullStreams | undefined;
                 const startPromise = startKuboNode(

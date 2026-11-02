@@ -16,6 +16,7 @@ import { path as resolveKuboBinary } from "kubo";
 import defaults from "../../src/common-utils/defaults.js";
 import { ensureIpnsPubsubEnabled, ensureKuboRoutingConfigMatchesHttpRouters } from "../../src/ipfs/startIpfs.js";
 import {
+    allocateFreePort,
     ensureKuboNodeStopped,
     isAddressInUseError,
     killChildProcess,
@@ -228,4 +229,26 @@ describe("kubo endpoint precedence (issue #200)", () => {
             expect(await kuboKeyNames(handle.configKuboApiUrl), "the community key did not land in kubo").toContain(address);
         }
     );
+
+    // For a locally managed kubo the daemon never rewrites Addresses.* of an existing repo, so an env
+    // override that differs from the config leaves kubo on one port and the daemon dialling another.
+    it("warns when the env overrides name ports the repo's kubo config does not listen on", { timeout: 180_000 }, async () => {
+        const [envApiPort, envGatewayPort] = await Promise.all([allocateFreePort("127.0.0.1"), allocateFreePort("127.0.0.1")]);
+        const envKuboApiUrl = `http://127.0.0.1:${envApiPort}/api/v0`;
+        const envGatewayUrl = `http://127.0.0.1:${envGatewayPort}`;
+        const handle = await startDaemon({ env: { KUBO_RPC_URL: envKuboApiUrl, IPFS_GATEWAY_URL: envGatewayUrl } });
+
+        const warned = await waitForCondition(
+            () => handle.output().includes("Addresses.API") && handle.output().includes("Addresses.Gateway"),
+            READY_TIMEOUT_MS,
+            250
+        );
+        const output = handle.output();
+        expect(warned, `daemon never warned about the mismatch:\n${output}`).toBe(true);
+        const configPath = path.join(handle.dataPath, ".bitsocial-cli.ipfs", "config");
+        expect(output).toContain(`KUBO_RPC_URL is ${envKuboApiUrl} but Addresses.API in ${configPath} is ${handle.configKuboApiUrl}`);
+        expect(output).toContain(
+            `IPFS_GATEWAY_URL is ${envGatewayUrl}/ but Addresses.Gateway in ${configPath} is http://127.0.0.1:${handle.configGatewayPort}/`
+        );
+    });
 });
