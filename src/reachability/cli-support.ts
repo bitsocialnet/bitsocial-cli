@@ -14,6 +14,7 @@ export function testOverrides(env: NodeJS.ProcessEnv): SetupOptions["overrides"]
     const number = (value: string | undefined) => (value ? Number(value) : undefined);
     const httpsPort = number(env["BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT"]);
     const httpPort = number(env["BITSOCIAL_TEST_REACHABILITY_HTTP_PORT"]);
+    const wsPort = number(env["BITSOCIAL_TEST_REACHABILITY_WS_PORT"]);
     const trustedRoots = env["BITSOCIAL_TEST_REACHABILITY_ACME_ROOT"];
     const publicIps = env["BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS"];
     return {
@@ -21,7 +22,8 @@ export function testOverrides(env: NodeJS.ProcessEnv): SetupOptions["overrides"]
         ...(trustedRoots ? { acmeTrustedRootsPath: trustedRoots } : {}),
         ...(publicIps ? { publicIps: publicIps.split(",") } : {}),
         ...(httpsPort ? { httpsPort } : {}),
-        ...(httpPort ? { httpPort } : {})
+        ...(httpPort ? { httpPort } : {}),
+        ...(wsPort ? { wsPort } : {})
     };
 }
 

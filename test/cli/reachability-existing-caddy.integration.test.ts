@@ -76,6 +76,7 @@ describe("another Caddy already holds the HTTPS port, no domain given", { timeou
             BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: pebble.directoryUrl,
             BITSOCIAL_TEST_REACHABILITY_ACME_ROOT: pebble.listenerRootPath,
             BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1",
+            BITSOCIAL_TEST_REACHABILITY_WS_PORT: String(await allocateFreePort()),
             BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(httpsPort),
             BITSOCIAL_TEST_REACHABILITY_HTTP_PORT: String(httpPort)
         };
@@ -185,6 +186,7 @@ describe("another Caddy holds only the HTTP port", { timeout: 300_000 }, () => {
                 BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: pebble.directoryUrl,
                 BITSOCIAL_TEST_REACHABILITY_ACME_ROOT: pebble.listenerRootPath,
                 BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1",
+                BITSOCIAL_TEST_REACHABILITY_WS_PORT: String(await allocateFreePort()),
                 BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(httpsPort),
                 BITSOCIAL_TEST_REACHABILITY_HTTP_PORT: String(httpPort)
             };

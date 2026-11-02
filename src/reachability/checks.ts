@@ -1,10 +1,11 @@
 import { execFile } from "child_process";
 import dgram from "dgram";
 import { promises as fs } from "fs";
+import net from "net";
 import os from "os";
 import { promisify } from "util";
-import { caddyBinaryPath } from "./caddy.js";
-import { detectContainer, findPortHolder, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type PortState } from "./discovery.js";
+import { caddyBinaryPath, isOurCaddyRunning } from "./caddy.js";
+import { detectContainer, findPortHolder, worstPortState, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type PortState } from "./discovery.js";
 import { setcapCommand, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
 import type { CertificateInfo } from "./state.js";
 
@@ -170,15 +171,21 @@ export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
     return checks;
 }
 
-export const probeUdpPort = (port: number, host = "0.0.0.0"): Promise<PortState> =>
+const probeUdpHost = (port: number, host: string): Promise<PortState> =>
     new Promise((resolve) => {
-        const socket = dgram.createSocket("udp4");
+        const socket = net.isIPv6(host) ? dgram.createSocket({ type: "udp6", ipv6Only: true }) : dgram.createSocket("udp4");
         socket.once("error", (error: NodeJS.ErrnoException) => {
             socket.close();
+            if (error.code === "EADDRNOTAVAIL" || error.code === "EAFNOSUPPORT") return resolve("free");
             resolve(error.code === "EACCES" ? "no-permission" : "busy");
         });
         socket.bind({ port, address: host, exclusive: true }, () => socket.close(() => resolve("free")));
     });
+
+export const probeUdpPort = async (port: number, host?: string): Promise<PortState> => {
+    if (host) return probeUdpHost(port, host);
+    return worstPortState([await probeUdpHost(port, "0.0.0.0"), await probeUdpHost(port, "::")]);
+};
 
 async function readLinuxBindInputs(platform: string) {
     if (platform !== "linux") return { unprivilegedPortStart: undefined, effectiveCapabilities: undefined };
@@ -261,15 +268,7 @@ export async function gatherCheckFacts(input: {
         bindPermission({ platform, port, uid: process.getuid?.(), effectiveCapabilities, unprivilegedPortStart, fileCapabilities: await fileCapabilities(binaryPath) });
 
     const kuboListen = await kuboListenAddresses(input.kuboRpcUrl);
-    let ourCaddyRunning = false;
-    if (input.caddyAdminPort) {
-        try {
-            await fetch(`http://127.0.0.1:${input.caddyAdminPort}/config/`, { headers: { Origin: `http://127.0.0.1:${input.caddyAdminPort}` }, signal: AbortSignal.timeout(1000) });
-            ourCaddyRunning = true;
-        } catch {
-            /* not running */
-        }
-    }
+    const ourCaddyRunning = input.caddyAdminPort ? await isOurCaddyRunning(input.caddyAdminPort, input.dataPath) : false;
     const [tcp443, tcp80, udp443] = await Promise.all([probeTcpPort(httpsPort), probeTcpPort(httpPort), probeUdpPort(443)]);
     return {
         platform,

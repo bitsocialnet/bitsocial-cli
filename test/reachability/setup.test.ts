@@ -9,6 +9,7 @@ import {
     discoverPublicIps,
     domainAnnounceAddress,
     domainPointsHere,
+    existingLoopbackWsPort,
     type SetupDependencies,
     type SetupOptions
 } from "../../src/reachability/setup.js";
@@ -210,4 +211,19 @@ it("noWssStatement says WebTransport is configured, not that nothing can reach t
     expect(text).toContain("TCP 443 is in use");
     expect(text).toContain("WebTransport");
     expect(text).not.toContain("Neither");
+});
+
+describe("existingLoopbackWsPort", () => {
+    it("reuses a loopback ws listener already in the kubo config", () => {
+        expect(existingLoopbackWsPort({ Addresses: { Swarm: ["/ip4/0.0.0.0/tcp/4001", "/ip4/127.0.0.1/tcp/4002/ws"] } })).toBe(4002);
+    });
+
+    it.each([
+        ["no config", undefined],
+        ["no listener", { Addresses: { Swarm: ["/ip4/0.0.0.0/tcp/4001"] } }],
+        ["a public ws listener", { Addresses: { Swarm: ["/ip4/0.0.0.0/tcp/4002/ws"] } }],
+        ["a secure one", { Addresses: { Swarm: ["/ip4/127.0.0.1/tcp/4002/tls/ws"] } }]
+    ])("finds nothing with %s", (_label, config) => {
+        expect(existingLoopbackWsPort(config)).toBeUndefined();
+    });
 });

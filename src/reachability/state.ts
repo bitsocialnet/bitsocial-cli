@@ -126,7 +126,10 @@ async function readJsonIfExists(filePath: string): Promise<unknown> {
 export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    await fs.writeFile(temporaryPath, JSON.stringify(value, null, 4));
+    // A rename replaces the mode too. kubo's config holds the node's private key and must stay private.
+    const mode = await fs.stat(filePath).then((stats) => stats.mode & 0o777, () => 0o600);
+    await fs.writeFile(temporaryPath, JSON.stringify(value, null, 4), { mode });
+    await fs.chmod(temporaryPath, mode); // the open above is subject to the umask
     await fs.rename(temporaryPath, filePath);
 }
 

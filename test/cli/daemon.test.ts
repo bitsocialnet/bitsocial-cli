@@ -941,13 +941,14 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
 describe("bitsocial daemon DEBUG env var", () => {
     it("DEBUG=* does not leak debug output to stderr", { timeout: 60000 }, async () => {
         const logPath = randomDirectory();
-        const e = await allocateKuboEndpoints();
         let daemonProcess: ManagedChildProcess | undefined;
         try {
-            daemonProcess = await startPkcDaemonCapturingStderr(
-                ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", e.rpcWsUrl, "--logPath", logPath],
-                { DEBUG: "*", KUBO_RPC_URL: e.kuboRpcUrl, IPFS_GATEWAY_URL: e.gatewayUrl }
-            );
+            ({ result: daemonProcess } = await withKuboBindRetry((endpoints) =>
+                startPkcDaemonCapturingStderr(
+                    ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", endpoints.rpcWsUrl, "--logPath", logPath],
+                    { DEBUG: "*", KUBO_RPC_URL: endpoints.kuboRpcUrl, IPFS_GATEWAY_URL: endpoints.gatewayUrl }
+                )
+            ));
 
             // stderr should not contain debug-format output (lines ending with +Nms)
             expect(daemonProcess.capturedStderr).not.toMatch(/\+\d+m?s$/m);
@@ -967,13 +968,14 @@ describe("bitsocial daemon DEBUG env var", () => {
     });
 
     it("daemon without DEBUG shows tip messages in stdout", { timeout: 60000 }, async () => {
-        const e = await allocateKuboEndpoints();
         let daemonProcess: ManagedChildProcess | undefined;
         try {
-            daemonProcess = await startPkcDaemonCapturingStderr(
-                ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", e.rpcWsUrl],
-                { KUBO_RPC_URL: e.kuboRpcUrl, IPFS_GATEWAY_URL: e.gatewayUrl }
-            );
+            ({ result: daemonProcess } = await withKuboBindRetry((endpoints) =>
+                startPkcDaemonCapturingStderr(["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", endpoints.rpcWsUrl], {
+                    KUBO_RPC_URL: endpoints.kuboRpcUrl,
+                    IPFS_GATEWAY_URL: endpoints.gatewayUrl
+                })
+            ));
 
             // stderr should not contain debug-format output
             expect(daemonProcess.capturedStderr).not.toMatch(/\+\d+m?s$/m);

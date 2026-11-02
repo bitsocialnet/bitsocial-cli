@@ -6,8 +6,9 @@ import fs from "fs/promises";
 import path from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
-import { allocateFreePort, ensureKuboNodeStopped, killChildProcess, startPkcDaemonWithDynamicPorts, stopPkcDaemon, type DynamicDaemonResult } from "../helpers/daemon-helpers.js";
+import { allocateFreePort, ensureKuboNodeStopped, killChildProcess, waitForCondition, startPkcDaemonWithDynamicPorts, stopPkcDaemon, type DynamicDaemonResult } from "../helpers/daemon-helpers.js";
 import { startPebble, type RunningPebble } from "../helpers/pebble.js";
+import { isTcpPortFree } from "../../src/reachability/discovery.js";
 import { caddyfilePath, ensureCaddyBinary, generateCaddyfile, startCaddy, stopCaddy, waitForCertificates } from "../../src/reachability/caddy.js";
 
 const runCli = (args: string[], env: Record<string, string>): Promise<{ stdout: string; stderr: string; exitCode: number | null }> =>
@@ -39,6 +40,7 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
             BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: pebble.directoryUrl,
             BITSOCIAL_TEST_REACHABILITY_ACME_ROOT: pebble.listenerRootPath,
             BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1",
+            BITSOCIAL_TEST_REACHABILITY_WS_PORT: String(await allocateFreePort()),
             BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(httpsPort),
             BITSOCIAL_TEST_REACHABILITY_HTTP_PORT: String(await allocateFreePort("0.0.0.0"))
         };
@@ -117,12 +119,43 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
         expect(status.certificates.flatMap((certificate: { names: string[] }) => certificate.names).sort()).toEqual(["127.0.0.1", "node.test"]);
     });
 
+    it("a rerun keeps a domain that was forced, since a proxy answers for it", async () => {
+        const result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
+        expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+        const { stdout } = await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env);
+        expect(JSON.parse(stdout).mode).toBe("ip+domain");
+    });
+
     it("a stored domain that went stale does not block repairing the rest", async () => {
+        const configPath = path.join(dataPath, "reachability", "config.json");
+        const { domainForced: _forced, ...notForced } = JSON.parse(await fs.readFile(configPath, "utf-8"));
+        await fs.writeFile(configPath, JSON.stringify(notForced));
         const result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
         expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
         expect(result.stderr).toContain("does not point at this machine");
         const { stdout } = await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env);
         expect(JSON.parse(stdout)).toMatchObject({ mode: "ip", addresses: [`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`], domain: "node.test" });
+    });
+
+    it("drops our sites from the Caddyfile once another server takes the HTTPS port", async () => {
+        // The daemon's own Caddy holds the port until it is disabled.
+        expect((await runCli(["reachability", "disable", "--pkcOptions.dataPath", dataPath], env)).exitCode).toBe(0);
+        const freed = await waitForCondition(() => isTcpPortFree(httpsPort, "0.0.0.0"), 30_000, 250);
+        expect(freed, "the daemon's Caddy did not stop").toBe(true);
+        const occupier = net.createServer();
+        await new Promise<void>((resolve, reject) => {
+            occupier.once("error", reject);
+            occupier.listen(httpsPort, "0.0.0.0", () => resolve());
+        });
+        try {
+            const result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(2);
+            expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).not.toMatch(/^https:\/\//m);
+        } finally {
+            await new Promise((resolve) => occupier.close(resolve));
+        }
+        const restored = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], env);
+        expect(restored.exitCode, `${restored.stdout}\n${restored.stderr}`).toBe(0);
     });
 
     it("rejects an --announce that browsers could not dial", async () => {
@@ -158,6 +191,7 @@ describe("bitsocial reachability setup behind the operator's proxy", { timeout: 
             BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: pebble.directoryUrl,
             BITSOCIAL_TEST_REACHABILITY_ACME_ROOT: pebble.listenerRootPath,
             BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1",
+            BITSOCIAL_TEST_REACHABILITY_WS_PORT: String(await allocateFreePort()),
             BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(busyPort),
             BITSOCIAL_TEST_REACHABILITY_HTTP_PORT: String(await allocateFreePort("0.0.0.0"))
         };

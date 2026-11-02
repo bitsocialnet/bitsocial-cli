@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { stopCaddy } from "./caddy.js";
+import { isOurCaddyRunning, stopCaddy } from "./caddy.js";
 import { kuboIdentity, shutdownKubo } from "./discovery.js";
 import { applyKuboConfig } from "./setup.js";
 import { readReachabilityConfig, reachabilityDir, type ReachabilityConfig } from "./state.js";
@@ -14,16 +14,8 @@ export interface LifecycleOptions {
     caddyStopGraceMs?: number;
 }
 
-const caddyUp = async (adminPort: number) => {
-    try {
-        await fetch(`http://127.0.0.1:${adminPort}/config/`, { headers: { Origin: `http://127.0.0.1:${adminPort}` }, signal: AbortSignal.timeout(1000) });
-        return true;
-    } catch {
-        return false;
-    }
-};
-
-async function ensureCaddyStopped(config: ReachabilityConfig, graceMs: number) {
+async function ensureCaddyStopped(config: ReachabilityConfig, dataPath: string, graceMs: number) {
+    const caddyUp = (adminPort: number) => isOurCaddyRunning(adminPort, dataPath);
     const deadline = Date.now() + graceMs;
     while (Date.now() < deadline) {
         if (!(await caddyUp(config.caddyAdminPort))) return;
@@ -47,7 +39,7 @@ export async function disableReachability(options: LifecycleOptions): Promise<Re
         if (kuboConfigChanged && (await kuboIdentity(options.kuboRpcUrl))) await shutdownKubo(options.kuboRpcUrl);
     } else options.log("Reachability was already disabled.");
     // A running daemon notices within seconds. It gets the first chance, so it does not report a crash.
-    await ensureCaddyStopped(config, options.caddyStopGraceMs ?? 15_000);
+    await ensureCaddyStopped(config, options.dataPath, options.caddyStopGraceMs ?? 15_000);
     options.log("Reachability is disabled. Browsers can no longer dial this node through it. Run `bitsocial reachability enable` to turn it back on.");
     return { ...config, enabled: false };
 }

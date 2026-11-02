@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import {
     ipfsGatewayUrlFromKuboConfig,
+    kuboApiRouteUrl,
     kuboRpcUrlFromKuboConfig,
     loadKuboConfigFile,
     parseMultiAddrIpfsGatewayToUrl,
@@ -90,6 +91,13 @@ describe("kubo endpoints from the kubo config", () => {
     ])("returns undefined so the caller falls back to defaults: %s", async (_label, config) => {
         expect(await kuboRpcUrlFromKuboConfig(config)).toBeUndefined();
         expect(await ipfsGatewayUrlFromKuboConfig(config)).toBeUndefined();
+    });
+});
+
+describe("kuboApiRouteUrl", () => {
+    it("keeps the /api/v0 prefix, which new URL(route, base) drops without a trailing slash", () => {
+        expect(kuboApiRouteUrl(new URL("http://127.0.0.1:5001/api/v0"), "version").toString()).toBe("http://127.0.0.1:5001/api/v0/version");
+        expect(kuboApiRouteUrl(new URL("http://127.0.0.1:5001/api/v0/"), "version").toString()).toBe("http://127.0.0.1:5001/api/v0/version");
     });
 });
 

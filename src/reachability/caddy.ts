@@ -192,6 +192,20 @@ const adminRequest = async (adminPort: number, route: string, init: RequestInit)
 // Through the admin API rather than signals, so the same code stops Caddy on every OS.
 export const stopCaddy = (adminPort: number) => adminRequest(adminPort, "/stop", { method: "POST" });
 
+// Something answering on the stored admin port is not proof it is ours: another program may have taken the
+// port since. Our Caddy reports storing in this node's data directory, and we never stop or reload anything else.
+export async function isOurCaddyRunning(adminPort: number, dataPath: string): Promise<boolean> {
+    try {
+        const origin = `http://127.0.0.1:${adminPort}`;
+        const response = await fetch(`${origin}/config/`, { headers: { Origin: origin }, signal: AbortSignal.timeout(2000) });
+        if (!response.ok) return false;
+        const config = (await response.json()) as { storage?: { root?: string } } | null;
+        return config?.storage?.root === caddyDataDir(dataPath).replaceAll("\\", "/");
+    } catch {
+        return false;
+    }
+}
+
 export const reloadCaddy = (adminPort: number, caddyfile: string) =>
     adminRequest(adminPort, "/load", { method: "POST", headers: { "Content-Type": "text/caddyfile" }, body: caddyfile });
 

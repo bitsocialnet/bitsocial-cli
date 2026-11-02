@@ -89,6 +89,13 @@ function multiAddrToHostPort(multiAddrObj: { getComponents: () => { name: string
     return { host, port };
 }
 
+// new URL(route, base) would drop the /api/v0 prefix, because the base has no trailing slash.
+export const kuboApiRouteUrl = (endpoint: URL, route: string) => {
+    const url = new URL(endpoint.toString());
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/${route}`;
+    return url;
+};
+
 export const hostForUrl = (host: string) => (host.includes(":") && !host.startsWith("[") ? `[${host}]` : host);
 
 /** The host to dial for a connectivity check. Sockets need IPv6 hosts without the brackets a URL keeps,

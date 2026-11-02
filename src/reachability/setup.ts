@@ -7,6 +7,7 @@ import {
     caddyfilePath,
     ensureCaddyBinary,
     generateCaddyfile,
+    isOurCaddyRunning,
     isValidDomain,
     LETS_ENCRYPT_DIRECTORY,
     LETS_ENCRYPT_STAGING_DIRECTORY,
@@ -70,7 +71,7 @@ export interface SetupOptions {
     announce?: string;
     force?: boolean;
     // Set only by tests, through the BITSOCIAL_TEST_REACHABILITY_* environment variables.
-    overrides?: { acmeDirectory?: string; acmeTrustedRootsPath?: string; publicIps?: string[]; httpsPort?: number; httpPort?: number };
+    overrides?: { acmeDirectory?: string; acmeTrustedRootsPath?: string; publicIps?: string[]; httpsPort?: number; httpPort?: number; wsPort?: number };
 }
 
 export interface SetupDependencies {
@@ -154,19 +155,30 @@ const freePort = (host = "127.0.0.1"): Promise<number> =>
         });
     });
 
-async function chooseWsPort(previous: ReachabilityConfig | undefined): Promise<number> {
-    if (previous) return previous.wsPort; // kubo itself may hold it, so a busy check would be wrong
-    return (await isTcpPortFree(4002, "127.0.0.1")) ? 4002 : freePort();
+export function existingLoopbackWsPort(kuboConfig: any): number | undefined {
+    const swarm: unknown = kuboConfig?.Addresses?.Swarm;
+    if (!Array.isArray(swarm)) return undefined;
+    for (const address of swarm) {
+        const port = typeof address === "string" ? address.match(/^\/ip4\/127\.0\.0\.1\/tcp\/(\d+)\/ws$/)?.[1] : undefined;
+        if (port) return Number(port);
+    }
+    return undefined;
 }
 
-const adminUp = async (adminPort: number) => {
-    try {
-        await fetch(`http://127.0.0.1:${adminPort}/config/`, { headers: { Origin: `http://127.0.0.1:${adminPort}` }, signal: AbortSignal.timeout(2000) });
-        return true;
-    } catch {
-        return false;
-    }
-};
+// kubo itself may hold a port we chose earlier or one an operator configured by hand, so a busy check on
+// those would wrongly add a second listener.
+async function chooseWsPort(previous: ReachabilityConfig | undefined, kuboRepoPath: string): Promise<number> {
+    if (previous) return previous.wsPort;
+    const kuboConfig = await fs.readFile(path.join(kuboRepoPath, "config"), "utf-8").then(JSON.parse, () => undefined);
+    return existingLoopbackWsPort(kuboConfig) ?? ((await isTcpPortFree(4002, "127.0.0.1")) ? 4002 : freePort());
+}
+
+// Keeps the stored admin port unless another program has taken it since.
+async function chooseAdminPort(previous: ReachabilityConfig | undefined, dataPath: string): Promise<number> {
+    if (!previous) return freePort();
+    const usable = (await isOurCaddyRunning(previous.caddyAdminPort, dataPath)) || (await isTcpPortFree(previous.caddyAdminPort, "127.0.0.1"));
+    return usable ? previous.caddyAdminPort : freePort();
+}
 
 export async function discoverPublicIps(
     options: SetupOptions,
@@ -213,7 +225,7 @@ async function issueCertificates(
     await fs.writeFile(caddyfilePath(options.dataPath), caddyfile);
 
     const timeoutMs = deps.certificateTimeoutMs ?? 90_000;
-    if (await adminUp(spec.adminPort)) {
+    if (await isOurCaddyRunning(spec.adminPort, options.dataPath)) {
         await reloadCaddy(spec.adminPort, caddyfile);
         const { issued } = await waitForCertificates(options.dataPath, spec.acmeDirectory, names, timeoutMs);
         return { issued };
@@ -300,8 +312,8 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     const previous = await readReachabilityConfig(options.dataPath);
     const httpsPort = options.overrides?.httpsPort ?? 443;
-    const wsPort = await chooseWsPort(previous);
-    const caddyAdminPort = previous?.caddyAdminPort ?? (await freePort());
+    const wsPort = previous?.wsPort ?? options.overrides?.wsPort ?? (await chooseWsPort(previous, options.kuboRepoPath));
+    const caddyAdminPort = await chooseAdminPort(previous, options.dataPath);
     let domain = options.domain ?? previous?.domain;
     if (domain && !isValidDomain(domain)) throw new SetupRefusedError(`Not a valid domain name: ${domain}`);
 
@@ -313,7 +325,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         if (check.status === "fail" || check.status === "warn") deps.warn(formatCheck(check));
     }
 
-    const ourCaddyRunning = await adminUp(caddyAdminPort);
+    const ourCaddyRunning = await isOurCaddyRunning(caddyAdminPort, options.dataPath);
     const portState = ourCaddyRunning ? "free" : await deps.probePort(httpsPort);
     const portBusy = portState === "busy";
     const holder = portBusy ? await deps.findHolder(httpsPort) : undefined;
@@ -331,6 +343,8 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         }
     }
 
+    // A proxy answers for a forced name, so its records are not expected to match on later runs either.
+    const force = options.force === true || (domain !== undefined && previous?.domain === domain && previous.domainForced === true);
     let records: ResolvedDomain = { v4: [], v6: [] };
     let domainUsable = domain !== undefined;
     if (domain) {
@@ -339,9 +353,9 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             const message = dnsMismatchMessage(domain, [...records.v4, ...records.v6], publicIps);
             // Refuse what the operator asked for now. A stored name going stale must not block repairing
             // the rest, so it only sits out this run, and is still stored for when its DNS is fixed.
-            if (domainAskedForNow && !options.force) throw new SetupRefusedError(message);
+            if (domainAskedForNow && !force) throw new SetupRefusedError(message);
             deps.warn(message);
-            if (options.force) deps.warn("Continuing because of --force.");
+            if (force) deps.warn("Continuing because of --force.");
             else domainUsable = false;
         }
     }
@@ -370,6 +384,10 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             caddyfilePath(options.dataPath),
             generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && issued.includes(domain) ? [domain] : [] })
         );
+    } else {
+        // Nothing for our Caddy to serve now, so the daemon must not keep starting it for old sites.
+        await fs.mkdir(reachabilityDir(options.dataPath), { recursive: true });
+        await fs.writeFile(caddyfilePath(options.dataPath), generateCaddyfile({ ...spec, ips: [], domains: [] }));
     }
     const issuedIps = publicIps.filter((ip) => issued.includes(ip));
     const domainIssued = domain !== undefined && issued.includes(domain);
@@ -389,6 +407,8 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             ...(domain && domainIssued ? [domainAnnounceAddress(domain, httpsPort, records)] : []),
             ...externalAnnounce
         ];
+        // Kept so the daemon can restore a name that recovers later, unless this run announced it again.
+        const stillDropped = (previous?.droppedAnnounce ?? []).filter((address) => !announce.includes(address));
         return {
             version: 1,
             enabled: true,
@@ -398,8 +418,9 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             ...(serveWss ? {} : { serveWss: false }),
             publicIps: issuedIps,
             ...(domain ? { domain } : {}),
-            ...(domain && (options.force || (previous?.domain === domain && previous.domainForced)) ? { domainForced: true } : {}),
+            ...(domain && force ? { domainForced: true } : {}),
             ...(externalAnnounce.length > 0 ? { externalAnnounce } : {}),
+            ...(stillDropped.length > 0 ? { droppedAnnounce: stillDropped } : {}),
             staging: options.staging,
             acmeDirectory,
             caddyAdminPort,

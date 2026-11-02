@@ -14,6 +14,7 @@ import {
     kuboRpcUrlFromKuboConfig,
     ipfsGatewayUrlFromKuboConfig,
     hostForUrl,
+    kuboApiRouteUrl,
     resolveKuboRepoPath,
     toConnectableHostname
 } from "../../util.js";
@@ -388,7 +389,7 @@ export default class Daemon extends Command {
                 if (isKuboApiPortTaken) {
                     const connectableEndpoint = new URL(kuboRpcEndpoint.toString());
                     connectableEndpoint.hostname = hostForUrl(connectHostname);
-                    const versionUrl = new URL("version", connectableEndpoint);
+                    const versionUrl = kuboApiRouteUrl(connectableEndpoint, "version");
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 2000);
                     let isHealthyKubo = false;

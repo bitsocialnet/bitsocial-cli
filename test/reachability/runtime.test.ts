@@ -172,6 +172,7 @@ describe("ReachabilityRuntime", () => {
             advance: (ms: number) => (clock += ms),
             setDerived: (ips: string[]) => (derived = ips),
             setRecords: (next: { v4: string[]; v6: string[] }) => (records = next),
+            setCaddyUp: (up: boolean) => (caddyUp = up),
             crashCaddy: () => {
                 caddyUp = false;
                 onCaddyExit();
@@ -226,6 +227,95 @@ describe("ReachabilityRuntime", () => {
         await runtime.stop();
         expect(events2).toEqual(["reload"]);
         expect(events).toEqual([]);
+    });
+
+    it("notices an adopted Caddy stopping, and starts its own", async () => {
+        const { runtime, events, setCaddyUp } = await setup(baseConfig());
+        setCaddyUp(true);
+        await runtime.watchCaddy();
+        expect(events).not.toContain("caddy start");
+        setCaddyUp(false);
+        await runtime.watchCaddy();
+        expect(events).toContain("caddy start");
+        await runtime.stop();
+    });
+
+    it("does not lose the address when no certificate can be issued after an IP change, and retries", async () => {
+        let issue = false;
+        const { runtime, dataPath, events, setDerived } = await setup(baseConfig(), { waitForIssuance: async (_config, names) => (issue ? names : []) });
+        const before = await fs.readFile(caddyfilePath(dataPath), "utf-8");
+        setDerived([V4_NEW]);
+        await runtime.runChecks();
+        await runtime.runChecks();
+        expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4]);
+        expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).toBe(before);
+        expect(events).not.toContain("restart kubo");
+
+        issue = true;
+        await runtime.runChecks();
+        await runtime.runChecks();
+        expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4_NEW]);
+    });
+
+    it("does not undo a disable that lands during an IP change", async () => {
+        const context: { dataPath?: string; kuboRepoPath?: string } = {};
+        const { runtime, dataPath, kuboRepoPath, setDerived } = await setup(baseConfig(), {
+            waitForIssuance: async (_config, names) => {
+                const current = (await readReachabilityConfig(context.dataPath!))!;
+                await applyKuboConfig(current, { dataPath: context.dataPath!, kuboRepoPath: context.kuboRepoPath! }, false);
+                return names;
+            }
+        });
+        context.dataPath = dataPath;
+        context.kuboRepoPath = kuboRepoPath;
+        setDerived([V4_NEW]);
+        await runtime.runChecks();
+        await runtime.runChecks();
+        expect((await readReachabilityConfig(dataPath))!.enabled).toBe(false);
+        expect(await kuboAnnounce(kuboRepoPath)).toEqual([]);
+    });
+
+    describe("router leases", () => {
+        const fakeRouter = () => {
+            const calls: string[] = [];
+            return {
+                calls,
+                router: {
+                    externalIp: async () => V4,
+                    mapPorts: async () => (calls.push("map"), { mapped: ["TCP 443"], refused: [] }),
+                    release: async () => void calls.push("release")
+                }
+            };
+        };
+        const natDeps = (router: ReturnType<typeof fakeRouter>["router"]) => ({ discoverRouter: async () => router, hasPublicIpv4Interface: () => false, lanIpv4: () => "192.168.1.5" });
+
+        it("asks for the forwards at daemon start, since setup's lease may have expired by then", async () => {
+            const { calls, router } = fakeRouter();
+            const { runtime } = await setup(baseConfig(), natDeps(router));
+            await runtime.start();
+            await runtime.leasesSettled();
+            expect(calls).toContain("map");
+            await runtime.stop();
+        });
+
+        it("does not touch the router on a machine with a public IPv4", async () => {
+            const { calls, router } = fakeRouter();
+            const { runtime } = await setup(baseConfig(), { ...natDeps(router), hasPublicIpv4Interface: () => true });
+            await runtime.refreshLeases();
+            expect(calls).toEqual([]);
+        });
+
+        it("releases the forwards instead of renewing them once disabled", async () => {
+            const { calls, router } = fakeRouter();
+            const { runtime, dataPath } = await setup(baseConfig(), natDeps(router));
+            await runtime.refreshLeases();
+            await writeReachabilityConfig(dataPath, baseConfig({ enabled: false }));
+            calls.length = 0;
+            await runtime.refreshLeases();
+            expect(calls).toEqual(["release"]);
+            await runtime.refreshLeases();
+            expect(calls).toEqual(["release"]);
+        });
     });
 
     it("reloads when the Caddyfile changes on a running daemon", async () => {
@@ -320,6 +410,20 @@ describe("ReachabilityRuntime", () => {
             expect(config.announce).toContain(domainAddress);
             expect(config.droppedAnnounce).toBeUndefined();
             expect(await kuboAnnounce(kuboRepoPath)).toContain(domainAddress);
+        });
+
+        it("does not announce a name twice when setup already restored it", async () => {
+            const { runtime, dataPath, setRecords, advance } = await setup(domainConfig());
+            setRecords({ v4: [], v6: [] });
+            await runtime.runChecks();
+            advance(25 * 60 * 60_000);
+            await runtime.runChecks();
+            const dropped = (await readReachabilityConfig(dataPath))!;
+            // What rerunning setup does once DNS is fixed: the address is back, and the status file is behind.
+            await writeReachabilityConfig(dataPath, { ...dropped, announce: [...dropped.announce, domainAddress] });
+            setRecords({ v4: [V4], v6: [] });
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.announce.filter((address) => address === domainAddress)).toHaveLength(1);
         });
 
         it("survives a daemon restart, so 24 hours is not reset", async () => {

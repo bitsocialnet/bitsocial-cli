@@ -11,7 +11,7 @@ import { path as resolveKuboBinary } from "kubo";
 import { allocateFreePort, killChildProcess, waitForCondition } from "../helpers/daemon-helpers.js";
 import { preInitKuboWithEphemeralSwarm } from "../helpers/kubo-helpers.js";
 import { startPebble, type RunningPebble } from "../helpers/pebble.js";
-import { caddyfilePath, ensureCaddyBinary, generateCaddyfile, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "../../src/reachability/caddy.js";
+import { caddyfilePath, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "../../src/reachability/caddy.js";
 import { computeKuboConfig } from "../../src/reachability/kubo-config.js";
 import { caddyDataDir, readIssuedCertificates, reachabilityDir } from "../../src/reachability/state.js";
 
@@ -149,6 +149,11 @@ describe("Caddy, Pebble and kubo", { timeout: 240_000 }, () => {
         expect(await readIssuedCertificates(dataPath)).toEqual(before);
         const result = await dialInChildProcess(`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws/p2p/${peerId}`, pebble.issuingRootPath);
         expect(result, caddyOutput).toEqual({ peerId });
+    });
+
+    it("recognises itself through the admin API, and not another node's data path", async () => {
+        expect(await isOurCaddyRunning(adminPort, dataPath)).toBe(true);
+        expect(await isOurCaddyRunning(adminPort, randomDirectory())).toBe(false);
     });
 
     it("stops through the admin API", async () => {

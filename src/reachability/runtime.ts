@@ -1,7 +1,7 @@
 import type { ChildProcess } from "child_process";
 import fs from "fs/promises";
 import net from "net";
-import { caddyfilePath, ensureCaddyBinary, generateCaddyfile, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
+import { caddyfilePath, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
 import { kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
 import { applyKuboConfig, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
@@ -102,6 +102,9 @@ export interface RuntimeDependencies {
     };
     restartKubo?: () => Promise<void>;
     waitForIssuance?: (config: ReachabilityConfig, names: string[]) => Promise<string[]>;
+    discoverRouter?: () => Promise<NatRouter | undefined>;
+    hasPublicIpv4Interface?: () => boolean;
+    lanIpv4?: () => string | undefined;
 }
 
 export class ReachabilityRuntime {
@@ -109,6 +112,9 @@ export class ReachabilityRuntime {
     private readonly now: () => number;
     private caddyChild: ChildProcess | undefined;
     private caddyRunning = false;
+    private caddyAdopted = false;
+    private expectingCaddyExit = false;
+    private leases: Promise<void> | undefined;
     private stopping = false;
     private loadedCaddyfile: string | undefined;
     private router: NatRouter | undefined;
@@ -137,6 +143,8 @@ export class ReachabilityRuntime {
             await this.printAddresses(config);
         }
         await this.watchCaddy();
+        // setup's lease may have expired while no daemon was running, so this cannot wait for the first refresh.
+        this.leases = this.refreshLeases().catch((error) => this.deps.warn(String(error)));
         this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.deps.warn(String(error))), CADDY_WATCH_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.runChecks().catch((error) => this.deps.warn(String(error))), CHECK_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
@@ -170,7 +178,8 @@ export class ReachabilityRuntime {
                     });
                     this.caddyChild.once("exit", () => {
                         this.caddyChild = undefined;
-                        if (!this.stopping) this.warnThrottled("caddy-exit", `Caddy exited, so browsers cannot reach this node over WSS until it restarts. Last output: ${output.trim().split("\n").at(-1) ?? "none"}`);
+                        if (!this.stopping && !this.expectingCaddyExit) this.warnThrottled("caddy-exit", `Caddy exited, so browsers cannot reach this node over WSS until it restarts. Last output: ${output.trim().split("\n").at(-1) ?? "none"}`);
+                        this.expectingCaddyExit = false;
                         onExit();
                     });
                 },
@@ -185,16 +194,7 @@ export class ReachabilityRuntime {
                 },
                 isUp: async () => {
                     const config = await this.readConfig();
-                    if (!config) return false;
-                    try {
-                        await fetch(`http://127.0.0.1:${config.caddyAdminPort}/config/`, {
-                            headers: { Origin: `http://127.0.0.1:${config.caddyAdminPort}` },
-                            signal: AbortSignal.timeout(2000)
-                        });
-                        return true;
-                    } catch {
-                        return false;
-                    }
+                    return config ? isOurCaddyRunning(config.caddyAdminPort, this.deps.dataPath) : false;
                 }
             }
         );
@@ -211,18 +211,24 @@ export class ReachabilityRuntime {
 
         if (!hasSites) {
             if (this.caddyRunning) {
-                this.stopping = true;
+                this.expectingCaddyExit = true;
                 await this.caddy.stop().catch(() => {});
-                this.stopping = false;
                 this.caddyRunning = false;
+                this.caddyAdopted = false;
                 this.loadedCaddyfile = undefined;
             }
             return;
+        }
+        // An adopted Caddy is not our child, so nothing tells us when it goes away.
+        if (this.caddyAdopted && !(await this.caddy.isUp())) {
+            this.caddyAdopted = false;
+            this.caddyRunning = false;
         }
         if (!this.caddyRunning) {
             // Left by a daemon that was killed, or by a setup still in progress: adopt it, don't fight it.
             if (await this.caddy.isUp()) {
                 this.caddyRunning = true;
+                this.caddyAdopted = true;
                 this.loadedCaddyfile = undefined;
             } else {
                 await this.caddy.start(() => {
@@ -247,7 +253,7 @@ export class ReachabilityRuntime {
         const fromInterfaces = publicIpsFromInterfaces();
         const ips = new Set(fromInterfaces);
         if (!fromInterfaces.some((ip) => net.isIPv4(ip))) {
-            this.router ??= await discoverNatRouter();
+            this.router ??= await (this.deps.discoverRouter ?? discoverNatRouter)();
             const external = await this.router?.externalIp().catch(() => undefined);
             if (external) for (const ip of publicIpsFromMultiaddrs([`/ip4/${external}`])) ips.add(ip);
         }
@@ -265,7 +271,11 @@ export class ReachabilityRuntime {
     }
 
     private async saveAndApply(config: ReachabilityConfig) {
-        const { config: applied, kuboConfigChanged } = await applyKuboConfig(config, this.deps, true);
+        // This can follow a wait of up to 90 s. An operator may have run disable during it, which must stand.
+        const latest = await this.readConfig();
+        if (!latest?.enabled) return latest ?? config;
+        const { kuboEdits: _stale, ...rest } = config;
+        const { config: applied, kuboConfigChanged } = await applyKuboConfig({ ...rest, ...(latest.kuboEdits ? { kuboEdits: latest.kuboEdits } : {}) }, this.deps, true);
         if (kuboConfigChanged) await this.restartKubo();
         return applied;
     }
@@ -282,6 +292,7 @@ export class ReachabilityRuntime {
             ...(config.httpPort ? { httpPort: config.httpPort } : {}),
             ...(config.acmeTrustedRootsPath ? { acmeTrustedRootsPath: config.acmeTrustedRootsPath } : {})
         };
+        const previousCaddyfile = await fs.readFile(caddyfilePath(this.deps.dataPath), "utf-8").catch(() => undefined);
         const candidate = generateCaddyfile({ ...spec, ips: nextIps });
         await fs.writeFile(caddyfilePath(this.deps.dataPath), candidate);
         await this.watchCaddy();
@@ -289,6 +300,14 @@ export class ReachabilityRuntime {
         const issued = this.deps.waitForIssuance
             ? await this.deps.waitForIssuance(config, nextIps)
             : (await waitForCertificates(this.deps.dataPath, config.acmeDirectory, nextIps)).issued;
+        // Nothing issued, e.g. a rate limit or an ACME outage. Keep the stored addresses so the next checks
+        // retry: with an empty list the daemon would never look at IPs again, and would stop Caddy too.
+        if (issued.length === 0) {
+            this.deps.warn(`No certificate could be issued for ${nextIps.join(", ")} after the IP change. Will retry.`);
+            if (previousCaddyfile !== undefined) await fs.writeFile(caddyfilePath(this.deps.dataPath), previousCaddyfile);
+            await this.watchCaddy();
+            return config;
+        }
         if (issued.length !== nextIps.length) {
             this.deps.warn(`No certificate could be issued for ${nextIps.filter((ip) => !issued.includes(ip)).join(", ")} after the IP change.`);
             await fs.writeFile(caddyfilePath(this.deps.dataPath), generateCaddyfile({ ...spec, ips: issued }));
@@ -327,7 +346,7 @@ export class ReachabilityRuntime {
             }
             if (verdict.restore) {
                 const stillDropped = (next.droppedAnnounce ?? []).filter((address) => address !== entry.address);
-                next = { ...next, announce: [...next.announce, entry.address], ...(stillDropped.length > 0 ? { droppedAnnounce: stillDropped } : {}) };
+                next = { ...next, announce: [...new Set([...next.announce, entry.address])], ...(stillDropped.length > 0 ? { droppedAnnounce: stillDropped } : {}) };
                 if (stillDropped.length === 0) delete next.droppedAnnounce;
                 droppedFromAnnounce = false;
                 changed = true;
@@ -389,8 +408,21 @@ export class ReachabilityRuntime {
     }
 
     async refreshLeases(): Promise<void> {
-        const lanIp = lanIpv4FromInterfaces();
+        const config = await this.readConfig();
+        if (!config?.enabled) {
+            await this.router?.release().catch(() => {});
+            this.router = undefined;
+            return;
+        }
+        const hasPublicIpv4 = this.deps.hasPublicIpv4Interface?.() ?? (Boolean(process.env["BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS"]) || publicIpsFromInterfaces().some((ip) => net.isIPv4(ip)));
+        if (hasPublicIpv4) return;
+        this.router ??= await (this.deps.discoverRouter ?? discoverNatRouter)();
+        const lanIp = (this.deps.lanIpv4 ?? lanIpv4FromInterfaces)();
         if (this.router && lanIp) await this.router.mapPorts(lanIp);
+    }
+
+    leasesSettled(): Promise<void> {
+        return this.leases ?? Promise.resolve();
     }
 
     async stop(): Promise<void> {
@@ -398,6 +430,7 @@ export class ReachabilityRuntime {
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
         await this.checkInFlight?.catch(() => {});
+        await this.leases;
         await this.router?.release().catch(() => {});
         if (!this.caddyRunning) return;
         const child = this.caddyChild;

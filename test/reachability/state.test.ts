@@ -10,6 +10,7 @@ import {
     readReachabilityStatus,
     reachabilityConfigPath,
     reachabilityRuntimeStatusPath,
+    writeJsonAtomic,
     writeReachabilityConfig,
     writeReachabilityRuntimeStatus,
     type ReachabilityConfig
@@ -109,6 +110,31 @@ describe("acmeIssuerKey", () => {
         ["https://127.0.0.1:38443/dir", "127.0.0.1-38443-dir"]
     ])("%s is stored by Caddy under %s", (directory, key) => {
         expect(acmeIssuerKey(directory)).toBe(key);
+    });
+});
+
+describe.skipIf(process.platform === "win32")("writeJsonAtomic", () => {
+    const modeOf = async (file: string) => (await fs.stat(file)).mode & 0o777;
+
+    it("keeps a private file private, because kubo's config holds the node's private key", async () => {
+        const file = path.join(randomDirectory(), "config");
+        await fs.writeFile(file, "{}", { mode: 0o600 });
+        await writeJsonAtomic(file, { a: 1 });
+        expect(await modeOf(file)).toBe(0o600);
+    });
+
+    it("keeps whatever mode the file already had", async () => {
+        const file = path.join(randomDirectory(), "config");
+        await fs.writeFile(file, "{}", { mode: 0o640 });
+        await fs.chmod(file, 0o640);
+        await writeJsonAtomic(file, {});
+        expect(await modeOf(file)).toBe(0o640);
+    });
+
+    it("creates a new file private", async () => {
+        const file = path.join(randomDirectory(), "new.json");
+        await writeJsonAtomic(file, {});
+        expect(await modeOf(file)).toBe(0o600);
     });
 });
 

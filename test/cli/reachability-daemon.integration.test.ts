@@ -60,6 +60,7 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
             BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: pebble.directoryUrl,
             BITSOCIAL_TEST_REACHABILITY_ACME_ROOT: pebble.listenerRootPath,
             BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1",
+            BITSOCIAL_TEST_REACHABILITY_WS_PORT: String(await allocateFreePort()),
             BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(httpsPort),
             BITSOCIAL_TEST_REACHABILITY_HTTP_PORT: String(await allocateFreePort("0.0.0.0"))
         };

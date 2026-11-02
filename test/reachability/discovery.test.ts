@@ -1,3 +1,4 @@
+import net from "net";
 import { describe, expect, it } from "vitest";
 import {
     classifyPortHolder,
@@ -8,8 +9,10 @@ import {
     parseLsofHolder,
     parseNetstatPid,
     parseSsHolder,
+    probeTcpPort,
     publicIpsFromInterfaces,
-    publicIpsFromMultiaddrs
+    publicIpsFromMultiaddrs,
+    worstPortState
 } from "../../src/reachability/discovery.js";
 
 const iface = (address: string, internal = false) => ({ address, internal, family: address.includes(":") ? "IPv6" : "IPv4" }) as any;
@@ -71,6 +74,39 @@ it("publicIpsFromMultiaddrs does not let our own announced address confirm itsel
     expect(publicIpsFromMultiaddrs([`${own}/p2p/${peer}`, `/ip4/93.184.216.34/tcp/4001/p2p/${peer}`], [own])).toEqual(["93.184.216.34"]);
     expect(publicIpsFromMultiaddrs([`/ip4/93.184.216.35/tcp/4001/p2p/${peer}`, `${own}/p2p/${peer}`], [own])).toEqual(["93.184.216.35"]);
 });
+
+describe("probeTcpPort", () => {
+    const hold = async (host: string, options: object = {}) => {
+        const server = net.createServer();
+        await new Promise<void>((resolve) => server.listen({ port: 0, host, ...options }, () => resolve()));
+        return { server, port: (server.address() as net.AddressInfo).port };
+    };
+
+    it("sees a port held on IPv4", async () => {
+        const { server, port } = await hold("0.0.0.0");
+        expect(await probeTcpPort(port)).toBe("busy");
+        server.close();
+    });
+
+    it("sees a port held only on IPv6, which Windows would otherwise let us bind over", async () => {
+        const { server, port } = await hold("::", { ipv6Only: true });
+        expect(await probeTcpPort(port)).toBe("busy");
+        server.close();
+    });
+
+    it("says free once released", async () => {
+        const { server, port } = await hold("0.0.0.0");
+        await new Promise((resolve) => server.close(resolve));
+        expect(await probeTcpPort(port)).toBe("free");
+    });
+});
+
+it.each([
+    [["free", "free"], "free"],
+    [["free", "busy"], "busy"],
+    [["no-permission", "free"], "no-permission"],
+    [["no-permission", "busy"], "busy"]
+] as const)("worstPortState(%j) is %s", (states, expected) => expect(worstPortState([...states])).toBe(expected));
 
 describe("port holder parsing", () => {
     it("reads ss output", () => {

@@ -1,5 +1,7 @@
 import fs from "fs/promises";
+import http from "http";
 import { describe, expect, it, vi } from "vitest";
+import { caddyDataDir } from "../../src/reachability/state.js";
 import { directory as randomDirectory } from "tempy";
 import {
     CADDY_RELEASE_SHA256,
@@ -7,6 +9,7 @@ import {
     caddyReleaseFor,
     ensureCaddyBinary,
     generateCaddyfile,
+    isOurCaddyRunning,
     LETS_ENCRYPT_DIRECTORY,
     waitForCertificates,
     type CaddyfileSpec
@@ -65,6 +68,34 @@ describe("ensureCaddyBinary", () => {
         const fetchImpl = vi.fn() as unknown as typeof fetch;
         expect(await ensureCaddyBinary(dataPath, { fetchImpl })).toBe(caddyBinaryPath(dataPath));
         expect(fetchImpl).not.toHaveBeenCalled();
+    });
+});
+
+describe("isOurCaddyRunning", () => {
+    const serve = async (body: string) => {
+        const server = http.createServer((_request, response) => response.end(body));
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+        return { server, port: (server.address() as { port: number }).port };
+    };
+
+    it("is true only for a Caddy storing in this node's data directory", async () => {
+        const dataPath = randomDirectory();
+        const { server, port } = await serve(JSON.stringify({ storage: { module: "file_system", root: caddyDataDir(dataPath).replaceAll("\\", "/") } }));
+        expect(await isOurCaddyRunning(port, dataPath)).toBe(true);
+        expect(await isOurCaddyRunning(port, randomDirectory())).toBe(false);
+        server.close();
+    });
+
+    it.each(["not json", "{}", "null"])("is false for something else answering on the port: %s", async (body) => {
+        const { server, port } = await serve(body);
+        expect(await isOurCaddyRunning(port, randomDirectory())).toBe(false);
+        server.close();
+    });
+
+    it("is false when nothing is listening", async () => {
+        const { server, port } = await serve("");
+        await new Promise((resolve) => server.close(resolve));
+        expect(await isOurCaddyRunning(port, randomDirectory())).toBe(false);
     });
 });
 

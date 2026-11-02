@@ -91,12 +91,26 @@ export async function detectContainer(readFile: (path: string) => Promise<string
 
 export type PortState = "free" | "busy" | "no-permission";
 
-export const probeTcpPort = (port: number, host = "0.0.0.0"): Promise<PortState> =>
+const probeTcpHost = (port: number, host: string): Promise<PortState> =>
     new Promise((resolve) => {
         const server = net.createServer();
-        server.once("error", (error: NodeJS.ErrnoException) => resolve(error.code === "EACCES" ? "no-permission" : "busy"));
+        server.once("error", (error: NodeJS.ErrnoException) => {
+            // A machine without IPv6 cannot be holding the port on it.
+            if (error.code === "EADDRNOTAVAIL" || error.code === "EAFNOSUPPORT") return resolve("free");
+            resolve(error.code === "EACCES" ? "no-permission" : "busy");
+        });
         server.listen({ port, host, exclusive: true }, () => server.close(() => resolve("free")));
     });
+
+// Windows lets a bind on 0.0.0.0 succeed while another program listens on [::], so one family proves nothing.
+export const worstPortState = (states: PortState[]): PortState => (states.includes("busy") ? "busy" : states.includes("no-permission") ? "no-permission" : "free");
+
+export const probeTcpPort = async (port: number, host?: string): Promise<PortState> => {
+    if (host) return probeTcpHost(port, host);
+    const states: PortState[] = [];
+    for (const wildcard of ["0.0.0.0", "::"]) states.push(await probeTcpHost(port, wildcard));
+    return worstPortState(states);
+};
 
 export const isTcpPortFree = async (port: number, host: string) => (await probeTcpPort(port, host)) === "free";
 
