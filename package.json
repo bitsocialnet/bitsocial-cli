@@ -60,6 +60,9 @@
             "page-sort": {
                 "description": "Manage page sort packages"
             },
+            "reachability": {
+                "description": "Make this node dialable from browsers and keep it that way"
+            },
             "update": {
                 "description": "Check for and install bitsocial CLI updates"
             }
