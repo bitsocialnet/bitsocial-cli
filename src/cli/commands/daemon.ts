@@ -11,8 +11,10 @@ import {
     PKCLogger,
     setupDebugLogger,
     loadKuboConfigFile,
-    parseMultiAddrKuboRpcToUrl,
-    parseMultiAddrIpfsGatewayToUrl
+    kuboRpcUrlFromKuboConfig,
+    ipfsGatewayUrlFromKuboConfig,
+    hostForUrl,
+    toConnectableHostname
 } from "../../util.js";
 import type { PKCLoggerType } from "../../util.js";
 import { startDaemonServer } from "../../webui/daemon-server.js";
@@ -26,14 +28,6 @@ import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-util
 import fs from "fs";
 import fsPromise from "fs/promises";
 
-/** Replace wildcard bind addresses with loopback for connectivity checks (macOS rejects connect to 0.0.0.0 with EINVAL) */
-function toConnectableHostname(hostname: string): string {
-    if (process.platform === "darwin") {
-        if (hostname === "0.0.0.0") return "127.0.0.1";
-        if (hostname === "::") return "::1";
-    }
-    return hostname;
-}
 import { EOL } from "node:os";
 import { formatWithOptions } from "node:util";
 import { createRequire } from "node:module";
@@ -89,7 +83,7 @@ export async function runKeepKuboUpTick(deps: KeepKuboUpTickDeps): Promise<void>
 export default class Daemon extends Command {
     static override description = `Run a network-connected Bitsocial node. Once the daemon is running you can create and start your communities and receive publications from users. The daemon will also serve web ui on http that can be accessed through a browser on any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
     Options can be passed to the RPC's instance through flag --pkcOptions.optionName. For a list of pkc options (https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#pkcoptions)
-    If you need to modify ipfs config, you should head to {bitsocial-data-path}/.ipfs-bitsocial-cli/config and modify the config file
+    If you need to modify ipfs config, you should head to {bitsocial-data-path}/.bitsocial-cli.ipfs/config (or $IPFS_PATH/config if set) and modify the config file
     `;
 
     static override flags = {
@@ -328,14 +322,14 @@ export default class Daemon extends Command {
             const ipfsConfig = await loadKuboConfigFile(pkcOptionsFromFlag?.dataPath || defaultPkcOptions.dataPath!);
             const kuboRpcEndpoint = pkcOptionsFromFlag?.kuboRpcClientsOptions
                 ? new URL(pkcOptionsFromFlag.kuboRpcClientsOptions[0]!.toString())
-                : ipfsConfig?.["Addresses"]?.["API"]
-                  ? await parseMultiAddrKuboRpcToUrl(ipfsConfig?.["Addresses"]?.["API"])
-                  : defaults.KUBO_RPC_URL;
+                : process.env["KUBO_RPC_URL"]
+                  ? defaults.KUBO_RPC_URL
+                  : ((await kuboRpcUrlFromKuboConfig(ipfsConfig)) ?? defaults.KUBO_RPC_URL);
             const ipfsGatewayEndpoint = pkcOptionsFromFlag?.ipfsGatewayUrls
                 ? new URL(pkcOptionsFromFlag.ipfsGatewayUrls[0])
-                : ipfsConfig?.["Addresses"]?.["Gateway"]
-                  ? await parseMultiAddrIpfsGatewayToUrl(ipfsConfig?.["Addresses"]?.["Gateway"])
-                  : defaults.IPFS_GATEWAY_URL;
+                : process.env["IPFS_GATEWAY_URL"]
+                  ? defaults.IPFS_GATEWAY_URL
+                  : ((await ipfsGatewayUrlFromKuboConfig(ipfsConfig)) ?? defaults.IPFS_GATEWAY_URL);
 
             defaultPkcOptions.kuboRpcClientsOptions = [kuboRpcEndpoint.toString()];
             const mergedPkcOptions = { ...defaultPkcOptions, ...pkcOptionsFromFlag };
@@ -392,7 +386,7 @@ export default class Daemon extends Command {
                 if (mainProcessExited || kuboProcess || pendingKuboStart) return;
                 if (isKuboApiPortTaken) {
                     const connectableEndpoint = new URL(kuboRpcEndpoint.toString());
-                    connectableEndpoint.hostname = connectHostname;
+                    connectableEndpoint.hostname = hostForUrl(connectHostname);
                     const versionUrl = new URL("version", connectableEndpoint);
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 2000);

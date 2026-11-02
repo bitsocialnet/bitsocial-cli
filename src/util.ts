@@ -53,8 +53,14 @@ export function getLanIpV4Address(): string | undefined {
     return undefined;
 }
 
+// The one place that decides where the kubo repo lives. Everything that spawns kubo or reads or
+// writes its config must go through this, so they can never disagree on the directory (issue #200).
+export function resolveKuboRepoPath(pkcDataPath: string): string {
+    return process.env["IPFS_PATH"] || path.join(pkcDataPath, ".bitsocial-cli.ipfs");
+}
+
 export async function loadKuboConfigFile(pkcDataPath: string): Promise<any | undefined> {
-    const kuboConfigPath = path.join(pkcDataPath, ".ipfs-bitsocial-cli", "config");
+    const kuboConfigPath = path.join(resolveKuboRepoPath(pkcDataPath), "config");
 
     if (!fs.existsSync(kuboConfigPath)) return undefined;
 
@@ -77,18 +83,52 @@ function multiAddrToHostPort(multiAddrObj: { getComponents: () => { name: string
     return { host, port };
 }
 
+export const hostForUrl = (host: string) => (host.includes(":") && !host.startsWith("[") ? `[${host}]` : host);
+
+/** The host to dial for a connectivity check. Sockets need IPv6 hosts without the brackets a URL keeps,
+ * and a wildcard bind address is reached over loopback (macOS rejects connect to 0.0.0.0 with EINVAL). */
+export function toConnectableHostname(hostname: string): string {
+    const bare = hostname.replace(/^\[(.*)\]$/, "$1");
+    if (bare === "0.0.0.0") return "127.0.0.1";
+    if (bare === "::") return "::1";
+    return bare;
+}
+
 export async function parseMultiAddrKuboRpcToUrl(kuboMultiAddrString: string) {
     const multiAddrObj = await parseMultiAddr(kuboMultiAddrString);
     const parsed = multiAddrToHostPort(multiAddrObj);
     if (!parsed) throw new Error(`Unable to parse kubo RPC multiaddr: ${kuboMultiAddrString}`);
-    return new URL(`http://${parsed.host}:${parsed.port}/api/v0`);
+    return new URL(`http://${hostForUrl(parsed.host)}:${parsed.port}/api/v0`);
 }
 
 export async function parseMultiAddrIpfsGatewayToUrl(ipfsGatewaymultiAddrString: string) {
     const multiAddrObj = await parseMultiAddr(ipfsGatewaymultiAddrString);
     const parsed = multiAddrToHostPort(multiAddrObj);
     if (!parsed) throw new Error(`Unable to parse IPFS gateway multiaddr: ${ipfsGatewaymultiAddrString}`);
-    return new URL(`http://${parsed.host}:${parsed.port}`);
+    return new URL(`http://${hostForUrl(parsed.host)}:${parsed.port}`);
+}
+
+// Kubo accepts Addresses.API and Addresses.Gateway as a string or a list, and either can be empty
+// (disabled) or a /unix socket, which has no URL form here. Take the first usable entry; undefined
+// tells the caller to fall back to its defaults.
+async function firstUsableKuboAddress(addresses: unknown, parse: (multiAddr: string) => Promise<URL>): Promise<URL | undefined> {
+    for (const address of Array.isArray(addresses) ? addresses : [addresses]) {
+        if (typeof address !== "string" || !address) continue;
+        try {
+            return await parse(address);
+        } catch {
+            continue;
+        }
+    }
+    return undefined;
+}
+
+export function kuboRpcUrlFromKuboConfig(kuboConfig: any): Promise<URL | undefined> {
+    return firstUsableKuboAddress(kuboConfig?.Addresses?.API, parseMultiAddrKuboRpcToUrl);
+}
+
+export function ipfsGatewayUrlFromKuboConfig(kuboConfig: any): Promise<URL | undefined> {
+    return firstUsableKuboAddress(kuboConfig?.Addresses?.Gateway, parseMultiAddrIpfsGatewayToUrl);
 }
 
 /** Recursively replaces all `null` values with `undefined`.

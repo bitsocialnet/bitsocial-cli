@@ -940,7 +940,7 @@ DESCRIPTION
   any machine. Within the web ui users are able to browse, create and manage their communities fully P2P.
   Options can be passed to the RPC's instance through flag --pkcOptions.optionName. For a list of pkc options
   (https://github.com/pkcprotocol/pkc-js?tab=readme-ov-file#pkcoptions)
-  If you need to modify ipfs config, you should head to {bitsocial-data-path}/.ipfs-bitsocial-cli/config and modify the
+  If you need to modify ipfs config, you should head to {bitsocial-data-path}/.bitsocial-cli.ipfs/config (or $IPFS_PATH/config if set) and modify the
   config file
 
 
