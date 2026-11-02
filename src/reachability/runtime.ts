@@ -113,6 +113,7 @@ export class ReachabilityRuntime {
     private caddyChild: ChildProcess | undefined;
     private caddyRunning = false;
     private caddyAdopted = false;
+    private watchQueue: Promise<unknown> = Promise.resolve();
     private expectingCaddyExit = false;
     private leases: Promise<void> | undefined;
     private stopping = false;
@@ -142,10 +143,11 @@ export class ReachabilityRuntime {
         } else if (config.enabled) {
             await this.printAddresses(config);
         }
-        await this.watchCaddy();
+        // A failed start, e.g. a download error, must not stop the checks: the next tick tries again.
+        await this.watchCaddy().catch((error) => this.warnThrottled("caddy-start", `Caddy could not start: ${(error as Error).message}`));
         // setup's lease may have expired while no daemon was running, so this cannot wait for the first refresh.
         this.leases = this.refreshLeases().catch((error) => this.deps.warn(String(error)));
-        this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.deps.warn(String(error))), CADDY_WATCH_INTERVAL_MS));
+        this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.warnThrottled("caddy-start", `Caddy could not start: ${(error as Error).message}`)), CADDY_WATCH_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.runChecks().catch((error) => this.deps.warn(String(error))), CHECK_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
         for (const timer of this.timers) timer.unref();
@@ -202,7 +204,14 @@ export class ReachabilityRuntime {
 
     // Runs every few seconds, so `setup`, `enable` and `disable` take effect on a running daemon and
     // a crashed Caddy comes back the same way a crashed kubo does.
-    async watchCaddy(): Promise<void> {
+    // Serialized: a slow start, such as the first download, would otherwise overlap the next tick and spawn twice.
+    watchCaddy(): Promise<void> {
+        const run = this.watchQueue.then(() => this.watchCaddyOnce());
+        this.watchQueue = run.catch(() => {});
+        return run;
+    }
+
+    private async watchCaddyOnce(): Promise<void> {
         if (this.stopping) return;
         const config = await this.readConfig();
         const wanted = config?.enabled === true && config.publicIps.length + (config.domain ? 1 : 0) > 0;
@@ -283,7 +292,8 @@ export class ReachabilityRuntime {
     private async handleIpChange(config: ReachabilityConfig, nextIps: string[]): Promise<ReachabilityConfig> {
         // Moves only IP-certificate addresses. A domain's or proxy's address does not contain our IP.
         const spec = {
-            domains: config.domain && config.announce.some((address) => address.includes(`/${config.domain}/`)) ? [config.domain] : [],
+            // A dropped name keeps its site: nothing else would add it back when its DNS recovers.
+            domains: config.domain && [...config.announce, ...(config.droppedAnnounce ?? [])].some((address) => address.includes(`/${config.domain}/`)) ? [config.domain] : [],
             wsPort: config.wsPort,
             adminPort: config.caddyAdminPort,
             dataDirectory: caddyDataDir(this.deps.dataPath),
@@ -430,6 +440,7 @@ export class ReachabilityRuntime {
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
         await this.checkInFlight?.catch(() => {});
+        await this.watchQueue;
         await this.leases;
         await this.router?.release().catch(() => {});
         if (!this.caddyRunning) return;

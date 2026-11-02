@@ -229,6 +229,55 @@ describe("ReachabilityRuntime", () => {
         expect(events).toEqual([]);
     });
 
+    it("starts one Caddy when checks overlap during a slow start", async () => {
+        let starts = 0;
+        let up = false;
+        const { runtime } = await setup(baseConfig(), {
+            caddy: {
+                start: async () => {
+                    starts++;
+                    await new Promise((resolve) => setTimeout(resolve, 50));
+                    up = true;
+                },
+                stop: async () => {},
+                reload: async () => {},
+                isUp: async () => up
+            }
+        });
+        await Promise.all([runtime.watchCaddy(), runtime.watchCaddy(), runtime.watchCaddy()]);
+        expect(starts).toBe(1);
+    });
+
+    it("keeps running when the first Caddy start fails, and tries again", async () => {
+        let attempts = 0;
+        const { runtime, events } = await setup(baseConfig(), {
+            caddy: {
+                start: async () => {
+                    attempts++;
+                    if (attempts === 1) throw new Error("download failed");
+                },
+                stop: async () => {},
+                reload: async () => {},
+                isUp: async () => false
+            }
+        });
+        await runtime.start();
+        expect(events.some((event) => event.includes("download failed"))).toBe(true);
+        await runtime.watchCaddy();
+        expect(attempts).toBe(2);
+        await runtime.stop();
+    });
+
+    it("keeps a dropped domain in the Caddyfile through an IP change, so it can recover", async () => {
+        const domainAddress = "/dns4/node.example/tcp/443/tls/ws";
+        const { runtime, dataPath, setDerived, setRecords } = await setup(baseConfig({ domain: "node.example", announce: [`/ip4/${V4}/tcp/443/tls/ws`], droppedAnnounce: [domainAddress], mode: "ip" }));
+        setRecords({ v4: [], v6: [] });
+        setDerived([V4_NEW]);
+        await runtime.runChecks();
+        await runtime.runChecks();
+        expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).toContain("https://node.example");
+    });
+
     it("notices an adopted Caddy stopping, and starts its own", async () => {
         const { runtime, events, setCaddyUp } = await setup(baseConfig());
         setCaddyUp(true);

@@ -178,6 +178,12 @@ export function startCaddy(dataPath: string, binaryPath: string, onOutput?: (lin
     });
     child.stdout.on("data", (data: Buffer) => onOutput?.(data.toString()));
     child.stderr.on("data", (data: Buffer) => onOutput?.(data.toString()));
+    // A binary that cannot run emits only "error", which would otherwise crash the process. Every caller
+    // already handles "exit", so this needs no second failure path.
+    child.once("error", (error) => {
+        onOutput?.(error.message);
+        child.emit("exit", null, null);
+    });
     return child;
 }
 

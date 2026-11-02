@@ -22,6 +22,22 @@ const runCli = (args: string[], env: Record<string, string>): Promise<{ stdout: 
         child.once("close", (exitCode) => resolve({ stdout, stderr: stderr.replace(/[\s›]+/g, " "), exitCode }));
     });
 
+it("--announce with no daemon running is refused before anything changes", { timeout: 60_000 }, async () => {
+    const dataPath = randomDirectory();
+    const repo = path.join(dataPath, ".bitsocial-cli.ipfs");
+    await fs.mkdir(repo, { recursive: true });
+    const original = JSON.stringify({ Addresses: { Swarm: [] }, Swarm: { AddrFilters: [] }, AutoTLS: { Enabled: true } });
+    await fs.writeFile(path.join(repo, "config"), original);
+    const result = await runCli(["reachability", "setup", "--non-interactive", "--announce", "/ip4/93.184.216.34/tcp/443/tls/ws", "--pkcOptions.dataPath", dataPath], {
+        KUBO_RPC_URL: `http://127.0.0.1:${await allocateFreePort()}/api/v0`,
+        BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: "https://127.0.0.1:9/dir",
+        BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1"
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("daemon must be running");
+    expect(await fs.readFile(path.join(repo, "config"), "utf-8")).toBe(original);
+});
+
 describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
     let pebble: RunningPebble;
     let daemon: DynamicDaemonResult;

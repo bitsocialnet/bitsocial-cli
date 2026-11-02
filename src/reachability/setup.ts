@@ -324,7 +324,11 @@ async function restartAndVerifyKubo(config: ReachabilityConfig, restart: boolean
 export async function runReachabilitySetup(options: SetupOptions, deps: SetupDependencies): Promise<ReachabilityConfig> {
     const acmeDirectory = chooseAcmeDirectory(options);
     assertAcmeDirectoryAllowed(acmeDirectory, deps.isCi);
-    if (options.announce) assertAnnounceShape(options.announce);
+    if (options.announce) {
+        assertAnnounceShape(options.announce);
+        // Checked first, so a refusal leaves the kubo config as it was.
+        if (!(await kuboIdentity(options.kuboRpcUrl))) throw new SetupRefusedError("--announce is verified by dialling this node through it, so the daemon must be running.");
+    }
 
     const previous = await readReachabilityConfig(options.dataPath);
     const httpsPort = options.overrides?.httpsPort ?? 443;

@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import http from "http";
+import path from "path";
 import { describe, expect, it, vi } from "vitest";
 import { caddyDataDir } from "../../src/reachability/state.js";
 import { directory as randomDirectory } from "tempy";
@@ -11,6 +12,7 @@ import {
     generateCaddyfile,
     isOurCaddyRunning,
     LETS_ENCRYPT_DIRECTORY,
+    startCaddy,
     waitForCertificates,
     type CaddyfileSpec
 } from "../../src/reachability/caddy.js";
@@ -68,6 +70,16 @@ describe("ensureCaddyBinary", () => {
         const fetchImpl = vi.fn() as unknown as typeof fetch;
         expect(await ensureCaddyBinary(dataPath, { fetchImpl })).toBe(caddyBinaryPath(dataPath));
         expect(fetchImpl).not.toHaveBeenCalled();
+    });
+});
+
+describe("startCaddy", () => {
+    it("reports a binary that cannot run as an exit, instead of crashing the process", async () => {
+        const dataPath = randomDirectory();
+        let output = "";
+        const child = startCaddy(dataPath, path.join(dataPath, "no-such-caddy"), (line) => (output += line));
+        await new Promise((resolve) => child.once("exit", resolve));
+        expect(output).toContain("ENOENT");
     });
 });
 
