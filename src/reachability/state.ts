@@ -19,6 +19,8 @@ export interface ReachabilityConfig {
     announce: string[];
     publicIps: string[];
     domain?: string;
+    // Addresses served by the operator's own proxy, each verified by a libp2p dial.
+    externalAnnounce?: string[];
     staging: boolean;
     acmeDirectory: string;
     caddyAdminPort: number;
@@ -80,6 +82,7 @@ function assertValidConfig(parsed: any, configPath: string): asserts parsed is R
     if (!isStringArray(parsed.announce)) fail("announce must be a list of multiaddrs");
     if (!isStringArray(parsed.publicIps)) fail("publicIps must be a list of IP addresses");
     if (parsed.domain !== undefined && typeof parsed.domain !== "string") fail("domain must be a string");
+    if (parsed.externalAnnounce !== undefined && !isStringArray(parsed.externalAnnounce)) fail("externalAnnounce must be a list of multiaddrs");
     if (typeof parsed.staging !== "boolean") fail("staging must be a boolean");
     if (typeof parsed.acmeDirectory !== "string") fail("acmeDirectory must be a URL");
     if (!Number.isInteger(parsed.caddyAdminPort)) fail("caddyAdminPort must be a port number");

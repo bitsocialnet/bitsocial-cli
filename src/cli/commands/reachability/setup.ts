@@ -4,7 +4,7 @@ import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
 import { initKuboRepoIfNeeded, resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { detectContainer } from "../../../reachability/discovery.js";
-import { NeedsAnswerError, realSetupDependencies, runReachabilitySetup, type SetupOptions } from "../../../reachability/setup.js";
+import { NeedsAnswerError, realSetupDependencies, SetupRefusedError, runReachabilitySetup, type SetupOptions } from "../../../reachability/setup.js";
 import { loadKuboConfigFile, PKCLogger, resolveKuboRepoPath, resolveKuboRpcUrl } from "../../../util.js";
 
 // Test hooks: Pebble in place of Let's Encrypt, and loopback in place of a public address.
@@ -32,14 +32,16 @@ const runSudoSetcap = (binaryPath: string) =>
         child.once("exit", (code) => resolve(code === 0));
     });
 
-async function confirmOnTerminal(question: string): Promise<boolean> {
+async function askOnTerminal(question: string): Promise<string> {
     const terminal = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
-        return /^y(es)?$/i.test((await terminal.question(`${question} [y/N] `)).trim());
+        return await terminal.question(`${question} `);
     } finally {
         terminal.close();
     }
 }
+
+const confirmOnTerminal = async (question: string) => /^y(es)?$/i.test((await askOnTerminal(`${question} [y/N]`)).trim());
 
 export default class Setup extends Command {
     static override description =
@@ -47,11 +49,20 @@ export default class Setup extends Command {
 
     static override flags = {
         "pkcOptions.dataPath": Flags.directory({ description: "Data path of the node", required: false }),
+        domain: Flags.string({ description: "A domain pointing at this machine, to get a certificate for or to forward through your own proxy" }),
+        announce: Flags.string({ description: "A multiaddr your own proxy serves, e.g. /dns4/node.example/tcp/443/tls/ws. Announced only after a real libp2p dial succeeds" }),
+        force: Flags.boolean({ description: "Continue when the domain does not resolve to this machine, for proxies in front of it", default: false }),
         staging: Flags.boolean({ description: "Use the Let's Encrypt staging CA. Its certificates are not trusted by browsers", default: false }),
         "non-interactive": Flags.boolean({ description: "Never ask. Exit non-zero with the reason if an answer would be needed", default: false })
     };
 
-    static override examples = ["bitsocial reachability setup", "bitsocial reachability setup --staging", "bitsocial reachability setup --non-interactive"];
+    static override examples = [
+        "bitsocial reachability setup",
+        "bitsocial reachability setup --staging",
+        "bitsocial reachability setup --domain node.example",
+        "bitsocial reachability setup --domain node.example --announce /dns4/node.example/tcp/443/tls/ws",
+        "bitsocial reachability setup --non-interactive"
+    ];
 
     async run(): Promise<void> {
         const { flags } = await this.parse(Setup);
@@ -72,13 +83,16 @@ export default class Setup extends Command {
                     kuboRpcUrl,
                     staging: flags.staging,
                     nonInteractive: flags["non-interactive"],
+                    force: flags.force,
+                    ...(flags.domain ? { domain: flags.domain } : {}),
+                    ...(flags.announce ? { announce: flags.announce } : {}),
                     ...(overrides ? { overrides } : {})
                 },
                 {
                     ...realSetupDependencies(),
                     log: (message) => this.log(message),
                     warn: (message) => this.logToStderr(message),
-                    ...(canAsk ? { confirm: confirmOnTerminal, runSudoSetcap } : {}),
+                    ...(canAsk ? { confirm: confirmOnTerminal, ask: askOnTerminal, runSudoSetcap } : {}),
                     platform: process.platform,
                     inContainer: await detectContainer(),
                     isCi: Boolean(process.env["CI"]),
@@ -87,6 +101,7 @@ export default class Setup extends Command {
             );
         } catch (error) {
             if (error instanceof NeedsAnswerError) this.error(error.message, { exit: 2 });
+            if (error instanceof SetupRefusedError) this.error(error.message, { exit: 1 });
             throw error;
         }
     }

@@ -1,4 +1,5 @@
 import type { ChildProcess } from "child_process";
+import dns from "dns/promises";
 import fs from "fs/promises";
 import net from "net";
 import path from "path";
@@ -6,6 +7,7 @@ import {
     caddyfilePath,
     ensureCaddyBinary,
     generateCaddyfile,
+    isValidDomain,
     LETS_ENCRYPT_DIRECTORY,
     LETS_ENCRYPT_STAGING_DIRECTORY,
     reloadCaddy,
@@ -32,8 +34,10 @@ import {
     ACME_NOTICE,
     bindDeniedGuidance,
     busyPortMessage,
+    dnsMismatchMessage,
     IPV6_ONLY_CAVEAT,
     NO_IPV6_HINT,
+    reverseProxySnippet,
     setcapCommand,
     testCommandHint,
     unreachableStatement,
@@ -42,9 +46,16 @@ import {
 } from "./guidance.js";
 import { localWsSwarmAddress, planKuboConfig } from "./kubo-config.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
-import { caddyDataDir, readReachabilityConfig, reachabilityDir, writeJsonAtomic, writeReachabilityConfig, type ReachabilityConfig, type ReachabilityMode } from "./state.js";
+import { dialWithLibp2p } from "./libp2p-dial.js";
+import { caddyDataDir, isSameCertificateName, readReachabilityConfig, reachabilityDir, writeJsonAtomic, writeReachabilityConfig, type ReachabilityConfig, type ReachabilityMode } from "./state.js";
 
 export class NeedsAnswerError extends Error {}
+export class SetupRefusedError extends Error {}
+
+export interface ResolvedDomain {
+    v4: string[];
+    v6: string[];
+}
 
 export interface SetupOptions {
     dataPath: string;
@@ -52,6 +63,9 @@ export interface SetupOptions {
     kuboRpcUrl: URL;
     staging: boolean;
     nonInteractive: boolean;
+    domain?: string;
+    announce?: string;
+    force?: boolean;
     // Set only by tests, through the BITSOCIAL_TEST_REACHABILITY_* environment variables.
     overrides?: { acmeDirectory?: string; acmeTrustedRootsPath?: string; publicIps?: string[]; httpsPort?: number; httpPort?: number };
 }
@@ -61,6 +75,7 @@ export interface SetupDependencies {
     warn: (message: string) => void;
     // undefined when nobody can answer, i.e. stdin is not a TTY or --non-interactive was passed.
     confirm?: (question: string) => Promise<boolean>;
+    ask?: (question: string) => Promise<string>;
     runSudoSetcap?: (binaryPath: string) => Promise<boolean>;
     platform: string;
     inContainer: boolean;
@@ -72,17 +87,41 @@ export interface SetupDependencies {
     publicIpsFromInterfaces: () => string[];
     lanIpv4: () => string | undefined;
     ensureCaddy: (dataPath: string) => Promise<string>;
+    resolveDomain: (domain: string) => Promise<ResolvedDomain>;
+    dial: (address: string) => Promise<{ peerId: string }>;
     certificateTimeoutMs?: number;
 }
 
-export const realSetupDependencies = (): Pick<SetupDependencies, "discoverRouter" | "probePort" | "findHolder" | "publicIpsFromInterfaces" | "lanIpv4" | "ensureCaddy"> => ({
+export const realSetupDependencies = (): Pick<SetupDependencies, "discoverRouter" | "probePort" | "findHolder" | "publicIpsFromInterfaces" | "lanIpv4" | "ensureCaddy" | "resolveDomain" | "dial"> => ({
     discoverRouter: () => discoverNatRouter(),
     probePort: (port) => probeTcpPort(port),
     findHolder: (port) => findPortHolder(port),
     publicIpsFromInterfaces: () => publicIpsFromInterfaces(),
     lanIpv4: () => lanIpv4FromInterfaces(),
-    ensureCaddy: (dataPath) => ensureCaddyBinary(dataPath)
+    ensureCaddy: (dataPath) => ensureCaddyBinary(dataPath),
+    resolveDomain: resolveDomainRecords,
+    dial: (address) => dialWithLibp2p(address)
 });
+
+// Asks DNS itself rather than the OS resolver, so a hosts-file entry cannot make a stale record look right.
+export async function resolveDomainRecords(domain: string): Promise<ResolvedDomain> {
+    const [v4, v6] = await Promise.all([dns.resolve4(domain).catch(() => [] as string[]), dns.resolve6(domain).catch(() => [] as string[])]);
+    return { v4, v6 };
+}
+
+export function domainAnnounceAddress(domain: string, port: number, records: ResolvedDomain): string {
+    const protocol = records.v4.length === 0 && records.v6.length > 0 ? "dns6" : "dns4";
+    return `/${protocol}/${domain}/tcp/${port}/tls/ws`;
+}
+
+export function domainPointsHere(records: ResolvedDomain, publicIps: string[]): boolean {
+    return [...records.v4, ...records.v6].some((resolved) => publicIps.some((ip) => isSameCertificateName(resolved, ip)));
+}
+
+// Only a browser-dialable shape is worth announcing, and the dial below needs to add our own /p2p part.
+export function assertAnnounceShape(address: string) {
+    if (!/\/(tls\/ws|wss)$/.test(address)) throw new SetupRefusedError(`--announce must end in /tls/ws or /wss so browsers can dial it: ${address}`);
+}
 
 // CI must never spend real Let's Encrypt rate limit, whatever a workflow or test passes in.
 export function assertAcmeDirectoryAllowed(directory: string, isCi: boolean) {
@@ -246,81 +285,146 @@ async function restartAndVerifyKubo(config: ReachabilityConfig, restart: boolean
 export async function runReachabilitySetup(options: SetupOptions, deps: SetupDependencies): Promise<ReachabilityConfig> {
     const acmeDirectory = chooseAcmeDirectory(options);
     assertAcmeDirectoryAllowed(acmeDirectory, deps.isCi);
+    if (options.announce) assertAnnounceShape(options.announce);
 
     const previous = await readReachabilityConfig(options.dataPath);
     const httpsPort = options.overrides?.httpsPort ?? 443;
     const wsPort = await chooseWsPort(previous);
     const caddyAdminPort = previous?.caddyAdminPort ?? (await freePort());
+    let domain = options.domain ?? previous?.domain;
+    if (domain && !isValidDomain(domain)) throw new SetupRefusedError(`Not a valid domain name: ${domain}`);
 
     const { publicIps, refused, sawCgnat } = await discoverPublicIps(options, deps);
     if (publicIps.length > 0) deps.log(`Public addresses: ${publicIps.join(", ")}`);
 
     const ourCaddyRunning = await adminUp(caddyAdminPort);
     const portState = ourCaddyRunning ? "free" : await deps.probePort(httpsPort);
-    let issuedIps: string[] = [];
-    let unreachableReason: string | undefined;
+    const portBusy = portState === "busy";
+    const holder = portBusy ? await deps.findHolder(httpsPort) : undefined;
+    if (portBusy) deps.warn(busyPortMessage(holder));
 
-    if (publicIps.length === 0) {
-        unreachableReason = sawCgnat ? "this network is behind carrier-grade NAT and has no global IPv6" : "no public IPv4 or global IPv6 address was found";
-    } else if (portState === "busy") {
-        deps.warn(busyPortMessage(await deps.findHolder(httpsPort)));
-        unreachableReason = "TCP 443 is in use by another program";
-    } else {
-        deps.log(ACME_NOTICE);
-        const spec: CaddyfileSpec = {
-            ips: publicIps,
-            domains: [],
-            wsPort,
-            adminPort: caddyAdminPort,
-            dataDirectory: caddyDataDir(options.dataPath),
-            acmeDirectory,
-            ...(options.overrides?.httpsPort ? { httpsPort: options.overrides.httpsPort } : {}),
-            ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}),
-            ...(options.overrides?.acmeTrustedRootsPath ? { acmeTrustedRootsPath: options.overrides.acmeTrustedRootsPath } : {})
-        };
-        const { issued, failure } = await issueCertificates(spec, publicIps, options, deps);
-        issuedIps = issued;
-        if (issuedIps.length === 0) unreachableReason = failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443";
-        // Keep only what worked, so the daemon's Caddy does not retry a name forever.
-        await fs.writeFile(caddyfilePath(options.dataPath), generateCaddyfile({ ...spec, ips: issuedIps }));
+    // Path B is what is left when the IP certificate cannot work, so that is when it is worth asking.
+    if (!domain && !options.announce && deps.ask && (portBusy || publicIps.length === 0)) {
+        const answer = (await deps.ask("Domain name pointing at this machine (Enter to skip):")).trim();
+        if (answer) {
+            if (!isValidDomain(answer)) throw new SetupRefusedError(`Not a valid domain name: ${answer}`);
+            domain = answer;
+        }
     }
+
+    let records: ResolvedDomain = { v4: [], v6: [] };
+    let domainUsable = domain !== undefined;
+    if (domain) {
+        records = await deps.resolveDomain(domain);
+        if (!domainPointsHere(records, publicIps)) {
+            const message = dnsMismatchMessage(domain, [...records.v4, ...records.v6], publicIps);
+            // Refuse what the operator asked for now. A stored name going stale must not block repairing
+            // the rest, so it only sits out this run, and is still stored for when its DNS is fixed.
+            if (options.domain && !options.force) throw new SetupRefusedError(message);
+            deps.warn(message);
+            if (options.force) deps.warn("Continuing because of --force.");
+            else domainUsable = false;
+        }
+    }
+
+    const certificateNames = portBusy ? [] : [...publicIps, ...(domain && domainUsable ? [domain] : [])];
+    let issued: string[] = [];
+    let failure: string | undefined;
+    const spec: CaddyfileSpec = {
+        ips: publicIps,
+        domains: domain && domainUsable ? [domain] : [],
+        wsPort,
+        adminPort: caddyAdminPort,
+        dataDirectory: caddyDataDir(options.dataPath),
+        acmeDirectory,
+        ...(options.overrides?.httpsPort ? { httpsPort: options.overrides.httpsPort } : {}),
+        ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}),
+        ...(options.overrides?.acmeTrustedRootsPath ? { acmeTrustedRootsPath: options.overrides.acmeTrustedRootsPath } : {})
+    };
+    if (certificateNames.length > 0) {
+        deps.log(ACME_NOTICE);
+        const result = await issueCertificates(spec, certificateNames, options, deps);
+        issued = result.issued;
+        failure = result.failure;
+        // Keep only what worked, so the daemon's Caddy does not retry a name forever.
+        await fs.writeFile(
+            caddyfilePath(options.dataPath),
+            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && issued.includes(domain) ? [domain] : [] })
+        );
+    }
+    const issuedIps = publicIps.filter((ip) => issued.includes(ip));
+    const domainIssued = domain !== undefined && issued.includes(domain);
+    if (domain && domainUsable && !portBusy && !domainIssued) deps.warn(`No certificate was issued for ${domain}. ${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443 through that name."}`);
 
     if (issuedIps.length > 0 && issuedIps.every((ip) => net.isIPv6(ip))) deps.warn(IPV6_ONLY_CAVEAT);
-    if (!publicIps.some((ip) => net.isIPv6(ip)) && issuedIps.length > 0) deps.log(NO_IPV6_HINT);
-    if (issuedIps.length === 0 && unreachableReason) {
-        const portHint = refused.length > 0 ? `${unreachableReason}; the router refused ${refused.join(", ")}` : unreachableReason;
-        deps.warn(unreachableStatement(portHint));
-    }
-    if (deps.platform === "win32" && issuedIps.length > 0) deps.log(windowsFirewallGuidance());
+    if (issuedIps.length > 0 && !publicIps.some((ip) => net.isIPv6(ip))) deps.log(NO_IPV6_HINT);
+    if (deps.platform === "win32" && issued.length > 0) deps.log(windowsFirewallGuidance());
 
-    const announce = issuedIps.map((ip) => announceForIp(ip, httpsPort));
-    const { config, kuboConfigChanged } = await applyKuboConfig(
-        {
+    const buildConfig = (externalAnnounce: string[]): ReachabilityConfig => {
+        const announce = [
+            ...issuedIps.map((ip) => announceForIp(ip, httpsPort)),
+            ...(domain && domainIssued ? [domainAnnounceAddress(domain, httpsPort, records)] : []),
+            ...externalAnnounce
+        ];
+        return {
             version: 1,
             enabled: true,
-            mode: deriveMode({ ip: issuedIps.length > 0, domain: false, proxy: false }),
+            mode: deriveMode({ ip: issuedIps.length > 0, domain: domainIssued, proxy: externalAnnounce.length > 0 }),
             wsPort,
             announce,
             publicIps: issuedIps,
+            ...(domain ? { domain } : {}),
+            ...(externalAnnounce.length > 0 ? { externalAnnounce } : {}),
             staging: options.staging,
             acmeDirectory,
             caddyAdminPort,
             ...(options.overrides?.httpsPort ? { httpsPort: options.overrides.httpsPort } : {}),
             ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}),
-            ...(options.overrides?.acmeTrustedRootsPath ? { acmeTrustedRootsPath: options.overrides.acmeTrustedRootsPath } : {}),
-            ...(previous?.kuboEdits ? { kuboEdits: previous.kuboEdits } : {})
-        },
-        options,
-        true
-    );
-    await restartAndVerifyKubo(config, kuboConfigChanged, options, deps);
+            ...(options.overrides?.acmeTrustedRootsPath ? { acmeTrustedRootsPath: options.overrides.acmeTrustedRootsPath } : {})
+        };
+    };
 
-    if (announce.length > 0) {
-        deps.log("Announced browser addresses:");
-        for (const address of announce) deps.log(`  ${address}`);
-        deps.log(testCommandHint(issuedIps[0]!, httpsPort));
-    } else {
-        deps.log("WebTransport on UDP 443 is configured. No WSS address is announced.");
+    // The listeners go first: the operator's proxy has nothing to forward to until kubo has its ws port.
+    let externalAnnounce = previous?.externalAnnounce ?? [];
+    let applied = await applyKuboConfig({ ...buildConfig(externalAnnounce), ...(previous?.kuboEdits ? { kuboEdits: previous.kuboEdits } : {}) }, options, true);
+    await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
+
+    if (options.announce) {
+        const identity = await kuboIdentity(options.kuboRpcUrl);
+        if (!identity) throw new SetupRefusedError("--announce is verified by dialling this node through it, so the daemon must be running.");
+        try {
+            await deps.dial(`${options.announce}/p2p/${identity.peerId}`);
+        } catch (error) {
+            throw new SetupRefusedError(`Could not complete a libp2p handshake with this node through ${options.announce}, so it was not announced: ${(error as Error).message}`);
+        }
+        deps.log(`Verified ${options.announce} with a libp2p handshake.`);
+        externalAnnounce = [...new Set([...externalAnnounce, options.announce])];
+        applied = await applyKuboConfig({ ...buildConfig(externalAnnounce), ...(applied.config.kuboEdits ? { kuboEdits: applied.config.kuboEdits } : {}) }, options, true);
+        await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
     }
+    const { config } = applied;
+
+    if (config.announce.length > 0) {
+        deps.log("Announced browser addresses:");
+        for (const address of config.announce) deps.log(`  ${address}`);
+        const testHost = issuedIps[0] ?? (domainIssued ? domain : undefined);
+        if (testHost) deps.log(testCommandHint(testHost, httpsPort));
+        return config;
+    }
+
+    deps.log("WebTransport on UDP 443 is configured. No WSS address is announced.");
+    if (portBusy && domain) {
+        deps.log(reverseProxySnippet(holder, domain, wsPort));
+        if (!deps.confirm) throw new NeedsAnswerError(`Set up the reverse proxy above, then rerun setup with --announce. kubo is listening on 127.0.0.1:${wsPort}.`);
+        return config;
+    }
+    const reason = portBusy
+        ? "TCP 443 is in use by another program and no domain was given"
+        : publicIps.length === 0
+          ? sawCgnat
+              ? "this network is behind carrier-grade NAT and has no global IPv6"
+              : "no public IPv4 or global IPv6 address was found"
+          : (failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443");
+    deps.warn(unreachableStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
     return config;
 }

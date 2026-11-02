@@ -67,3 +67,47 @@ export const unreachableStatement = (reason: string) =>
 export const testCommandHint = (host: string, port: number) =>
     "Test from another network while the daemon runs (expect 101):\n" +
     `  curl -sS --http1.1 -o /dev/null -w '%{http_code}\\n' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://${host.includes(":") ? `[${host}]` : host}${port === 443 ? "" : `:${port}`}/`;
+
+export function reverseProxySnippet(holder: PortHolder | undefined, domain: string, wsPort: number): string {
+    const nginx = [
+        "server {",
+        "    listen 443 ssl;",
+        `    server_name ${domain};`,
+        "    # ssl_certificate and ssl_certificate_key as for your other sites",
+        "    location / {",
+        `        proxy_pass http://127.0.0.1:${wsPort};`,
+        "        proxy_http_version 1.1;",
+        "        proxy_set_header Upgrade $http_upgrade;",
+        '        proxy_set_header Connection "upgrade";',
+        "        proxy_set_header Host $host;",
+        "        proxy_read_timeout 86400s;",
+        "    }",
+        "}"
+    ].join(EOL);
+    const apache = [
+        "<VirtualHost *:443>",
+        `    ServerName ${domain}`,
+        "    # SSLEngine and certificate lines as for your other sites",
+        "    RewriteEngine On",
+        "    RewriteCond %{HTTP:Upgrade} =websocket [NC]",
+        `    RewriteRule /(.*) ws://127.0.0.1:${wsPort}/$1 [P,L]`,
+        "</VirtualHost>",
+        "# requires: a2enmod proxy proxy_wstunnel rewrite ssl"
+    ].join(EOL);
+    const caddy = `${domain} {${EOL}    reverse_proxy 127.0.0.1:${wsPort}${EOL}}`;
+    const snippet = holder === "apache" ? apache : holder === "caddy" ? caddy : nginx;
+    const server = holder === "apache" ? "Apache" : holder === "caddy" ? "Caddy" : "nginx";
+    const intro =
+        holder === "apache" || holder === "caddy" || holder === "nginx"
+            ? `Add this to ${server} so it forwards ${domain} to kubo:`
+            : `Forward ${domain} to kubo with WebSocket upgrades through your server on port 443. For example, in nginx:`;
+    return [intro, "", snippet, "", `Then run: bitsocial reachability setup --domain ${domain} --announce /dns4/${domain}/tcp/443/tls/ws`].join(EOL);
+}
+
+export const dnsMismatchMessage = (domain: string, resolved: string[], publicIps: string[]) =>
+    [
+        `${domain} does not point at this machine.`,
+        `  It resolves to: ${resolved.join(", ") || "nothing"}`,
+        `  This machine's public addresses: ${publicIps.join(", ") || "none found"}`,
+        "Fix the DNS record, or pass --force if a proxy in front of this machine is meant to answer for it."
+    ].join(EOL);

@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
-import { bindDeniedGuidance, busyPortMessage, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
-import { assertAcmeDirectoryAllowed, chooseAcmeDirectory, deriveMode, discoverPublicIps, type SetupDependencies, type SetupOptions } from "../../src/reachability/setup.js";
+import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
+import {
+    assertAcmeDirectoryAllowed,
+    assertAnnounceShape,
+    chooseAcmeDirectory,
+    deriveMode,
+    discoverPublicIps,
+    domainAnnounceAddress,
+    domainPointsHere,
+    type SetupDependencies,
+    type SetupOptions
+} from "../../src/reachability/setup.js";
 
 describe("ACME directory", () => {
     it("is production by default and staging on request", () => {
@@ -100,5 +110,59 @@ describe("discoverPublicIps", () => {
 
     it("finds nothing with no public IP and no router", async () => {
         expect((await discoverPublicIps(options, deps({}))).publicIps).toEqual([]);
+    });
+});
+
+describe("Path B checks", () => {
+    it("matches a domain on any of its records", () => {
+        expect(domainPointsHere({ v4: ["93.184.216.34"], v6: [] }, ["93.184.216.34"])).toBe(true);
+        expect(domainPointsHere({ v4: ["1.1.1.1"], v6: ["2606:4700:0:0::1"] }, ["2606:4700::1"])).toBe(true);
+    });
+
+    it("does not match another address or an empty result", () => {
+        expect(domainPointsHere({ v4: ["1.1.1.1"], v6: [] }, ["93.184.216.34"])).toBe(false);
+        expect(domainPointsHere({ v4: [], v6: [] }, ["93.184.216.34"])).toBe(false);
+    });
+
+    it("shows both sides of a mismatch and names --force", () => {
+        const message = dnsMismatchMessage("node.example", ["1.1.1.1"], ["93.184.216.34"]);
+        expect(message).toContain("1.1.1.1");
+        expect(message).toContain("93.184.216.34");
+        expect(message).toContain("--force");
+    });
+
+    it("announces dns4 unless the name has only AAAA records", () => {
+        expect(domainAnnounceAddress("node.example", 443, { v4: ["1.1.1.1"], v6: ["2606:4700::1"] })).toBe("/dns4/node.example/tcp/443/tls/ws");
+        expect(domainAnnounceAddress("node.example", 443, { v4: [], v6: ["2606:4700::1"] })).toBe("/dns6/node.example/tcp/443/tls/ws");
+        expect(domainAnnounceAddress("node.example", 443, { v4: [], v6: [] })).toBe("/dns4/node.example/tcp/443/tls/ws");
+    });
+
+    it.each(["/dns4/node.example/tcp/443/tls/ws", "/ip4/93.184.216.34/tcp/443/wss"])("accepts %s for --announce", (address) => {
+        expect(() => assertAnnounceShape(address)).not.toThrow();
+    });
+
+    it.each(["/ip4/93.184.216.34/tcp/4001", "/dns4/node.example/tcp/80/ws", "/ip4/93.184.216.34/udp/443/quic-v1/webtransport"])("rejects %s for --announce", (address) => {
+        expect(() => assertAnnounceShape(address)).toThrow(/--announce/);
+    });
+});
+
+describe("reverseProxySnippet", () => {
+    it.each([
+        ["nginx", "proxy_pass http://127.0.0.1:4002;"],
+        ["apache", "ws://127.0.0.1:4002/"],
+        ["caddy", "reverse_proxy 127.0.0.1:4002"]
+    ] as const)("%s forwards to kubo's loopback ws port", (holder, expected) => {
+        const snippet = reverseProxySnippet(holder, "node.example", 4002);
+        expect(snippet).toContain(expected);
+        expect(snippet).toContain("node.example");
+        expect(snippet).toContain("--announce /dns4/node.example/tcp/443/tls/ws");
+    });
+
+    it("gives nginx as the example for an unknown server", () => {
+        expect(reverseProxySnippet(undefined, "node.example", 4002)).toContain("For example, in nginx");
+    });
+
+    it("carries the upgrade headers nginx does not forward by default", () => {
+        expect(reverseProxySnippet("nginx", "node.example", 4002)).toContain("proxy_set_header Upgrade $http_upgrade");
     });
 });

@@ -105,6 +105,7 @@ export interface CaddyfileSpec {
 
 // Hostnames reach the Caddyfile from --domain, so anything but a plain name must not get through:
 // a space, brace or newline would let the value add directives of its own.
+export const isValidDomain = (domain: string) => HOSTNAME_PATTERN.test(domain);
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
 
 const assertPort = (label: string, port: number) => {
