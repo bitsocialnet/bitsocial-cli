@@ -1,5 +1,6 @@
 import { X509Certificate } from "crypto";
 import fs from "fs/promises";
+import net from "net";
 import path from "path";
 import type { KuboEditRecord } from "./kubo-config.js";
 
@@ -19,6 +20,7 @@ export interface ReachabilityConfig {
     publicIps: string[];
     domain?: string;
     staging: boolean;
+    acmeDirectory: string;
     kuboEdits?: KuboEditRecord;
 }
 
@@ -74,6 +76,7 @@ function assertValidConfig(parsed: any, configPath: string): asserts parsed is R
     if (!isStringArray(parsed.publicIps)) fail("publicIps must be a list of IP addresses");
     if (parsed.domain !== undefined && typeof parsed.domain !== "string") fail("domain must be a string");
     if (typeof parsed.staging !== "boolean") fail("staging must be a boolean");
+    if (typeof parsed.acmeDirectory !== "string") fail("acmeDirectory must be a URL");
 }
 
 async function readJsonIfExists(filePath: string): Promise<unknown> {
@@ -114,13 +117,54 @@ export const writeReachabilityConfig = (dataPath: string, config: ReachabilityCo
 export const writeReachabilityRuntimeStatus = (dataPath: string, status: ReachabilityRuntimeStatus) =>
     writeJsonAtomic(reachabilityRuntimeStatusPath(dataPath), status);
 
+const isPlainObject = (value: unknown): value is Record<string, any> => value !== null && typeof value === "object" && !Array.isArray(value);
+
+function isRuntimeStatus(value: unknown): value is ReachabilityRuntimeStatus {
+    if (!isPlainObject(value) || typeof value["updatedAt"] !== "string") return false;
+    const { lastIpCheck, domains, caddy } = value;
+    if (lastIpCheck !== undefined && !(isPlainObject(lastIpCheck) && typeof lastIpCheck["at"] === "string" && isStringArray(lastIpCheck["publicIps"])))
+        return false;
+    if (domains !== undefined) {
+        if (!isPlainObject(domains)) return false;
+        for (const domain of Object.values(domains))
+            if (!isPlainObject(domain) || typeof domain["lastCheckAt"] !== "string" || typeof domain["ok"] !== "boolean") return false;
+    }
+    return caddy === undefined || (isPlainObject(caddy) && typeof caddy["running"] === "boolean");
+}
+
 // Status must keep working when this file is damaged: it only holds the last check results.
 async function readRuntimeStatus(dataPath: string): Promise<ReachabilityRuntimeStatus | null> {
     try {
-        return ((await readJsonIfExists(reachabilityRuntimeStatusPath(dataPath))) as ReachabilityRuntimeStatus | undefined) ?? null;
+        const parsed = await readJsonIfExists(reachabilityRuntimeStatusPath(dataPath));
+        return isRuntimeStatus(parsed) ? parsed : null;
     } catch {
         return null;
     }
+}
+
+// The directory name Caddy stores a CA's certificates under.
+export function acmeIssuerKey(acmeDirectory: string): string {
+    const url = new URL(acmeDirectory);
+    return `${url.host}${url.pathname}`.replace(/[:/]/g, "-");
+}
+
+// Certificate SANs and operator input spell the same IPv6 address differently, so compare as addresses.
+export function isSameCertificateName(a: string, b: string): boolean {
+    if (net.isIPv6(a) && net.isIPv6(b)) {
+        const blockList = new net.BlockList();
+        blockList.addAddress(a, "ipv6");
+        return blockList.check(b, "ipv6");
+    }
+    return a.toLowerCase() === b.toLowerCase();
+}
+
+// What the node serves now. Caddy keeps certificates for old addresses and other CAs until they expire,
+// and treating those as current would misreport expiry, or let a staging certificate pass for a real one.
+export function currentCertificates(certificates: CertificateInfo[], acmeDirectory: string, names: string[]): CertificateInfo[] {
+    const issuer = acmeIssuerKey(acmeDirectory);
+    return certificates.filter(
+        (certificate) => certificate.issuer === issuer && certificate.names.some((held) => names.some((name) => isSameCertificateName(held, name)))
+    );
 }
 
 function certificateNames(certificate: X509Certificate): string[] {
@@ -162,7 +206,9 @@ export async function readIssuedCertificates(dataPath: string, now: Date = new D
 
 export async function readReachabilityStatus(dataPath: string, now: Date = new Date()): Promise<ReachabilityStatus> {
     const config = await readReachabilityConfig(dataPath);
-    const [certificates, lastChecks] = await Promise.all([readIssuedCertificates(dataPath, now), readRuntimeStatus(dataPath)]);
+    const [allCertificates, lastChecks] = await Promise.all([readIssuedCertificates(dataPath, now), readRuntimeStatus(dataPath)]);
+    const names = config ? [...config.publicIps, ...(config.domain ? [config.domain] : [])] : [];
+    const certificates = config ? currentCertificates(allCertificates, config.acmeDirectory, names) : [];
     return {
         configured: config !== undefined,
         enabled: config?.enabled ?? false,

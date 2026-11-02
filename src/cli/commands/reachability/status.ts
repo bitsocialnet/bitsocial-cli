@@ -36,6 +36,11 @@ export default class Status extends Command {
             const { at, publicIps } = status.lastChecks.lastIpCheck;
             this.log(`Last IP check: ${at} (${publicIps.join(", ") || "no public IP found"})`);
         }
+        for (const [domain, check] of Object.entries(status.lastChecks?.domains ?? {})) {
+            const state = check.ok ? "ok" : `failing since ${check.failingSince ?? check.lastCheckAt}`;
+            this.log(`Domain check ${domain}: ${state}${check.droppedFromAnnounce ? ", no longer announced" : ""} (checked ${check.lastCheckAt})`);
+        }
+        if (status.lastChecks?.caddy) this.log(`Caddy: ${status.lastChecks.caddy.running ? "running" : "not running"}`);
         return status;
     }
 }

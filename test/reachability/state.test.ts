@@ -3,6 +3,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import {
+    acmeIssuerKey,
     caddyDataDir,
     readIssuedCertificates,
     readReachabilityConfig,
@@ -36,7 +37,8 @@ const validConfig = (): ReachabilityConfig => ({
     wsPort: 4002,
     announce: ["/ip4/203.0.113.7/tcp/443/tls/ws"],
     publicIps: ["203.0.113.7"],
-    staging: false
+    staging: false,
+    acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory"
 });
 
 const writeRawConfig = async (dataPath: string, content: string) => {
@@ -89,11 +91,22 @@ describe("reachability config file", () => {
         ["announce not a list", { announce: "/ip4/1.1.1.1" }],
         ["publicIps holding a number", { publicIps: [1] }],
         ["domain not a string", { domain: 5 }],
-        ["staging missing", { staging: undefined }]
+        ["staging missing", { staging: undefined }],
+        ["acmeDirectory missing", { acmeDirectory: undefined }]
     ])("rejects %s", async (_label, overrides) => {
         const dataPath = randomDirectory();
         await writeRawConfig(dataPath, JSON.stringify({ ...validConfig(), ...overrides }));
         await expect(readReachabilityConfig(dataPath)).rejects.toThrow(/Invalid reachability config/);
+    });
+});
+
+describe("acmeIssuerKey", () => {
+    it.each([
+        ["https://acme-v02.api.letsencrypt.org/directory", "acme-v02.api.letsencrypt.org-directory"],
+        ["https://acme-staging-v02.api.letsencrypt.org/directory", "acme-staging-v02.api.letsencrypt.org-directory"],
+        ["https://127.0.0.1:38443/dir", "127.0.0.1-38443-dir"]
+    ])("%s is stored by Caddy under %s", (directory, key) => {
+        expect(acmeIssuerKey(directory)).toBe(key);
     });
 });
 
@@ -146,6 +159,37 @@ describe("reachability status", () => {
         expect(status).toMatchObject({ configured: true, enabled: false, mode: "ip", addresses: [] });
     });
 
+    it("lists only certificates for the current addresses from the configured CA", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityConfig(dataPath, validConfig());
+        await installCertificate(dataPath, "203.0.113.7", "acme-staging-v02.api.letsencrypt.org-directory");
+        expect((await readReachabilityStatus(dataPath)).certificates).toEqual([]);
+        await installCertificate(dataPath, "203.0.113.7");
+        const { certificates } = await readReachabilityStatus(dataPath);
+        expect(certificates.map((certificate) => certificate.issuer)).toEqual(["acme-v02.api.letsencrypt.org-directory"]);
+    });
+
+    it("drops a certificate for an address we no longer hold", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityConfig(dataPath, { ...validConfig(), publicIps: ["198.51.100.9"], announce: [] });
+        await installCertificate(dataPath);
+        expect((await readReachabilityStatus(dataPath)).certificates).toEqual([]);
+    });
+
+    it("matches an IPv6 address however it is spelled", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityConfig(dataPath, { ...validConfig(), publicIps: ["2001:0db8:0:0::7"] });
+        await installCertificate(dataPath);
+        expect((await readReachabilityStatus(dataPath)).certificates).toHaveLength(1);
+    });
+
+    it("matches the configured domain case-insensitively", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityConfig(dataPath, { ...validConfig(), publicIps: [], domain: "NODE.example" });
+        await installCertificate(dataPath);
+        expect((await readReachabilityStatus(dataPath)).certificates).toHaveLength(1);
+    });
+
     it("includes the daemon's last checks", async () => {
         const dataPath = randomDirectory();
         await writeReachabilityConfig(dataPath, validConfig());
@@ -154,10 +198,18 @@ describe("reachability status", () => {
         expect((await readReachabilityStatus(dataPath)).lastChecks).toEqual(lastChecks);
     });
 
-    it("survives a damaged runtime status file", async () => {
+    it.each([
+        ["broken JSON", "{ broken"],
+        ["a list", "[]"],
+        ["no updatedAt", JSON.stringify({ lastIpCheck: { at: "x", publicIps: [] } })],
+        ["publicIps not a list", JSON.stringify({ updatedAt: "x", lastIpCheck: { at: "x", publicIps: "1.1.1.1" } })],
+        ["domains not an object", JSON.stringify({ updatedAt: "x", domains: [] })],
+        ["a malformed domain entry", JSON.stringify({ updatedAt: "x", domains: { a: { ok: "yes" } } })],
+        ["caddy.running not a boolean", JSON.stringify({ updatedAt: "x", caddy: { running: 1 } })]
+    ])("treats a runtime status file with %s as no checks yet", async (_label, content) => {
         const dataPath = randomDirectory();
         await writeReachabilityConfig(dataPath, validConfig());
-        await fs.writeFile(reachabilityRuntimeStatusPath(dataPath), "{ broken");
+        await fs.writeFile(reachabilityRuntimeStatusPath(dataPath), content);
         expect((await readReachabilityStatus(dataPath)).lastChecks).toBeNull();
     });
 });
