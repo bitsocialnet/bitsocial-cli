@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.120 (2026-11-02)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.133 ([ae55002](https://github.com/bitsocialnet/bitsocial-cli/commit/ae55002))
+  * pkc-js [0.0.133](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.133) (2026-11-02)
+    * fix(community): finish a rename before restarting so its cycle can't race the postUpdates move ([#470](https://github.com/pkcprotocol/pkc-js/issues/470)) ([b335791](https://github.com/pkcprotocol/pkc-js/commit/b3357912c7ad0b0ec029ef0cc82c62fc33ce74f2)), closes [#469](https://github.com/pkcprotocol/pkc-js/issues/469) [#469](https://github.com/pkcprotocol/pkc-js/issues/469) [#469](https://github.com/pkcprotocol/pkc-js/issues/469) [#469](https://github.com/pkcprotocol/pkc-js/issues/469)
+    * fix(signatures): reject forged CommentUpdate.edit (other comment, unsigned fields, cache) ([#474](https://github.com/pkcprotocol/pkc-js/issues/474)) ([1acb264](https://github.com/pkcprotocol/pkc-js/commit/1acb26404dd0b5317b880351102e564bf05a9c50)), closes [#473](https://github.com/pkcprotocol/pkc-js/issues/473)
+
 ## <small>0.19.119 (2026-10-30)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.132 ([65f0a48](https://github.com/bitsocialnet/bitsocial-cli/commit/65f0a48))
