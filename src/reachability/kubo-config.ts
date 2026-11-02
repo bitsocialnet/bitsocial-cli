@@ -40,10 +40,14 @@ const shapeOf = (value: unknown): OriginalShape => (value === undefined ? "absen
 
 const withoutEntries = (list: unknown, entries: string[]) => (Array.isArray(list) ? list.filter((entry) => !entries.includes(entry)) : list);
 
-// Puts an emptied container back the way we found it. A list the operator has since added to stays.
+// Puts an emptied list or section back the way we found it. A list the operator has since added to stays.
 const restoreShape = (parent: any, key: string, shape: OriginalShape) => {
     const value = parent[key];
-    const isEmpty = value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+    const isEmpty =
+        value === null ||
+        value === undefined ||
+        (Array.isArray(value) && value.length === 0) ||
+        (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
     if (!isEmpty || shape === "present") return;
     if (shape === "absent") delete parent[key];
     else parent[key] = null;
@@ -55,7 +59,7 @@ function undoListEdits(config: any, edits: KuboEditRecord) {
         config.Addresses.AppendAnnounce = withoutEntries(config.Addresses.AppendAnnounce, edits.addedAppendAnnounce);
         restoreShape(config.Addresses, "Swarm", edits.swarmListShape);
         restoreShape(config.Addresses, "AppendAnnounce", edits.appendAnnounceListShape);
-        if (edits.addressesShape === "absent" && Object.keys(config.Addresses).length === 0) delete config.Addresses;
+        restoreShape(config, "Addresses", edits.addressesShape);
     }
     if (edits.removedAddrFilters.length > 0 && config.Swarm) {
         const restored = edits.removedAddrFilters.map(({ entry }) => entry);
@@ -71,7 +75,7 @@ function restoreAutoTls(config: any, autoTls: KuboEditRecord["autoTls"]) {
     if (config.AutoTLS?.Enabled !== false) return;
     if (autoTls.enabledShape === "absent") delete config.AutoTLS.Enabled;
     else config.AutoTLS.Enabled = autoTls.enabled;
-    if (autoTls.sectionShape === "absent" && Object.keys(config.AutoTLS).length === 0) delete config.AutoTLS;
+    restoreShape(config, "AutoTLS", autoTls.sectionShape);
 }
 
 const appendMissing = (existing: string[], entries: string[]) => {
