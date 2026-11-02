@@ -216,6 +216,7 @@ export async function discoverPublicIps(
 async function issueCertificates(
     spec: CaddyfileSpec,
     names: string[],
+    caChanged: boolean,
     options: SetupOptions,
     deps: SetupDependencies
 ): Promise<{ issued: string[]; failure?: string }> {
@@ -225,8 +226,23 @@ async function issueCertificates(
     await fs.writeFile(caddyfilePath(options.dataPath), caddyfile);
 
     const timeoutMs = deps.certificateTimeoutMs ?? 90_000;
-    if (await isOurCaddyRunning(spec.adminPort, options.dataPath)) {
+    let running = await isOurCaddyRunning(spec.adminPort, options.dataPath);
+    if (running && caChanged) {
+        // A reload keeps serving the old CA's cached certificate and orders nothing, so moving CA needs a
+        // restart. A running daemon brings Caddy back within seconds, from the Caddyfile written above.
+        await stopCaddy(spec.adminPort);
+        const stoppedBy = Date.now() + 5000;
+        while (Date.now() < stoppedBy && (await isOurCaddyRunning(spec.adminPort, options.dataPath))) await new Promise((resolve) => setTimeout(resolve, 200));
+        running = false;
+        const respawnedBy = Date.now() + 7000;
+        while (!running && Date.now() < respawnedBy) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            running = await isOurCaddyRunning(spec.adminPort, options.dataPath);
+        }
+    } else if (running) {
         await reloadCaddy(spec.adminPort, caddyfile);
+    }
+    if (running) {
         const { issued } = await waitForCertificates(options.dataPath, spec.acmeDirectory, names, timeoutMs);
         return { issued };
     }
@@ -376,7 +392,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     };
     if (certificateNames.length > 0) {
         deps.log(ACME_NOTICE);
-        const result = await issueCertificates(spec, certificateNames, options, deps);
+        const result = await issueCertificates(spec, certificateNames, previous !== undefined && previous.acmeDirectory !== acmeDirectory, options, deps);
         issued = result.issued;
         failure = result.failure;
         // Keep only what worked, so the daemon's Caddy does not retry a name forever.

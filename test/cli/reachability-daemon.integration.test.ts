@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import { allocateFreePort, ensureKuboNodeStopped, startPkcDaemonWithDynamicPorts, stopPkcDaemon, waitForCondition, type DynamicDaemonResult } from "../helpers/daemon-helpers.js";
 import { startPebble, type RunningPebble } from "../helpers/pebble.js";
+import { acmeIssuerKey } from "../../src/reachability/state.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -147,6 +148,28 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
             return outcome.peerId === peerId;
         }, 60_000, 1000);
         expect(reached, JSON.stringify(outcome)).toBe(true);
+    });
+
+    // A reload keeps serving the old CA's cached certificate and orders nothing, as a live move from
+    // Let's Encrypt staging to production showed. Moving CA has to restart Caddy.
+    it("moving to another CA on a running daemon obtains a certificate from it", async () => {
+        const secondCa = await startPebble(randomDirectory());
+        try {
+            const cliEnv = { ...env, KUBO_RPC_URL: daemon.kuboRpcUrl, IPFS_GATEWAY_URL: daemon.gatewayUrl, BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: secondCa.directoryUrl };
+            const result = await runCli(["reachability", "setup", "--non-interactive", "--pkcOptions.dataPath", dataPath], cliEnv);
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+            const status = JSON.parse((await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], cliEnv)).stdout);
+            expect(status.addresses, `${result.stdout}\n${result.stderr}`).toEqual([`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`]);
+            expect(status.certificates.map((certificate: { issuer: string }) => certificate.issuer)).toEqual([acmeIssuerKey(secondCa.directoryUrl)]);
+            let outcome: { peerId?: string; error?: string } = {};
+            const reached = await waitForCondition(async () => {
+                outcome = await dial(address(), secondCa.issuingRootPath);
+                return outcome.peerId === peerId;
+            }, 60_000, 1000);
+            expect(reached, JSON.stringify(outcome)).toBe(true);
+        } finally {
+            await secondCa.stop();
+        }
     });
 
     it("stops Caddy when the daemon shuts down", async () => {

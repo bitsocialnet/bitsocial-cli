@@ -144,7 +144,6 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. On kubo t
 
 ## Known limits
 
-- **Staging to production on a running Caddy.** `setup` reloads a running Caddy, which keeps serving the cached staging certificate and orders nothing. Until this is fixed, run `disable` first, then `setup` without `--staging`.
 - **NAT-PMP is not supported**, only UPnP, and a machine forwarded by hand may not find its public IP. See [#210](https://github.com/bitsocialnet/bitsocial-cli/issues/210).
 - **IPv4 and IPv6 get separate certificates**, because Caddy obtains one per address.
 
@@ -162,6 +161,8 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. On kubo t
 | `auto_https disable_redirects` | Otherwise Caddy binds TCP 80 and fails to start if anything holds it |
 | `default_sni <ip>` | Browsers send no SNI for an IP, and behind NAT the local address is not the public IP |
 | Explicit `issuer acme { dir }` | Let's Encrypt only, with no implicit fallback CA |
+
+**Moving CA needs a restart.** A reload keeps serving the old CA's cached certificate and orders nothing, so `setup` stops Caddy when the ACME directory changes, e.g. from `--staging` to production. A running daemon brings it back.
 
 **Whose Caddy is it?** Something answering on the stored admin port is not proof. `isOurCaddyRunning` checks that Caddy reports storing in this node's data directory, and we never stop or reload anything else.
 
