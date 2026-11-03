@@ -122,6 +122,8 @@ export class ReachabilityRuntime {
     private expectingCaddyExit = false;
     private leases: Promise<void> | undefined;
     private stopping = false;
+    // Ends the slow waits, so they cannot hold up the daemon's shutdown.
+    private readonly stopController = new AbortController();
     private loadedCaddyfile: string | undefined;
     private router: NatRouter | undefined;
     private pendingIps: string | undefined;
@@ -143,6 +145,10 @@ export class ReachabilityRuntime {
         this.deps.warn(message);
     }
 
+    private warnCaddyStartFailed(error: unknown) {
+        if (!this.stopping) this.warnThrottled("caddy-start", `Caddy could not start: ${(error as Error).message}`);
+    }
+
     async start(): Promise<void> {
         const config = await this.readConfig();
         if (!config) {
@@ -151,10 +157,10 @@ export class ReachabilityRuntime {
             await this.printAddresses(config);
         }
         // A failed start, e.g. a download error, must not stop the checks: the next tick tries again.
-        await this.watchCaddy().catch((error) => this.warnThrottled("caddy-start", `Caddy could not start: ${(error as Error).message}`));
+        await this.watchCaddy().catch((error) => this.warnCaddyStartFailed(error));
         // setup's lease may have expired while no daemon was running, so this cannot wait for the first refresh.
         this.leases = this.refreshLeases().catch((error) => this.deps.warn(String(error)));
-        this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.warnThrottled("caddy-start", `Caddy could not start: ${(error as Error).message}`)), CADDY_WATCH_INTERVAL_MS));
+        this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.warnCaddyStartFailed(error)), CADDY_WATCH_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.runChecks().catch((error) => this.deps.warn(String(error))), CHECK_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
         for (const timer of this.timers) timer.unref();
@@ -180,7 +186,7 @@ export class ReachabilityRuntime {
         return (
             this.deps.caddy ?? {
                 start: async (onExit: (lastOutput?: string) => void) => {
-                    const binaryPath = await ensureCaddyBinary(this.deps.dataPath);
+                    const binaryPath = await ensureCaddyBinary(this.deps.dataPath, { signal: this.stopController.signal });
                     let output = "";
                     this.caddyChild = startCaddy(this.deps.dataPath, binaryPath, (line) => {
                         output = (output + line).slice(-2000);
@@ -348,7 +354,12 @@ export class ReachabilityRuntime {
 
         const issued = this.deps.waitForIssuance
             ? await this.deps.waitForIssuance(config, nextIps)
-            : (await waitForCertificates(this.deps.dataPath, config.acmeDirectory, nextIps)).issued;
+            : (await waitForCertificates(this.deps.dataPath, config.acmeDirectory, nextIps, undefined, this.stopController.signal)).issued;
+        // Not a failure, so no backoff. The next start must not serve an address the config does not hold yet.
+        if (this.stopping) {
+            if (previousCaddyfile !== undefined) await fs.writeFile(caddyfilePath(this.deps.dataPath), previousCaddyfile);
+            return config;
+        }
         // Each attempt can cost failed validations, of which Let's Encrypt allows 5 per address per hour. Retrying
         // at every chance would use them up and keep failing after the operator fixes what was wrong.
         for (const ip of nextIps.filter((candidate) => !issued.includes(candidate))) {
@@ -485,6 +496,7 @@ export class ReachabilityRuntime {
 
     async stop(): Promise<void> {
         this.stopping = true;
+        this.stopController.abort();
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
         await this.checkInFlight?.catch(() => {});

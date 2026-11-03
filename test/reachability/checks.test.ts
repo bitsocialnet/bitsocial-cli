@@ -180,6 +180,15 @@ describe("evaluateChecks", () => {
 describe("firewall parsing", () => {
     it("reads inactive ufw", () => expect(parseUfwStatus("Status: inactive\n")!.active).toBe(false));
 
+    it.each(["Anywhere", "Anywhere (v6)"])("counts a blanket %s rule as allowing both protocols", (rule) => {
+        const blanket = parseUfwStatus(`Status: active\n\n${rule.padEnd(27)}ALLOW       Anywhere\n`)!;
+        expect(blanket).toMatchObject({ allowsTcp443: true, allowsUdp443: true });
+    });
+
+    it("does not count a ufw app profile as allowing UDP, since those only open TCP", () => {
+        expect(parseUfwStatus("Status: active\n\nNginx Full                 ALLOW       Anywhere\n")!.allowsUdp443).toBe(false);
+    });
+
     it("reads ufw rules per protocol", () => {
         const tcpOnly = parseUfwStatus("Status: active\n\nTo                         Action      From\n--                         ------      ----\n443/tcp                    ALLOW       Anywhere\n")!;
         expect(tcpOnly).toMatchObject({ active: true, allowsTcp443: true, allowsUdp443: false });

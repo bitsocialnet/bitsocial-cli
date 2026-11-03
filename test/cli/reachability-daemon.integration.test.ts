@@ -198,7 +198,7 @@ it("keeps kubo up while the Caddy download is stalled", { timeout: 180_000 }, as
     await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "ip", wsPort: await allocateFreePort(), announce: [], publicIps: ["127.0.0.1"], staging: false, acmeDirectory, caddyAdminPort: adminPort });
     await fs.writeFile(caddyfilePath(dataPath), generateCaddyfile({ ips: ["127.0.0.1"], domains: [], wsPort: 4002, adminPort, dataDirectory: caddyDataDir(dataPath), acmeDirectory }));
     // In a data: URL because NODE_OPTIONS splits on spaces and a file path can hold one.
-    const stallCaddyDownload = `const real = globalThis.fetch; globalThis.fetch = (url, init) => String(url).includes("caddyserver/caddy/releases") ? new Promise(() => {}) : real(url, init);`;
+    const stallCaddyDownload = `const real = globalThis.fetch; globalThis.fetch = (url, init) => String(url).includes("caddyserver/caddy/releases") ? new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason))) : real(url, init);`;
     let daemon: DynamicDaemonResult | undefined;
     try {
         daemon = await startPkcDaemonWithDynamicPorts(
@@ -221,6 +221,11 @@ it("keeps kubo up while the Caddy download is stalled", { timeout: 180_000 }, as
 
         expect(await waitForCondition(kuboAnswers, 30_000, 500), "the daemon did not bring kubo back").toBe(true);
         await expect(fs.access(caddyBinaryPath(dataPath)), "the download was meant to still be stalled").rejects.toThrow();
+
+        // A clean stop, which must not wait for the download either. The helper below would force it after 5 s.
+        daemon.daemonProcess.kill();
+        const exited = await waitForCondition(() => daemon!.daemonProcess.exitCode !== null || daemon!.daemonProcess.signalCode !== null, 30_000, 250);
+        expect(exited, "the daemon did not stop while the download was stalled").toBe(true);
     } finally {
         await stopPkcDaemon(daemon?.daemonProcess);
         if (daemon?.kuboApiUrl) await ensureKuboNodeStopped(daemon.kuboApiUrl);

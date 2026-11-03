@@ -64,6 +64,20 @@ describe("ensureCaddyBinary", () => {
         expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
 
+    it("gives up straight away when told to stop, without retrying", async () => {
+        const controller = new AbortController();
+        const fetchImpl = vi.fn(
+            (_url: unknown, init?: RequestInit) => new Promise((_resolve, reject) => init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason)))
+        ) as unknown as typeof fetch;
+        const download = ensureCaddyBinary(randomDirectory(), { fetchImpl, signal: controller.signal });
+        await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+        const startedAt = Date.now();
+        controller.abort();
+        await expect(download).rejects.toThrow();
+        expect(Date.now() - startedAt).toBeLessThan(1000);
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
     it("does not download again once the binary exists", async () => {
         const dataPath = randomDirectory();
         await fs.mkdir(caddyBinaryPath(dataPath).replace(/[^/\\]+$/, ""), { recursive: true });

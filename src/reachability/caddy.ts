@@ -41,15 +41,17 @@ export const caddyBinaryPath = (dataPath: string, platform: string = process.pla
 
 export const caddyfilePath = (dataPath: string) => path.join(reachabilityDir(dataPath), "Caddyfile");
 
-async function downloadWithRetry(url: string, fetchImpl: typeof fetch): Promise<Buffer> {
+async function downloadWithRetry(url: string, fetchImpl: typeof fetch, stop?: AbortSignal): Promise<Buffer> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-            const response = await fetchImpl(url, { signal: AbortSignal.timeout(300_000) });
+            const timeout = AbortSignal.timeout(300_000);
+            const response = await fetchImpl(url, { signal: stop ? AbortSignal.any([timeout, stop]) : timeout });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return Buffer.from(await response.arrayBuffer());
         } catch (error) {
             lastError = error;
+            if (stop?.aborted) break;
             if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
         }
     }
@@ -60,7 +62,7 @@ async function downloadWithRetry(url: string, fetchImpl: typeof fetch): Promise<
 // and the binary only appears at its final path once complete, so a crash cannot leave a partial one.
 export async function ensureCaddyBinary(
     dataPath: string,
-    { fetchImpl = fetch, log = () => {} }: { fetchImpl?: typeof fetch; log?: (message: string) => void } = {}
+    { fetchImpl = fetch, log = () => {}, signal }: { fetchImpl?: typeof fetch; log?: (message: string) => void; signal?: AbortSignal } = {}
 ): Promise<string> {
     const finalPath = caddyBinaryPath(dataPath);
     try {
@@ -71,7 +73,7 @@ export async function ensureCaddyBinary(
     }
     const release = caddyReleaseFor(process.platform, process.arch);
     log(`Downloading Caddy ${CADDY_VERSION} from ${release.url}`);
-    const archive = await downloadWithRetry(release.url, fetchImpl);
+    const archive = await downloadWithRetry(release.url, fetchImpl, signal);
     const actualHash = createHash("sha256").update(archive).digest("hex");
     if (actualHash !== release.sha256)
         throw new Error(`Caddy download failed verification, refusing to run it.\n  URL: ${release.url}\n  Expected sha256: ${release.sha256}\n  Actual sha256: ${actualHash}`);

@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import { caddyBinaryPath, caddyfilePath, generateCaddyfile } from "../../src/reachability/caddy.js";
 import { setcapCommand } from "../../src/reachability/guidance.js";
@@ -501,6 +501,35 @@ describe("ReachabilityRuntime", () => {
             await checks(2);
             expect(attempts, "a success should have reset the wait to 1 hour").toHaveLength(before + 2);
         });
+    });
+
+    describe("stopping while an IP change waits for its certificate", () => {
+        // The real wait, which polls for 90 s, with a certificate that never comes.
+        const stoppedDuringWait = async () => {
+            const context = await setup(baseConfig());
+            delete context.deps.waitForIssuance;
+            const before = await fs.readFile(caddyfilePath(context.dataPath), "utf-8");
+            context.setDerived([V4_NEW]);
+            await context.runtime.runChecks();
+            void context.runtime.runChecks();
+            await vi.waitFor(async () => expect(await fs.readFile(caddyfilePath(context.dataPath), "utf-8")).toContain(V4_NEW), { timeout: 5000 });
+            const outcome = await Promise.race([
+                context.runtime.stop().then(() => "stopped"),
+                new Promise((resolve) => setTimeout(() => resolve("still waiting"), 10_000))
+            ]);
+            return { ...context, before, outcome };
+        };
+
+        it("does not hold up the daemon's shutdown", async () => {
+            expect((await stoppedDuringWait()).outcome).toBe("stopped");
+        }, 20_000);
+
+        it("does not leave an address without a certificate for the next start, or report a failure that did not happen", async () => {
+            const { dataPath, before, events } = await stoppedDuringWait();
+            expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).toBe(before);
+            expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4]);
+            expect(events.filter((event) => event.includes("No certificate could be issued"))).toEqual([]);
+        }, 20_000);
     });
 
     describe("a family that cannot get a certificate", () => {
