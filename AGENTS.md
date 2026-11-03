@@ -108,6 +108,7 @@ Routine live operations are not repository feature work:
 - **MUST** verify build passes after any code change: `npm run build && npm run build:test`.
 - **MUST** run tests with `npm run test:cli` (not `vitest` directly — the script downloads web UIs first).
 - **MUST** ensure all tests pass before committing.
+- **NOTE:** `test:cli` already passes `--bail 1` to vitest, so appending `-- --bail 0` (to see all failures) crashes with `Expected a single value for option "--bail"`. To run without bailing, call `npx vitest run --config config/vitest.config.ts` directly (after `npm run ci:download-web-uis` at least once, so `dist/webuis` exists).
 
 ### Code Organization
 
