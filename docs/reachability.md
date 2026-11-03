@@ -105,9 +105,11 @@ When `config.json` exists and is enabled, the daemon runs Caddy as a child proce
 | Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
 | At start and every 20 min | Renews router forwards when there is no public IPv4 on an interface. They are released on shutdown or once disabled |
 
-**IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued, it keeps the stored addresses and tries again on later checks.
+**IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued at all, it keeps the stored addresses and tries again on later checks.
 
-**Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
+If only some can be, it moves to those and waits before asking again for the family that failed: 1 hour, doubling up to 24, until `setup` or a retry gets that family a certificate. This covers the common case of a global IPv6 behind a router's firewall, which would otherwise look new on every check. The wait is held in memory, so restarting the daemon tries again straight away.
+
+**Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Rerunning `setup` can also announce it again, which starts a new 24 hours. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
 
 **Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
 
@@ -124,7 +126,7 @@ The daemon sends stderr only to its log file, so these messages go to stdout whe
 | `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
 | `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |
-| `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to |
+| `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to. `kubo-ws` is skipped when `setup` left the node without WSS |
 | `kubo-announce` | With reachability enabled: an address is missing from kubo's config, or running kubo does not announce it, so browsers cannot learn it. `reachability enable` repairs the config and restarts kubo. An entry in `Addresses.NoAnnounce` that matches the address hides it even then |
 | `certificate` | Under 24 hours left |
 | `inbound` | Always `unknown`. Nothing on the machine can prove inbound traffic arrives, or see a cloud provider's firewall |

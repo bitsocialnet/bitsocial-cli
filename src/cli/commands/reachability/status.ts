@@ -37,7 +37,9 @@ export default class Status extends Command {
                 ...(override ? { publicIps: override.split(",") } : config?.publicIps.length ? { publicIps: config.publicIps } : {}),
                 ...(config?.httpsPort ? { httpsPort: config.httpsPort } : {}),
                 ...(config?.httpPort ? { httpPort: config.httpPort } : {}),
-                ...(config ? { wsPort: config.wsPort, caddyAdminPort: config.caddyAdminPort } : {})
+                ...(config ? { caddyAdminPort: config.caddyAdminPort } : {}),
+                // Without WSS, setup leaves kubo without this listener on purpose, so its absence is no problem.
+                ...(config && config.serveWss !== false ? { wsPort: config.wsPort } : {})
             })
         );
         const printChecks = () => {

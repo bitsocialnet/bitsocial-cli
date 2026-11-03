@@ -6,6 +6,7 @@ import { caddyfilePath } from "../../src/reachability/caddy.js";
 import { applyKuboConfig } from "../../src/reachability/setup.js";
 import {
     announcedNames,
+    CHECK_INTERVAL_MS,
     isNameHealthy,
     judgeName,
     NOT_CONFIGURED_MESSAGE,
@@ -19,6 +20,7 @@ import { readReachabilityConfig, readReachabilityRuntimeStatus, reachabilityDir,
 const V4 = "93.184.216.34";
 const V4_NEW = "93.184.216.35";
 const V6 = "2606:4700::1";
+const V6_NEW = "2606:4700::2";
 
 describe("planIpChange", () => {
     it("is no change when the same addresses are seen", () => {
@@ -220,6 +222,42 @@ describe("ReachabilityRuntime", () => {
         await runtime.stop();
     });
 
+    describe("the warning when Caddy exits", () => {
+        const exitWarnings = (events: string[]) => events.filter((event) => event.includes("Caddy exited"));
+
+        it("warns about a crash, naming Caddy's last output", async () => {
+            const { runtime, events, crashCaddy } = await setup(baseConfig());
+            await runtime.start();
+            crashCaddy();
+            expect(exitWarnings(events)).toHaveLength(1);
+            await runtime.stop();
+        });
+
+        it("stays quiet about a Caddy it stopped itself", async () => {
+            const { runtime, dataPath, events, crashCaddy } = await setup(baseConfig());
+            await runtime.start();
+            await writeReachabilityConfig(dataPath, baseConfig({ enabled: false }));
+            await runtime.watchCaddy();
+            crashCaddy();
+            expect(exitWarnings(events)).toEqual([]);
+            await runtime.stop();
+        });
+
+        it("still warns about the next crash after stopping an adopted Caddy, which never reports an exit", async () => {
+            const { runtime, dataPath, events, setCaddyUp, crashCaddy } = await setup(baseConfig());
+            setCaddyUp(true);
+            await runtime.watchCaddy();
+            await writeReachabilityConfig(dataPath, baseConfig({ enabled: false }));
+            await runtime.watchCaddy();
+            await writeReachabilityConfig(dataPath, baseConfig());
+            await runtime.watchCaddy();
+            expect(events.filter((event) => event === "caddy start")).toHaveLength(1);
+            crashCaddy();
+            expect(exitWarnings(events)).toHaveLength(1);
+            await runtime.stop();
+        });
+    });
+
     it("adopts a Caddy already holding the admin port, rather than starting a second", async () => {
         const { runtime, events } = await setup(baseConfig(), { caddy: { start: async () => void events2.push("start"), stop: async () => {}, reload: async () => void events2.push("reload"), isUp: async () => true } });
         const events2: string[] = [];
@@ -304,6 +342,69 @@ describe("ReachabilityRuntime", () => {
         await runtime.runChecks();
         await runtime.runChecks();
         expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4_NEW]);
+    });
+
+    describe("a family that cannot get a certificate", () => {
+        const HOUR = 60 * 60_000;
+        const failingV6 = async () => {
+            const attempts: string[][] = [];
+            const state = { v6Issues: false };
+            const context = await setup(baseConfig(), {
+                waitForIssuance: async (_config, names) => {
+                    attempts.push(names);
+                    return names.filter((ip) => ip !== V6 || state.v6Issues);
+                }
+            });
+            context.setDerived([V4, V6]);
+            const checks = async (count: number) => {
+                for (let i = 0; i < count; i++) {
+                    await context.runtime.runChecks();
+                    context.advance(CHECK_INTERVAL_MS);
+                }
+            };
+            return { ...context, attempts, state, checks };
+        };
+
+        it("backs off instead of asking the CA again on every check", async () => {
+            const { attempts, checks, advance, dataPath, state } = await failingV6();
+            await checks(2);
+            expect(attempts).toEqual([[V4, V6]]);
+            await checks(6);
+            expect(attempts, "retried inside the first hour").toHaveLength(1);
+
+            advance(HOUR);
+            await checks(2);
+            expect(attempts).toHaveLength(2);
+            advance(HOUR);
+            await checks(2);
+            expect(attempts, "the wait did not grow after a second failure").toHaveLength(2);
+            advance(HOUR);
+            await checks(2);
+            expect(attempts).toHaveLength(3);
+
+            state.v6Issues = true;
+            advance(4 * HOUR);
+            await checks(2);
+            expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4, V6]);
+        });
+
+        it("does not report a move or touch kubo when nothing moved", async () => {
+            const { checks, events, dataPath } = await failingV6();
+            await checks(2);
+            expect(events.filter((event) => event.includes("Public address changed"))).toEqual([]);
+            expect(events).not.toContain("restart kubo");
+            expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4]);
+            expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).not.toContain("2606:4700");
+        });
+
+        it("follows a held address again once setup got that family a certificate", async () => {
+            const { attempts, checks, dataPath, setDerived } = await failingV6();
+            await checks(2);
+            await writeReachabilityConfig(dataPath, { ...(await readReachabilityConfig(dataPath))!, publicIps: [V4, V6] });
+            setDerived([V4, V6_NEW]);
+            await checks(2);
+            expect(attempts.at(-1)).toEqual([V4, V6_NEW]);
+        });
     });
 
     it("does not undo a disable that lands during an IP change", async () => {
@@ -473,6 +574,45 @@ describe("ReachabilityRuntime", () => {
             setRecords({ v4: [V4], v6: [] });
             await runtime.runChecks();
             expect((await readReachabilityConfig(dataPath))!.announce.filter((address) => address === domainAddress)).toHaveLength(1);
+        });
+
+        describe("announced again by setup while still broken", () => {
+            const droppedThenReannounced = async () => {
+                const context = await setup(domainConfig());
+                context.setRecords({ v4: [], v6: [] });
+                await context.runtime.runChecks();
+                context.advance(25 * 60 * 60_000);
+                await context.runtime.runChecks();
+                // What buildConfig stores when setup announces the address again: it leaves droppedAnnounce too.
+                const { droppedAnnounce: _dropped, ...config } = (await readReachabilityConfig(context.dataPath))!;
+                await writeReachabilityConfig(context.dataPath, { ...config, announce: [...config.announce, domainAddress] });
+                return context;
+            };
+
+            it("gets a fresh 24 hours rather than being dropped at the next check", async () => {
+                const { runtime, dataPath, advance } = await droppedThenReannounced();
+                await runtime.runChecks();
+                advance(60 * 60_000);
+                await runtime.runChecks();
+                expect((await readReachabilityConfig(dataPath))!.announce).toContain(domainAddress);
+                expect((await readReachabilityRuntimeStatus(dataPath))!.domains!["node.example"]!.droppedFromAnnounce).toBeUndefined();
+            });
+
+            it("is dropped again if it stays broken, rather than staying announced forever", async () => {
+                const { runtime, dataPath, advance } = await droppedThenReannounced();
+                await runtime.runChecks();
+                advance(25 * 60 * 60_000);
+                await runtime.runChecks();
+                const config = (await readReachabilityConfig(dataPath))!;
+                expect(config.announce).not.toContain(domainAddress);
+                expect(config.droppedAnnounce).toEqual([domainAddress]);
+            });
+        });
+
+        it("restores a dropped name that recovers even if the status file was lost", async () => {
+            const { runtime, dataPath } = await setup(baseConfig({ domain: "node.example", announce: [`/ip4/${V4}/tcp/443/tls/ws`], droppedAnnounce: [domainAddress], mode: "ip" }));
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.announce).toContain(domainAddress);
         });
 
         it("survives a daemon restart, so 24 hours is not reset", async () => {

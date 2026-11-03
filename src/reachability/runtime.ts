@@ -23,6 +23,8 @@ export const CADDY_WATCH_INTERVAL_MS = 5000;
 const HOUR_MS = 60 * 60 * 1000;
 export const STALE_NAME_DROP_AFTER_MS = 24 * HOUR_MS;
 export const CERTIFICATE_WARNING_HOURS = 24;
+const ISSUANCE_RETRY_MIN_MS = HOUR_MS;
+const ISSUANCE_RETRY_MAX_MS = 24 * HOUR_MS;
 
 export const NOT_CONFIGURED_MESSAGE = "Browsers cannot reach this node. To fix that, run: bitsocial reachability setup";
 
@@ -95,7 +97,7 @@ export interface RuntimeDependencies {
     derivePublicIps?: () => Promise<string[]>;
     resolveDomain?: (name: string) => Promise<ResolvedDomain>;
     caddy?: {
-        start: (onExit: () => void) => Promise<void>;
+        start: (onExit: (lastOutput?: string) => void) => Promise<void>;
         stop: () => Promise<void>;
         reload: (caddyfile: string) => Promise<void>;
         isUp: () => Promise<boolean>;
@@ -120,6 +122,8 @@ export class ReachabilityRuntime {
     private loadedCaddyfile: string | undefined;
     private router: NatRouter | undefined;
     private pendingIps: string | undefined;
+    // By family, not address: what blocks one address, usually a firewall, blocks the host's other IPv6 addresses too.
+    private readonly issuanceBackoff = new Map<number, { failures: number; retryAt: number }>();
     private readonly lastWarned = new Map<string, number>();
     private timers: NodeJS.Timeout[] = [];
     private checkInFlight: Promise<void> | undefined;
@@ -172,7 +176,7 @@ export class ReachabilityRuntime {
     private get caddy() {
         return (
             this.deps.caddy ?? {
-                start: async (onExit: () => void) => {
+                start: async (onExit: (lastOutput?: string) => void) => {
                     const binaryPath = await ensureCaddyBinary(this.deps.dataPath);
                     let output = "";
                     this.caddyChild = startCaddy(this.deps.dataPath, binaryPath, (line) => {
@@ -180,9 +184,7 @@ export class ReachabilityRuntime {
                     });
                     this.caddyChild.once("exit", () => {
                         this.caddyChild = undefined;
-                        if (!this.stopping && !this.expectingCaddyExit) this.warnThrottled("caddy-exit", `Caddy exited, so browsers cannot reach this node over WSS until it restarts. Last output: ${output.trim().split("\n").at(-1) ?? "none"}`);
-                        this.expectingCaddyExit = false;
-                        onExit();
+                        onExit(output.trim().split("\n").at(-1));
                     });
                 },
                 stop: async () => {
@@ -220,7 +222,8 @@ export class ReachabilityRuntime {
 
         if (!hasSites) {
             if (this.caddyRunning) {
-                this.expectingCaddyExit = true;
+                // An adopted Caddy is not our child, so no exit would ever clear this.
+                this.expectingCaddyExit = !this.caddyAdopted;
                 await this.caddy.stop().catch(() => {});
                 this.caddyRunning = false;
                 this.caddyAdopted = false;
@@ -240,7 +243,9 @@ export class ReachabilityRuntime {
                 this.caddyAdopted = true;
                 this.loadedCaddyfile = undefined;
             } else {
-                await this.caddy.start(() => {
+                await this.caddy.start((lastOutput) => {
+                    if (!this.stopping && !this.expectingCaddyExit) this.warnThrottled("caddy-exit", `Caddy exited, so browsers cannot reach this node over WSS until it restarts. Last output: ${lastOutput || "none"}`);
+                    this.expectingCaddyExit = false;
                     this.caddyRunning = false;
                     this.loadedCaddyfile = undefined;
                 });
@@ -289,6 +294,24 @@ export class ReachabilityRuntime {
         return applied;
     }
 
+    private backOffIssuance(ip: string): number {
+        const family = net.isIP(ip);
+        const failures = (this.issuanceBackoff.get(family)?.failures ?? 0) + 1;
+        const waitMs = Math.min(ISSUANCE_RETRY_MIN_MS * 2 ** (failures - 1), ISSUANCE_RETRY_MAX_MS);
+        this.issuanceBackoff.set(family, { failures, retryAt: this.now() + waitMs });
+        return waitMs;
+    }
+
+    // A host often has an address in a family it can't get a certificate for, such as a global IPv6 behind a
+    // router's firewall. It would look new on every check, so without this each one would ask the CA again.
+    private addressesWorthTrying(config: ReachabilityConfig, derived: string[]): string[] {
+        for (const family of this.issuanceBackoff.keys()) if (config.publicIps.some((ip) => net.isIP(ip) === family)) this.issuanceBackoff.delete(family);
+        return derived.filter((ip) => {
+            const backoff = this.issuanceBackoff.get(net.isIP(ip));
+            return backoff === undefined || this.now() >= backoff.retryAt;
+        });
+    }
+
     private async handleIpChange(config: ReachabilityConfig, nextIps: string[]): Promise<ReachabilityConfig> {
         // Moves only IP-certificate addresses. A domain's or proxy's address does not contain our IP.
         const spec = {
@@ -319,10 +342,14 @@ export class ReachabilityRuntime {
             return config;
         }
         if (issued.length !== nextIps.length) {
-            this.deps.warn(`No certificate could be issued for ${nextIps.filter((ip) => !issued.includes(ip)).join(", ")} after the IP change.`);
+            for (const ip of nextIps.filter((candidate) => !issued.includes(candidate))) {
+                const waitMs = this.backOffIssuance(ip);
+                this.deps.warn(`No certificate could be issued for ${ip}. Will try again in ${waitMs / HOUR_MS} h.`);
+            }
             await fs.writeFile(caddyfilePath(this.deps.dataPath), generateCaddyfile({ ...spec, ips: issued }));
             await this.watchCaddy();
         }
+        if (issued.length === config.publicIps.length && issued.every((ip) => config.publicIps.some((held) => isSameCertificateName(ip, held)))) return config;
         const port = config.httpsPort ?? 443;
         const ipAddress = (ip: string) => `/${net.isIPv6(ip) ? "ip6" : "ip4"}/${ip}/tcp/${port}/tls/ws`;
         const oldIpAddresses = config.publicIps.map(ipAddress);
@@ -338,10 +365,14 @@ export class ReachabilityRuntime {
         for (const entry of announcedNames(config)) {
             const records = await (this.deps.resolveDomain ?? resolveDomainRecords)(entry.name);
             const healthy = isNameHealthy(entry, records, publicIps);
-            const previous = status.domains?.[entry.name];
+            // The config decides what is dropped, because setup can announce an address again without touching
+            // the status file. An address announced that way starts a new 24 hours.
+            const isDropped = (config.droppedAnnounce ?? []).includes(entry.address);
+            const stored = status.domains?.[entry.name];
+            const previous = stored?.droppedFromAnnounce === true && !isDropped ? undefined : { ...stored, droppedFromAnnounce: isDropped };
             const verdict = judgeName(healthy, previous, this.lastWarned.get(`name:${entry.name}`), this.now());
             const nowIso = new Date(this.now()).toISOString();
-            let droppedFromAnnounce = previous?.droppedFromAnnounce === true;
+            let droppedFromAnnounce = isDropped;
             if (verdict.warn) this.warnThrottled(`name:${entry.name}`, staleNameWarning(entry.address, verdict.failingSince!));
             if (healthy) this.lastWarned.delete(`name:${entry.name}`);
             if (verdict.drop) {
@@ -400,7 +431,7 @@ export class ReachabilityRuntime {
 
         // Only addresses that hold a certificate move. A proxy-only node has nothing here to change.
         if (config.publicIps.length > 0) {
-            const nextIps = planIpChange(config.publicIps, derived);
+            const nextIps = planIpChange(config.publicIps, this.addressesWorthTrying(config, derived));
             // Seen twice in a row before acting: a restart is too costly to spend on one odd reading.
             const key = nextIps?.join() ?? undefined;
             if (key !== undefined && key === this.pendingIps) {

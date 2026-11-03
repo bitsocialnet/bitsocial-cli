@@ -82,10 +82,10 @@ describe("bitsocial reachability status", () => {
         const address = "/ip4/203.0.113.7/tcp/443/tls/ws";
         const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
 
-        const configuredNode = async ({ enabled = true, appendAnnounce }: { enabled?: boolean; appendAnnounce: string[] }) => {
+        const configuredNode = async ({ enabled = true, appendAnnounce, serveWss }: { enabled?: boolean; appendAnnounce: string[]; serveWss?: false }) => {
             const dataPath = randomDirectory();
             // The real edits setup would make, so the test cannot drift from what setup stores and writes.
-            const applied = planKuboConfig({ Addresses: { Swarm: [], Announce: [] } }, { wsPort: 4002, announce: [address] }, true);
+            const applied = planKuboConfig({ Addresses: { Swarm: [], Announce: [] } }, { wsPort: 4002, announce: [address], ...(serveWss === false ? { serveWss } : {}) }, true);
             await writeReachabilityConfig(dataPath, {
                 version: 1,
                 enabled,
@@ -96,7 +96,8 @@ describe("bitsocial reachability status", () => {
                 staging: false,
                 acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory",
                 caddyAdminPort: 2019,
-                kuboEdits: applied.kuboEdits
+                kuboEdits: applied.kuboEdits,
+                ...(serveWss === false ? { serveWss } : {})
             });
             const repo = path.join(dataPath, ".bitsocial-cli.ipfs");
             await fs.mkdir(repo, { recursive: true });
@@ -105,10 +106,10 @@ describe("bitsocial reachability status", () => {
         };
 
         // Answers like a running kubo that loaded the given announce list. Real kubo appends /p2p to each address.
-        const withRunningKubo = async <T>(announced: string[], run: (kuboRpcUrl: string) => Promise<T>): Promise<T> => {
+        const withRunningKubo = async <T>(announced: string[], run: (kuboRpcUrl: string) => Promise<T>, listen = ["/ip4/127.0.0.1/tcp/4002/ws", "/ip4/0.0.0.0/udp/443/quic-v1/webtransport"]): Promise<T> => {
             const server = http.createServer((request, response) => {
                 response.setHeader("content-type", "application/json");
-                if (request.url?.startsWith("/api/v0/swarm/addrs/listen")) response.end(JSON.stringify({ Strings: ["/ip4/127.0.0.1/tcp/4002/ws", "/ip4/0.0.0.0/udp/443/quic-v1/webtransport"] }));
+                if (request.url?.startsWith("/api/v0/swarm/addrs/listen")) response.end(JSON.stringify({ Strings: listen }));
                 else if (request.url?.startsWith("/api/v0/id")) response.end(JSON.stringify({ ID: peerId, Addresses: announced.map((a) => `${a}/p2p/${peerId}`) }));
                 else {
                     response.statusCode = 404;
@@ -151,6 +152,21 @@ describe("bitsocial reachability status", () => {
             const dataPath = await configuredNode({ appendAnnounce: [address] });
             const { stdout } = await withRunningKubo([address], (url) => runStatus(["--json", "--pkcOptions.dataPath", dataPath], url));
             expect(checksNaming(stdout)).toEqual([]);
+        });
+
+        const NO_WS_LISTENER = ["/ip4/0.0.0.0/udp/443/quic-v1/webtransport"];
+        const checkIds = (stdout: string) => JSON.parse(stdout).checks.map((check: { id: string }) => check.id);
+
+        it("fails when kubo lacks the WSS listener a WSS node needs", async () => {
+            const dataPath = await configuredNode({ appendAnnounce: [address] });
+            const { stdout } = await withRunningKubo([address], (url) => runStatus(["--json", "--pkcOptions.dataPath", dataPath], url), NO_WS_LISTENER);
+            expect(JSON.parse(stdout).checks.find((check: { id: string }) => check.id === "kubo-ws")).toMatchObject({ status: "fail" });
+        });
+
+        it("does not ask for that listener on a node setup left without WSS, where enable could not add it", async () => {
+            const dataPath = await configuredNode({ appendAnnounce: [address], serveWss: false });
+            const { stdout } = await withRunningKubo([address], (url) => runStatus(["--json", "--pkcOptions.dataPath", dataPath], url), NO_WS_LISTENER);
+            expect(checkIds(stdout)).not.toContain("kubo-ws");
         });
 
         it("stays quiet when reachability is disabled", async () => {
