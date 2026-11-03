@@ -1,5 +1,36 @@
 # Changelog
 
+## <small>0.19.123 (2026-11-03)</small>
+
+* fix(reachability): back off failed certificates and fix review findings ([a025028](https://github.com/bitsocialnet/bitsocial-cli/commit/a025028))
+* fix(reachability): count only certificates from the configured CA ([cb41e25](https://github.com/bitsocialnet/bitsocial-cli/commit/cb41e25))
+* fix(reachability): detect a held TCP port by connecting to it ([0f84335](https://github.com/bitsocialnet/bitsocial-cli/commit/0f84335))
+* fix(reachability): detect addresses kubo does not announce ([186bd90](https://github.com/bitsocialnet/bitsocial-cli/commit/186bd90))
+* fix(reachability): fix stale domain sites, issuance retries and bind errors ([8db1bbc](https://github.com/bitsocialnet/bitsocial-cli/commit/8db1bbc))
+* fix(reachability): forget a dropped name when setup moves to another domain ([145488b](https://github.com/bitsocialnet/bitsocial-cli/commit/145488b))
+* fix(reachability): handle a server already holding TCP 443 ([36cc45a](https://github.com/bitsocialnet/bitsocial-cli/commit/36cc45a))
+* fix(reachability): keep a working node when a setup rerun gets no certificate ([6a1336e](https://github.com/bitsocialnet/bitsocial-cli/commit/6a1336e))
+* fix(reachability): keep serving when no IP is found, start after watchdog ([b46a1f2](https://github.com/bitsocialnet/bitsocial-cli/commit/b46a1f2))
+* fix(reachability): keep the daemon's Caddy handling robust ([8df1a55](https://github.com/bitsocialnet/bitsocial-cli/commit/8df1a55))
+* fix(reachability): keep the node key private and fix review findings ([c65d156](https://github.com/bitsocialnet/bitsocial-cli/commit/c65d156))
+* fix(reachability): no router forwards after stop, read ufw port lists ([202e809](https://github.com/bitsocialnet/bitsocial-cli/commit/202e809))
+* fix(reachability): restart Caddy when moving to another CA ([43ee82c](https://github.com/bitsocialnet/bitsocial-cli/commit/43ee82c))
+* fix(reachability): restore null kubo sections on disable ([6ed4c24](https://github.com/bitsocialnet/bitsocial-cli/commit/6ed4c24))
+* fix(reachability): show only current certificates and validate runtime status ([812bb36](https://github.com/bitsocialnet/bitsocial-cli/commit/812bb36))
+* fix(reachability): stop waits on shutdown and read blanket ufw rules ([7fff329](https://github.com/bitsocialnet/bitsocial-cli/commit/7fff329))
+* test(reachability): retry lost port races in the integration tests ([5e2f531](https://github.com/bitsocialnet/bitsocial-cli/commit/5e2f531))
+* test(reachability): retry the loopback edit until running kubo loads it ([b25c0dd](https://github.com/bitsocialnet/bitsocial-cli/commit/b25c0dd))
+* test(reachability): show what kubo announces when the announce test fails ([816996d](https://github.com/bitsocialnet/bitsocial-cli/commit/816996d))
+* docs(reachability): explain how it works and how to troubleshoot it ([f45cdcb](https://github.com/bitsocialnet/bitsocial-cli/commit/f45cdcb))
+* feat(reachability): add Caddy download, Caddyfile generation and Pebble tests ([8e6a2f4](https://github.com/bitsocialnet/bitsocial-cli/commit/8e6a2f4))
+* feat(reachability): add domains and operator proxies to setup ([ff035eb](https://github.com/bitsocialnet/bitsocial-cli/commit/ff035eb))
+* feat(reachability): add enable and disable, and fix review findings ([ec82dea](https://github.com/bitsocialnet/bitsocial-cli/commit/ec82dea))
+* feat(reachability): add the pure kubo config transform ([1555fef](https://github.com/bitsocialnet/bitsocial-cli/commit/1555fef))
+* feat(reachability): add the setup command with IP certificates ([654557c](https://github.com/bitsocialnet/bitsocial-cli/commit/654557c))
+* feat(reachability): add versioned state and the status command ([537eff1](https://github.com/bitsocialnet/bitsocial-cli/commit/537eff1))
+* feat(reachability): check what the node needs in status and setup ([f107898](https://github.com/bitsocialnet/bitsocial-cli/commit/f107898))
+* feat(reachability): keep the node reachable from the daemon ([140081f](https://github.com/bitsocialnet/bitsocial-cli/commit/140081f))
+
 ## <small>0.19.122 (2026-11-03)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.134 ([8d443fe](https://github.com/bitsocialnet/bitsocial-cli/commit/8d443fe))
