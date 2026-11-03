@@ -185,6 +185,26 @@ describe("firewall parsing", () => {
         expect(blanket).toMatchObject({ allowsTcp443: true, allowsUdp443: true });
     });
 
+    it.each([
+        ["80,443/tcp", true, false],
+        ["443,8443/udp", false, true],
+        ["443:444/udp", false, true],
+        ["400:500/tcp", true, false],
+        ["80,400:500/tcp", true, false],
+        ["80,443/tcp (v6)", true, false],
+        ["Anywhere/udp", false, true]
+    ])("reads the ufw rule %s", (rule, tcp, udp) => {
+        expect(parseUfwStatus(`Status: active\n\n${rule.padEnd(27)}ALLOW       Anywhere\n`)).toMatchObject({ allowsTcp443: tcp, allowsUdp443: udp });
+    });
+
+    it.each(["80,8443/tcp", "444:500/tcp", "1:442/udp", "4430", "1443/tcp"])("does not take the ufw rule %s to include 443", (rule) => {
+        expect(parseUfwStatus(`Status: active\n\n${rule.padEnd(27)}ALLOW       Anywhere\n`)).toMatchObject({ allowsTcp443: false, allowsUdp443: false });
+    });
+
+    it.each(["443", "80,443/tcp", "Anywhere", "Nginx Full"])("does not count an outgoing or denying %s rule as opening the port", (rule) => {
+        for (const action of ["ALLOW OUT", "DENY", "REJECT"]) expect(parseUfwStatus(`Status: active\n\n${rule.padEnd(27)}${action.padEnd(12)}Anywhere\n`)).toMatchObject({ allowsTcp443: false, allowsUdp443: false });
+    });
+
     it("does not count a ufw app profile as allowing UDP, since those only open TCP", () => {
         expect(parseUfwStatus("Status: active\n\nNginx Full                 ALLOW       Anywhere\n")!.allowsUdp443).toBe(false);
     });

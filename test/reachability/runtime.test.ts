@@ -636,6 +636,40 @@ describe("ReachabilityRuntime", () => {
             await runtime.stop();
         });
 
+        it("sets nothing up when stopped during the first start, which can spend minutes downloading Caddy", async () => {
+            const { calls, router } = fakeRouter();
+            let finishStart = () => {};
+            let starting = false;
+            const { runtime } = await setup(baseConfig(), {
+                ...natDeps(router),
+                caddy: {
+                    start: async () => {
+                        starting = true;
+                        await new Promise<void>((resolve) => (finishStart = resolve));
+                    },
+                    stop: async () => {},
+                    reload: async () => {},
+                    isUp: async () => false
+                }
+            });
+            const started = runtime.start();
+            await vi.waitFor(() => expect(starting).toBe(true));
+            const stopped = runtime.stop();
+            finishStart();
+            await Promise.all([started, stopped]);
+            await runtime.leasesSettled();
+            expect(calls).not.toContain("map");
+            expect((runtime as any).timers).toEqual([]);
+        });
+
+        it("does not ask the router for forwards once stopped", async () => {
+            const { calls, router } = fakeRouter();
+            const { runtime } = await setup(baseConfig(), natDeps(router));
+            await runtime.stop();
+            await runtime.refreshLeases();
+            expect(calls).not.toContain("map");
+        });
+
         it("does not touch the router on a machine with a public IPv4", async () => {
             const { calls, router } = fakeRouter();
             const { runtime } = await setup(baseConfig(), { ...natDeps(router), hasPublicIpv4Interface: () => true });

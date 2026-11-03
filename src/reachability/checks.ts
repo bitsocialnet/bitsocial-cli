@@ -59,9 +59,21 @@ export interface FirewallState {
 export const parseUfwStatus = (output: string): FirewallState | undefined => {
     if (!/^Status:/m.test(output)) return undefined;
     const active = /^Status: active/m.test(output);
-    const hasPortRule = (protocol: string) => new RegExp(`^(443|443/${protocol}|Anywhere)(\\s|\\(v6\\)).*ALLOW`, "m").test(output);
+    // Outgoing rules print as ALLOW OUT, and say nothing about what reaches this machine.
+    const allowedInbound = output.split("\n").filter((line) => /\bALLOW\b(?! OUT)/.test(line));
+    // The first column is a port, a list or range such as 80,443/tcp or 443:444/udp, or Anywhere, with an optional protocol.
+    const hasPortRule = (protocol: string) =>
+        allowedInbound.some((line) => {
+            const [ports = "", ruleProtocol] = line.split(/\s/, 1)[0]!.replace(/\(v6\)$/, "").split("/");
+            if (ruleProtocol && ruleProtocol !== protocol) return false;
+            if (ports === "Anywhere") return true;
+            return ports.split(",").some((part) => {
+                const [first, last = first] = part.split(":").map(Number);
+                return first! <= 443 && 443 <= last!;
+            });
+        });
     // App profiles only open TCP.
-    const hasTcpProfile = /^(Caddy|Nginx (HTTPS|Full)|Apache (Secure|Full))\b.*ALLOW/m.test(output);
+    const hasTcpProfile = allowedInbound.some((line) => /^(Caddy|Nginx (HTTPS|Full)|Apache (Secure|Full))\b/.test(line));
     return { name: "ufw", active, allowsTcp443: hasPortRule("tcp") || hasTcpProfile, allowsUdp443: hasPortRule("udp") };
 };
 

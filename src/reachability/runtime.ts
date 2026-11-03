@@ -158,6 +158,8 @@ export class ReachabilityRuntime {
         }
         // A failed start, e.g. a download error, must not stop the checks: the next tick tries again.
         await this.watchCaddy().catch((error) => this.warnCaddyStartFailed(error));
+        // That can take minutes on a first download, and stop() has nothing to clean up if it came during them.
+        if (this.stopping) return;
         // setup's lease may have expired while no daemon was running, so this cannot wait for the first refresh.
         this.leases = this.refreshLeases().catch((error) => this.deps.warn(String(error)));
         this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.warnCaddyStartFailed(error)), CADDY_WATCH_INTERVAL_MS));
@@ -477,6 +479,8 @@ export class ReachabilityRuntime {
     }
 
     async refreshLeases(): Promise<void> {
+        // A forward asked for now would outlive the release in stop().
+        if (this.stopping) return;
         const config = await this.readConfig();
         if (!config?.enabled) {
             await this.router?.release().catch(() => {});
