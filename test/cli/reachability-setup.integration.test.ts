@@ -153,8 +153,15 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
             return result;
         };
 
+        // What was seen, for a failure that only shows up on one CI platform.
+        const announceEvidence = async () => {
+            const { Addresses } = JSON.parse(await fs.readFile(kuboConfigPath(), "utf-8"));
+            const listen = await fetch(`${daemon.kuboApiUrl}/swarm/addrs/listen`, { method: "POST" }).then((response) => response.text()).catch((error) => String(error));
+            return JSON.stringify({ expected: address(), announcedByKubo: await announcedByKubo(), appendAnnounce: Addresses.AppendAnnounce, noAnnounce: Addresses.NoAnnounce, listen });
+        };
+
         it("real kubo's /id shows the address, and status agrees", async () => {
-            expect(await isAnnounced()).toBe(true);
+            expect(await isAnnounced(), await announceEvidence()).toBe(true);
             expect(await announceCheck()).toMatchObject({ status: "ok" });
         });
 
