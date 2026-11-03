@@ -150,6 +150,20 @@ describe("describeKuboEndpointMismatch", () => {
         expect(describeApi(new URL("http://[::]:5001/api/v0"), new URL("http://[::1]:5001/api/v0"))).toBeUndefined();
     });
 
+    it("accepts localhost for a loopback or wildcard listener", () => {
+        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://localhost:5001/api/v0"))).toBeUndefined();
+        expect(describeApi(new URL("http://[::1]:5001/api/v0"), new URL("http://localhost:5001/api/v0"))).toBeUndefined();
+        expect(describeApi(new URL("http://0.0.0.0:5001/api/v0"), new URL("http://localhost:5001/api/v0"))).toBeUndefined();
+        expect(describeApi(new URL("http://localhost:5001/api/v0"), new URL("http://127.0.0.1:5001/api/v0"))).toBeUndefined();
+    });
+
+    it("still warns when the IP families of two loopback literals differ", () => {
+        // A kubo bound on /ip4/127.0.0.1 refuses a dial to [::1].
+        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://[::1]:5001/api/v0"))).toContain(
+            "KUBO_RPC_URL is http://[::1]:5001/api/v0"
+        );
+    });
+
     it("names the env var, the config field and both URLs when the ports differ", () => {
         const message = describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://127.0.0.1:5002/api/v0"));
         expect(message).toBe(

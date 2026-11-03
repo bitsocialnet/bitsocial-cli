@@ -134,6 +134,14 @@ export function ipfsGatewayUrlFromKuboConfig(kuboConfig: any): Promise<URL | und
 
 const urlPort = (url: URL) => Number(url.port || (url.protocol === "https:" ? 443 : 80));
 
+const isLoopbackLiteral = (host: string) => host === "127.0.0.1" || host === "::1";
+
+/** Whether two connectable hostnames reach the same listener. `localhost` resolves to either loopback
+ * literal and the connect falls back across families, so it matches both; `127.0.0.1` and `::1` are
+ * different listeners, since a kubo bound on one refuses a dial to the other. */
+const sameConnectableHost = (a: string, b: string) =>
+    a === b || (a === "localhost" && isLoopbackLiteral(b)) || (b === "localhost" && isLoopbackLiteral(a));
+
 /** For a locally managed kubo the daemon never rewrites Addresses.* of an existing repo, so an env
  * override that differs from the config leaves kubo on one port and the daemon dialling another.
  * Returns the warning to print, or undefined when the override reaches the configured listener. */
@@ -152,7 +160,8 @@ export function describeKuboEndpointMismatch({
 }): string | undefined {
     if (!configured) return undefined;
     const sameListener =
-        urlPort(configured) === urlPort(chosen) && toConnectableHostname(configured.hostname) === toConnectableHostname(chosen.hostname);
+        urlPort(configured) === urlPort(chosen) &&
+        sameConnectableHost(toConnectableHostname(configured.hostname), toConnectableHostname(chosen.hostname));
     if (sameListener) return undefined;
     return (
         `${envVar} is ${chosen} but ${configField} in ${configPath} is ${configured}. ` +
