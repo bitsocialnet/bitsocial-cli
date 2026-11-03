@@ -525,6 +525,30 @@ describe("a stored domain whose DNS no longer points here", () => {
         }
     });
 
+    it("forgets a dropped name once setup moves to another domain, so the daemon cannot announce it with no site behind it", async () => {
+        const oldAddress = "/dns4/old.example/tcp/443/tls/ws";
+        const { options, deps, dataPath, caddyfile, dnsRecovers, stopAdmin } = await prepare(node({ domain: "old.example", droppedAnnounce: [oldAddress] }));
+        try {
+            const result = await runReachabilitySetup({ ...options, domain: "new.example" }, { ...deps, resolveDomain: async () => HERE });
+            expect(result.domain).toBe("new.example");
+            await dnsRecovers();
+            expect((await readReachabilityConfig(dataPath))!.announce).not.toContain(oldAddress);
+            expect(await caddyfile()).not.toContain("https://old.example");
+            expect(result.droppedAnnounce).toBeUndefined();
+        } finally {
+            await stopAdmin();
+        }
+    });
+
+    it("keeps a dropped address of the domain it still holds", async () => {
+        const { options, deps, stopAdmin } = await prepare(node({ droppedAnnounce: [DOMAIN_ADDRESS] }));
+        try {
+            expect((await runReachabilitySetup(options, deps)).droppedAnnounce).toEqual([DOMAIN_ADDRESS]);
+        } finally {
+            await stopAdmin();
+        }
+    });
+
     it("keeps nothing for a name that never had an address here", async () => {
         const { options, deps, caddyfile, stopAdmin } = await prepare(node({}));
         try {

@@ -456,8 +456,11 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             ...(domain && domainIssued ? [domainAnnounceAddress(domain, httpsPort, records)] : []),
             ...externalAnnounce
         ];
-        // Kept so the daemon can restore a name that recovers later, unless this run announced it again.
-        const stillDropped = [...new Set([...(previous?.droppedAnnounce ?? []), ...(keepsStaleSite ? staleWasAnnounced : [])])].filter((address) => !announce.includes(address));
+        // Kept so the daemon can restore a name that recovers later, unless this run announced it again. A domain
+        // this run moved away from is forgotten, because it has no site here and the daemon would announce it anyway.
+        const stillDropped = [...new Set([...(previous?.droppedAnnounce ?? []), ...(keepsStaleSite ? staleWasAnnounced : [])])].filter(
+            (address) => !announce.includes(address) && (address.match(/^\/dns[46]?\/([^/]+)\//)?.[1] === domain || externalAnnounce.includes(address))
+        );
         return {
             version: 1,
             enabled: true,
