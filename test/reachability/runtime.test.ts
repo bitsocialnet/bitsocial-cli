@@ -2,7 +2,8 @@ import fs from "fs/promises";
 import path from "path";
 import { describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
-import { caddyfilePath } from "../../src/reachability/caddy.js";
+import { caddyBinaryPath, caddyfilePath, generateCaddyfile } from "../../src/reachability/caddy.js";
+import { setcapCommand } from "../../src/reachability/guidance.js";
 import { applyKuboConfig } from "../../src/reachability/setup.js";
 import {
     announcedNames,
@@ -134,7 +135,7 @@ describe("ReachabilityRuntime", () => {
         }
         const events: string[] = [];
         let clock = Date.parse("2026-11-02T00:00:00Z");
-        let onCaddyExit = () => {};
+        let onCaddyExit: (lastOutput?: string) => void = () => {};
         let caddyUp = false;
         let derived: string[] = config?.publicIps ?? [];
         let records = { v4: [V4], v6: [] as string[] };
@@ -175,9 +176,9 @@ describe("ReachabilityRuntime", () => {
             setDerived: (ips: string[]) => (derived = ips),
             setRecords: (next: { v4: string[]; v6: string[] }) => (records = next),
             setCaddyUp: (up: boolean) => (caddyUp = up),
-            crashCaddy: () => {
+            crashCaddy: (lastOutput?: string) => {
                 caddyUp = false;
-                onCaddyExit();
+                onCaddyExit(lastOutput);
             }
         };
     };
@@ -231,6 +232,44 @@ describe("ReachabilityRuntime", () => {
             crashCaddy();
             expect(exitWarnings(events)).toHaveLength(1);
             await runtime.stop();
+        });
+
+        describe("when Caddy may not bind its port, as after an upgrade to a binary without the capability", () => {
+            // Caddy's real last line for this failure, captured from an unprivileged run.
+            const DENIED = '{"level":"error","msg":"loading initial config: loading new config: http app module: start: listening on :443: listen tcp :443: bind: permission denied"}';
+            const crashDenied = async (overrides: Partial<RuntimeDependencies>) => {
+                const { runtime, dataPath, events, crashCaddy } = await setup(baseConfig(), overrides);
+                await runtime.start();
+                crashCaddy(DENIED);
+                await runtime.stop();
+                return { warning: exitWarnings(events).join("\n"), dataPath };
+            };
+
+            it("names the fix for the binary now in use on Linux", async () => {
+                const { warning, dataPath } = await crashDenied({ platform: "linux", detectContainer: async () => false });
+                expect(warning).toContain(setcapCommand(caddyBinaryPath(dataPath, "linux")));
+                expect(warning).toContain("ip_unprivileged_port_start");
+            });
+
+            it("does not suggest sudo inside a container", async () => {
+                const { warning } = await crashDenied({ platform: "linux", detectContainer: async () => true });
+                expect(warning).toContain("NET_BIND_SERVICE");
+                expect(warning).not.toContain("sudo");
+            });
+
+            it("does not suggest Linux commands on another OS", async () => {
+                const { warning } = await crashDenied({ platform: "darwin", detectContainer: async () => false });
+                expect(warning).toContain("permission denied");
+                expect(warning).not.toContain("setcap");
+            });
+
+            it("adds nothing for another failure", async () => {
+                const { runtime, events, crashCaddy } = await setup(baseConfig(), { platform: "linux", detectContainer: async () => false });
+                await runtime.start();
+                crashCaddy('{"level":"error","msg":"listen tcp :443: bind: address already in use"}');
+                await runtime.stop();
+                expect(exitWarnings(events).join("\n")).not.toContain("setcap");
+            });
         });
 
         it("stays quiet about a Caddy it stopped itself", async () => {
@@ -306,9 +345,40 @@ describe("ReachabilityRuntime", () => {
         await runtime.stop();
     });
 
+    const caddyfileFor = (config: ReachabilityConfig, dataPath: string, domains: string[]) =>
+        generateCaddyfile({ ips: config.publicIps, domains, wsPort: config.wsPort, adminPort: config.caddyAdminPort, dataDirectory: path.join(dataPath, "caddy"), acmeDirectory: config.acmeDirectory });
+
+    it("does not add a proxy's name to the Caddyfile on an IP change, which would make Caddy order a certificate for it forever", async () => {
+        const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+        const config = baseConfig({ domain: "proxy.example", domainForced: true, announce: [`/ip4/${V4}/tcp/443/tls/ws`, proxied], externalAnnounce: [proxied], mode: "ip+reverse-proxy" });
+        const { runtime, dataPath, setDerived } = await setup(config);
+        // What setup leaves after the name's own issuance failed: "keep only what worked".
+        await fs.writeFile(caddyfilePath(dataPath), caddyfileFor(config, dataPath, []));
+        setDerived([V4_NEW]);
+        await runtime.runChecks();
+        await runtime.runChecks();
+        const caddyfile = await fs.readFile(caddyfilePath(dataPath), "utf-8");
+        expect(caddyfile).toContain(`https://${V4_NEW}`);
+        expect(caddyfile).not.toContain("https://proxy.example");
+        expect((await readReachabilityConfig(dataPath))!.announce).toEqual([`/ip4/${V4_NEW}/tcp/443/tls/ws`, proxied]);
+    });
+
+    it("keeps the site of a forced domain that did get its own certificate through an IP change", async () => {
+        const address = "/dns4/proxy.example/tcp/443/tls/ws";
+        const config = baseConfig({ domain: "proxy.example", domainForced: true, announce: [`/ip4/${V4}/tcp/443/tls/ws`, address], externalAnnounce: [address], mode: "ip+domain+reverse-proxy" });
+        const { runtime, dataPath, setDerived } = await setup(config);
+        await fs.writeFile(caddyfilePath(dataPath), caddyfileFor(config, dataPath, ["proxy.example"]));
+        setDerived([V4_NEW]);
+        await runtime.runChecks();
+        await runtime.runChecks();
+        expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).toContain("https://proxy.example");
+    });
+
     it("keeps a dropped domain in the Caddyfile through an IP change, so it can recover", async () => {
         const domainAddress = "/dns4/node.example/tcp/443/tls/ws";
-        const { runtime, dataPath, setDerived, setRecords } = await setup(baseConfig({ domain: "node.example", announce: [`/ip4/${V4}/tcp/443/tls/ws`], droppedAnnounce: [domainAddress], mode: "ip" }));
+        const config = baseConfig({ domain: "node.example", announce: [`/ip4/${V4}/tcp/443/tls/ws`], droppedAnnounce: [domainAddress], mode: "ip" });
+        const { runtime, dataPath, setDerived, setRecords } = await setup(config);
+        await fs.writeFile(caddyfilePath(dataPath), caddyfileFor(config, dataPath, ["node.example"]));
         setRecords({ v4: [], v6: [] });
         setDerived([V4_NEW]);
         await runtime.runChecks();
@@ -327,9 +397,9 @@ describe("ReachabilityRuntime", () => {
         await runtime.stop();
     });
 
-    it("does not lose the address when no certificate can be issued after an IP change, and retries", async () => {
+    it("does not lose the address when no certificate can be issued after an IP change, and retries after the wait", async () => {
         let issue = false;
-        const { runtime, dataPath, events, setDerived } = await setup(baseConfig(), { waitForIssuance: async (_config, names) => (issue ? names : []) });
+        const { runtime, dataPath, events, setDerived, advance } = await setup(baseConfig(), { waitForIssuance: async (_config, names) => (issue ? names : []) });
         const before = await fs.readFile(caddyfilePath(dataPath), "utf-8");
         setDerived([V4_NEW]);
         await runtime.runChecks();
@@ -339,9 +409,98 @@ describe("ReachabilityRuntime", () => {
         expect(events).not.toContain("restart kubo");
 
         issue = true;
+        advance(60 * 60_000);
         await runtime.runChecks();
         await runtime.runChecks();
         expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4_NEW]);
+    });
+
+    describe("a moved address that cannot get a certificate at all", () => {
+        const HOUR = 60 * 60_000;
+        const movedAndFailing = async () => {
+            const attempts: string[][] = [];
+            const state = { issues: false };
+            const context = await setup(baseConfig(), {
+                waitForIssuance: async (_config, names) => {
+                    attempts.push(names);
+                    return state.issues ? names : [];
+                }
+            });
+            context.setDerived([V4_NEW]);
+            const checks = async (count: number) => {
+                for (let i = 0; i < count; i++) {
+                    await context.runtime.runChecks();
+                    context.advance(CHECK_INTERVAL_MS);
+                }
+            };
+            return { ...context, attempts, state, checks };
+        };
+        const failureWarnings = (events: string[]) => events.filter((event) => event.startsWith("warn:") && event.includes("No certificate could be issued"));
+
+        // Let's Encrypt allows 5 failed validations per identifier per hour, and retrying every other
+        // check is 6: the node would lock itself out past the moment the operator fixes its forwarding.
+        it("orders at most once an hour, and waits longer after each failure", async () => {
+            const { attempts, checks, advance, events } = await movedAndFailing();
+            await checks(2);
+            expect(attempts).toEqual([[V4_NEW]]);
+            await checks(10);
+            expect(attempts, "retried inside the first hour").toHaveLength(1);
+            expect(failureWarnings(events)).toHaveLength(1);
+
+            advance(HOUR);
+            await checks(2);
+            expect(attempts).toHaveLength(2);
+            advance(HOUR);
+            await checks(2);
+            expect(attempts, "the wait did not grow after a second failure").toHaveLength(2);
+            advance(HOUR);
+            await checks(2);
+            expect(attempts).toHaveLength(3);
+        });
+
+        it("tells the operator how long it waits and how not to", async () => {
+            const { checks, events } = await movedAndFailing();
+            await checks(2);
+            expect(failureWarnings(events)[0]).toMatch(/try again in 1 h.*bitsocial reachability setup/);
+        });
+
+        it("keeps serving the stored address during the wait", async () => {
+            const { checks, dataPath, events } = await movedAndFailing();
+            const before = await fs.readFile(caddyfilePath(dataPath), "utf-8");
+            await checks(6);
+            expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4]);
+            expect(await fs.readFile(caddyfilePath(dataPath), "utf-8")).toBe(before);
+            expect(events).not.toContain("restart kubo");
+        });
+
+        it("stops waiting once setup got a certificate for a new address", async () => {
+            const { attempts, checks, dataPath, setDerived } = await movedAndFailing();
+            await checks(2);
+            await writeReachabilityConfig(dataPath, { ...(await readReachabilityConfig(dataPath))!, publicIps: [V4_NEW] });
+            setDerived([V4_NEW, "93.184.216.36"]);
+            await checks(1);
+            setDerived(["93.184.216.36"]);
+            await checks(2);
+            expect(attempts.at(-1)).toEqual(["93.184.216.36"]);
+        });
+
+        it("starts the wait from the beginning after a success", async () => {
+            const { attempts, checks, advance, dataPath, state, setDerived } = await movedAndFailing();
+            await checks(2);
+            state.issues = true;
+            advance(HOUR);
+            await checks(2);
+            expect((await readReachabilityConfig(dataPath))!.publicIps).toEqual([V4_NEW]);
+
+            state.issues = false;
+            setDerived(["93.184.216.36"]);
+            const before = attempts.length;
+            await checks(2);
+            expect(attempts).toHaveLength(before + 1);
+            advance(HOUR);
+            await checks(2);
+            expect(attempts, "a success should have reset the wait to 1 hour").toHaveLength(before + 2);
+        });
     });
 
     describe("a family that cannot get a certificate", () => {

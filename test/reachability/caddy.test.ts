@@ -7,6 +7,7 @@ import { directory as randomDirectory } from "tempy";
 import {
     CADDY_RELEASE_SHA256,
     caddyBinaryPath,
+    caddyfileServesDomain,
     caddyReleaseFor,
     ensureCaddyBinary,
     generateCaddyfile,
@@ -194,5 +195,21 @@ describe("generateCaddyfile", () => {
     it("rejects invalid ports", () => {
         expect(() => generateCaddyfile(spec({ wsPort: 0 }))).toThrow(/wsPort/);
         expect(() => generateCaddyfile(spec({ adminPort: 70000 }))).toThrow(/adminPort/);
+    });
+});
+
+describe("caddyfileServesDomain", () => {
+    const caddyfile = (domains: string[], httpsPort?: number) =>
+        generateCaddyfile({ ips: ["93.184.216.34"], domains, wsPort: 4002, adminPort: 2019, dataDirectory: "/data", acmeDirectory: "https://ca.example/dir", ...(httpsPort ? { httpsPort } : {}) });
+
+    it("finds a generated site, on the default port or another", () => {
+        expect(caddyfileServesDomain(caddyfile(["node.example"]), "node.example")).toBe(true);
+        expect(caddyfileServesDomain(caddyfile(["node.example"], 8443), "node.example")).toBe(true);
+    });
+
+    it("does not mistake another site or a longer name for it", () => {
+        expect(caddyfileServesDomain(caddyfile([]), "node.example")).toBe(false);
+        expect(caddyfileServesDomain(caddyfile(["node.example.org"]), "node.example")).toBe(false);
+        expect(caddyfileServesDomain(caddyfile(["sub.node.example"]), "node.example")).toBe(false);
     });
 });

@@ -167,6 +167,10 @@ export function generateCaddyfile(spec: CaddyfileSpec): string {
     ].join("\n\n") + "\n";
 }
 
+// Whether a Caddyfile from generateCaddyfile has a site for this name, on any port.
+export const caddyfileServesDomain = (caddyfile: string, domain: string) =>
+    caddyfile.split("\n").some((line) => line.startsWith(`https://${domain}`) && /^(:\d+)? \{$/.test(line.slice(`https://${domain}`.length)));
+
 export function startCaddy(dataPath: string, binaryPath: string, onOutput?: (line: string) => void): ChildProcessWithoutNullStreams {
     const child = spawn(binaryPath, ["run", "--config", caddyfilePath(dataPath), "--adapter", "caddyfile"], {
         env: {

@@ -105,11 +105,13 @@ When `config.json` exists and is enabled, the daemon runs Caddy as a child proce
 | Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
 | At start and every 20 min | Renews router forwards when there is no public IPv4 on an interface. They are released on shutdown or once disabled |
 
-**IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued at all, it keeps the stored addresses and tries again on later checks.
+**IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued at all, it keeps the stored addresses.
 
-If only some can be, it moves to those and waits before asking again for the family that failed: 1 hour, doubling up to 24, until `setup` or a retry gets that family a certificate. This covers the common case of a global IPv6 behind a router's firewall, which would otherwise look new on every check. The wait is held in memory, so restarting the daemon tries again straight away.
+If only some can be, it moves to those.
 
-**Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Rerunning `setup` can also announce it again, which starts a new 24 hours. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
+Either way it waits before asking again for the family that failed: 1 hour, doubling up to 24, until `setup` or a retry gets that family a certificate. Let's Encrypt allows 5 failed validations per address per hour, so retrying sooner could keep a node locked out after its forwarding is fixed. This also covers the common case of a global IPv6 behind a router's firewall, which would otherwise look new on every check. The wait is held in memory, so restarting the daemon tries again straight away, and so does running `setup`.
+
+**Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Rerunning `setup` can also announce it again, which starts a new 24 hours. Rerunning `setup` while a name still points elsewhere stops announcing it straight away, and the daemon announces it again when it recovers. The name keeps its Caddy site throughout, so its certificate is there when it does. The exception is another server holding TCP 443, where the name waits for `setup` to be run again. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
 
 **Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
 
@@ -137,7 +139,7 @@ The daemon sends stderr only to its log file, so these messages go to stdout whe
 sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443   # persist it in /etc/sysctl.d/
 ```
 
-Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. On kubo this is lost whenever kubo updates.
+Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is lost whenever kubo updates, and for Caddy whenever an upgrade changes `CADDY_VERSION`, because each version is a new file. The daemon cannot grant the capability itself, so when Caddy may not bind the port it warns with the command for the new binary. `status` reports the same under `tcp-443`.
 
 **Docker.** Add `cap_add: [NET_BIND_SERVICE]`, and publish `443:443/tcp`, `443:443/udp` and `80:80/tcp`. The image sets `KUBO_RPC_URL` and `IPFS_GATEWAY_URL`, and these beat the kubo config.
 

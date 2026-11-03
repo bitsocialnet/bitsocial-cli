@@ -39,6 +39,7 @@ import {
     dnsMismatchMessage,
     existingServerGuidance,
     IPV6_ONLY_CAVEAT,
+    isBindDenied,
     NO_IPV6_HINT,
     noWssStatement,
     reverseProxySnippet,
@@ -266,8 +267,7 @@ async function issueCertificates(
         }
         if (wait) return { issued: wait.issued };
 
-        const denied = /permission denied/i.test(output) && /bind|listen/i.test(output);
-        if (!denied || attempt > 1) return { issued: [], failure: output.trim().split("\n").at(-1) ?? "Caddy exited" };
+        if (!isBindDenied(output) || attempt > 1) return { issued: [], failure: output.trim().split("\n").at(-1) ?? "Caddy exited" };
         const guidance = bindDeniedGuidance({ inContainer: deps.inContainer, caddyPath: binaryPath, platform: deps.platform });
         if (deps.inContainer || !deps.confirm || !deps.runSudoSetcap || deps.platform !== "linux") throw new NeedsAnswerError(guidance);
         if (!(await deps.confirm(`Caddy needs permission to bind port 443. Run: ${setcapCommand(binaryPath)} ?`))) throw new NeedsAnswerError(guidance);
@@ -377,7 +377,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         if (!domainPointsHere(records, publicIps)) {
             const message = dnsMismatchMessage(domain, [...records.v4, ...records.v6], publicIps);
             // Refuse what the operator asked for now. A stored name going stale must not block repairing
-            // the rest, so it only sits out this run, and is still stored for when its DNS is fixed.
+            // the rest, so it is not announced for now, and is still stored for when its DNS is fixed.
             if (domainAskedForNow && !force) throw new SetupRefusedError(message);
             deps.warn(message);
             if (force) deps.warn("Continuing because of --force.");
@@ -385,12 +385,20 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         }
     }
 
+    // The daemon announces a stale name again when its DNS recovers, and does not touch the Caddyfile then, so a name
+    // that was served here keeps its site. Caddy orders nothing for it while its certificate on disk is still valid for this CA.
+    // Our Caddy cannot start with sites while another server holds the port, so there it waits for a rerun of setup.
+    const staleOwnAddresses = (domain && !domainUsable ? [`/dns4/${domain}/tcp/${httpsPort}/tls/ws`, `/dns6/${domain}/tcp/${httpsPort}/tls/ws`] : []).filter((address) => !previous?.externalAnnounce?.includes(address));
+    const staleWasAnnounced = staleOwnAddresses.filter((address) => previous?.announce.includes(address));
+    const keepsStaleSite = !portBusy && (staleWasAnnounced.length > 0 || staleOwnAddresses.some((address) => previous?.droppedAnnounce?.includes(address)));
+    const servedDomains = domain && (domainUsable || keepsStaleSite) ? [domain] : [];
+
     const certificateNames = portBusy ? [] : [...publicIps, ...(domain && domainUsable ? [domain] : [])];
     let issued: string[] = [];
     let failure: string | undefined;
     const spec: CaddyfileSpec = {
         ips: publicIps,
-        domains: domain && domainUsable ? [domain] : [],
+        domains: servedDomains,
         wsPort,
         adminPort: caddyAdminPort,
         dataDirectory: caddyDataDir(options.dataPath),
@@ -417,12 +425,12 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         // Keep only what worked, so the daemon's Caddy does not retry a name forever.
         await fs.writeFile(
             caddyfilePath(options.dataPath),
-            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && issued.includes(domain) ? [domain] : [] })
+            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && (issued.includes(domain) || keepsStaleSite) ? [domain] : [] })
         );
     } else {
         // Nothing for our Caddy to serve now, so the daemon must not keep starting it for old sites.
         await fs.mkdir(reachabilityDir(options.dataPath), { recursive: true });
-        await fs.writeFile(caddyfilePath(options.dataPath), generateCaddyfile({ ...spec, ips: [], domains: [] }));
+        await fs.writeFile(caddyfilePath(options.dataPath), generateCaddyfile({ ...spec, ips: [], domains: keepsStaleSite ? [domain!] : [] }));
     }
     const issuedIps = publicIps.filter((ip) => issued.includes(ip));
     const domainIssued = domain !== undefined && issued.includes(domain);
@@ -434,7 +442,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     // WSS needs kubo's loopback listener, the filter removal and AutoTLS off. Without something to terminate it,
     // or an operator who said they are setting that up, those edits would cost something and buy nothing.
-    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || (portBusy && domain !== undefined && domainUsable);
+    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || keepsStaleSite || (portBusy && domain !== undefined && domainUsable);
 
     const buildConfig = (externalAnnounce: string[], serveWss: boolean): ReachabilityConfig => {
         const announce = [
@@ -443,7 +451,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             ...externalAnnounce
         ];
         // Kept so the daemon can restore a name that recovers later, unless this run announced it again.
-        const stillDropped = (previous?.droppedAnnounce ?? []).filter((address) => !announce.includes(address));
+        const stillDropped = [...new Set([...(previous?.droppedAnnounce ?? []), ...(keepsStaleSite ? staleWasAnnounced : [])])].filter((address) => !announce.includes(address));
         return {
             version: 1,
             enabled: true,

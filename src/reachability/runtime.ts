@@ -1,8 +1,9 @@
 import type { ChildProcess } from "child_process";
 import fs from "fs/promises";
 import net from "net";
-import { caddyfilePath, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
-import { kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
+import { caddyBinaryPath, caddyfilePath, caddyfileServesDomain, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
+import { detectContainer, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
+import { bindDeniedGuidance, isBindDenied } from "./guidance.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
 import { applyKuboConfig, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
 import {
@@ -107,6 +108,8 @@ export interface RuntimeDependencies {
     discoverRouter?: () => Promise<NatRouter | undefined>;
     hasPublicIpv4Interface?: () => boolean;
     lanIpv4?: () => string | undefined;
+    platform?: string;
+    detectContainer?: () => Promise<boolean>;
 }
 
 export class ReachabilityRuntime {
@@ -123,7 +126,7 @@ export class ReachabilityRuntime {
     private router: NatRouter | undefined;
     private pendingIps: string | undefined;
     // By family, not address: what blocks one address, usually a firewall, blocks the host's other IPv6 addresses too.
-    private readonly issuanceBackoff = new Map<number, { failures: number; retryAt: number }>();
+    private readonly issuanceBackoff = new Map<number, { failures: number; retryAt: number; heldAtFailure: string[] }>();
     private readonly lastWarned = new Map<string, number>();
     private timers: NodeJS.Timeout[] = [];
     private checkInFlight: Promise<void> | undefined;
@@ -243,8 +246,9 @@ export class ReachabilityRuntime {
                 this.caddyAdopted = true;
                 this.loadedCaddyfile = undefined;
             } else {
+                const inContainer = await (this.deps.detectContainer ?? detectContainer)();
                 await this.caddy.start((lastOutput) => {
-                    if (!this.stopping && !this.expectingCaddyExit) this.warnThrottled("caddy-exit", `Caddy exited, so browsers cannot reach this node over WSS until it restarts. Last output: ${lastOutput || "none"}`);
+                    if (!this.stopping && !this.expectingCaddyExit) this.warnThrottled("caddy-exit", `Caddy exited, so browsers cannot reach this node over WSS until it restarts. Last output: ${lastOutput || "none"}${this.bindDeniedFix(lastOutput, inContainer)}`);
                     this.expectingCaddyExit = false;
                     this.caddyRunning = false;
                     this.loadedCaddyfile = undefined;
@@ -258,6 +262,13 @@ export class ReachabilityRuntime {
             await this.caddy.reload(caddyfile);
             this.loadedCaddyfile = caddyfile;
         }
+    }
+
+    // A file capability belongs to one binary, and each Caddy version is a new one that nothing here can grant it to.
+    private bindDeniedFix(lastOutput: string | undefined, inContainer: boolean): string {
+        const platform = this.deps.platform ?? process.platform;
+        if (!lastOutput || !isBindDenied(lastOutput) || (!inContainer && platform !== "linux")) return "";
+        return `\n${bindDeniedGuidance({ inContainer, caddyPath: caddyBinaryPath(this.deps.dataPath, platform), platform })}`;
     }
 
     private async derivePublicIps(config: ReachabilityConfig): Promise<string[]> {
@@ -294,18 +305,21 @@ export class ReachabilityRuntime {
         return applied;
     }
 
-    private backOffIssuance(ip: string): number {
+    private backOffIssuance(ip: string, config: ReachabilityConfig): number {
         const family = net.isIP(ip);
         const failures = (this.issuanceBackoff.get(family)?.failures ?? 0) + 1;
         const waitMs = Math.min(ISSUANCE_RETRY_MIN_MS * 2 ** (failures - 1), ISSUANCE_RETRY_MAX_MS);
-        this.issuanceBackoff.set(family, { failures, retryAt: this.now() + waitMs });
+        this.issuanceBackoff.set(family, { failures, retryAt: this.now() + waitMs, heldAtFailure: config.publicIps.filter((held) => net.isIP(held) === family) });
         return waitMs;
     }
 
     // A host often has an address in a family it can't get a certificate for, such as a global IPv6 behind a
     // router's firewall. It would look new on every check, so without this each one would ask the CA again.
     private addressesWorthTrying(config: ReachabilityConfig, derived: string[]): string[] {
-        for (const family of this.issuanceBackoff.keys()) if (config.publicIps.some((ip) => net.isIP(ip) === family)) this.issuanceBackoff.delete(family);
+        // Only an address the family did not hold when it failed proves a certificate came since. An address that
+        // moved keeps its old one stored throughout, and that must not end the wait.
+        for (const [family, backoff] of this.issuanceBackoff)
+            if (config.publicIps.some((ip) => net.isIP(ip) === family && !backoff.heldAtFailure.some((held) => isSameCertificateName(ip, held)))) this.issuanceBackoff.delete(family);
         return derived.filter((ip) => {
             const backoff = this.issuanceBackoff.get(net.isIP(ip));
             return backoff === undefined || this.now() >= backoff.retryAt;
@@ -314,9 +328,12 @@ export class ReachabilityRuntime {
 
     private async handleIpChange(config: ReachabilityConfig, nextIps: string[]): Promise<ReachabilityConfig> {
         // Moves only IP-certificate addresses. A domain's or proxy's address does not contain our IP.
+        const previousCaddyfile = await fs.readFile(caddyfilePath(this.deps.dataPath), "utf-8").catch(() => undefined);
         const spec = {
-            // A dropped name keeps its site: nothing else would add it back when its DNS recovers.
-            domains: config.domain && [...config.announce, ...(config.droppedAnnounce ?? [])].some((address) => address.includes(`/${config.domain}/`)) ? [config.domain] : [],
+            // Setup decided which sites exist, and this leaves that alone. A dropped name keeps its site, because
+            // nothing else would add it back when its DNS recovers. A name setup left out, because it could not get
+            // a certificate, stays out, because Caddy would keep ordering one for it.
+            domains: config.domain && previousCaddyfile !== undefined && caddyfileServesDomain(previousCaddyfile, config.domain) ? [config.domain] : [],
             wsPort: config.wsPort,
             adminPort: config.caddyAdminPort,
             dataDirectory: caddyDataDir(this.deps.dataPath),
@@ -325,7 +342,6 @@ export class ReachabilityRuntime {
             ...(config.httpPort ? { httpPort: config.httpPort } : {}),
             ...(config.acmeTrustedRootsPath ? { acmeTrustedRootsPath: config.acmeTrustedRootsPath } : {})
         };
-        const previousCaddyfile = await fs.readFile(caddyfilePath(this.deps.dataPath), "utf-8").catch(() => undefined);
         const candidate = generateCaddyfile({ ...spec, ips: nextIps });
         await fs.writeFile(caddyfilePath(this.deps.dataPath), candidate);
         await this.watchCaddy();
@@ -333,19 +349,20 @@ export class ReachabilityRuntime {
         const issued = this.deps.waitForIssuance
             ? await this.deps.waitForIssuance(config, nextIps)
             : (await waitForCertificates(this.deps.dataPath, config.acmeDirectory, nextIps)).issued;
-        // Nothing issued, e.g. a rate limit or an ACME outage. Keep the stored addresses so the next checks
+        // Each attempt can cost failed validations, of which Let's Encrypt allows 5 per address per hour. Retrying
+        // at every chance would use them up and keep failing after the operator fixes what was wrong.
+        for (const ip of nextIps.filter((candidate) => !issued.includes(candidate))) {
+            const waitMs = this.backOffIssuance(ip, config);
+            this.deps.warn(`No certificate could be issued for ${ip}. Will try again in ${waitMs / HOUR_MS} h, or run: bitsocial reachability setup`);
+        }
+        // Nothing issued, e.g. a rate limit or an ACME outage. Keep the stored addresses so later checks can
         // retry: with an empty list the daemon would never look at IPs again, and would stop Caddy too.
         if (issued.length === 0) {
-            this.deps.warn(`No certificate could be issued for ${nextIps.join(", ")} after the IP change. Will retry.`);
             if (previousCaddyfile !== undefined) await fs.writeFile(caddyfilePath(this.deps.dataPath), previousCaddyfile);
             await this.watchCaddy();
             return config;
         }
         if (issued.length !== nextIps.length) {
-            for (const ip of nextIps.filter((candidate) => !issued.includes(candidate))) {
-                const waitMs = this.backOffIssuance(ip);
-                this.deps.warn(`No certificate could be issued for ${ip}. Will try again in ${waitMs / HOUR_MS} h.`);
-            }
             await fs.writeFile(caddyfilePath(this.deps.dataPath), generateCaddyfile({ ...spec, ips: issued }));
             await this.watchCaddy();
         }

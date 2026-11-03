@@ -9,6 +9,8 @@ export const ACME_NOTICE =
 export const setcapCommand = (binaryPath: string) => `sudo setcap cap_net_bind_service=+ep ${JSON.stringify(binaryPath)}`;
 export const UNPRIVILEGED_PORT_SYSCTL = "sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443";
 
+export const isBindDenied = (caddyOutput: string) => /permission denied/i.test(caddyOutput) && /bind|listen/i.test(caddyOutput);
+
 export function bindDeniedGuidance(options: { inContainer: boolean; caddyPath: string; platform: string }): string {
     if (options.inContainer)
         return [
@@ -19,7 +21,7 @@ export function bindDeniedGuidance(options: { inContainer: boolean; caddyPath: s
         ].join(EOL);
     return [
         "Caddy may not bind port 443 as a non-root user. Run one of these, then rerun setup:",
-        `  ${setcapCommand(options.caddyPath)}`,
+        `  ${setcapCommand(options.caddyPath)}   (lost whenever an upgrade brings a new Caddy)`,
         `  ${UNPRIVILEGED_PORT_SYSCTL}   (also lets kubo bind UDP 443; persist it in /etc/sysctl.d/)`
     ].join(EOL);
 }

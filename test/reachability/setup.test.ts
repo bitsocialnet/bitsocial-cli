@@ -4,8 +4,9 @@ import type { AddressInfo } from "net";
 import path from "path";
 import { directory as randomDirectory } from "tempy";
 import { describe, expect, it } from "vitest";
-import { caddyfilePath, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
-import { readReachabilityConfig, reachabilityDir, type ReachabilityConfig } from "../../src/reachability/state.js";
+import { caddyfilePath, generateCaddyfile, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
+import { ReachabilityRuntime } from "../../src/reachability/runtime.js";
+import { caddyDataDir, readReachabilityConfig, reachabilityDir, type ReachabilityConfig } from "../../src/reachability/state.js";
 import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, existingServerGuidance, noWssStatement, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
 import {
     assertAcmeDirectoryAllowed,
@@ -342,3 +343,163 @@ describe("a setup run that cannot issue any certificate", () => {
         expect(await runReachabilitySetup(options(), deps)).toMatchObject({ enabled: true, publicIps: [], announce: [] });
     });
 });
+
+describe("a stored domain whose DNS no longer points here", () => {
+    const IP = "203.0.113.7";
+    const IP_ADDRESS = `/ip4/${IP}/tcp/443/tls/ws`;
+    const DOMAIN = "node.example";
+    const DOMAIN_ADDRESS = `/dns4/${DOMAIN}/tcp/443/tls/ws`;
+    const ELSEWHERE = { v4: ["198.51.100.9"], v6: [] };
+    const HERE = { v4: [IP], v6: [] };
+
+    const node = (overrides: Partial<ReachabilityConfig>): ReachabilityConfig => ({
+        version: 1,
+        enabled: true,
+        mode: "ip",
+        wsPort: 4002,
+        announce: [IP_ADDRESS],
+        publicIps: [IP],
+        domain: DOMAIN,
+        staging: false,
+        acmeDirectory: LETS_ENCRYPT_DIRECTORY,
+        caddyAdminPort: 2019,
+        ...overrides
+    });
+
+    // A running Caddy as setup sees it, through its admin API. Together with a certificate already on disk this
+    // lets setup succeed on every OS without a real Caddy or CA. Real Caddy is covered by the integration test.
+    const prepare = async (previous: ReachabilityConfig, { caddyUp = true, certificate = true } = {}) => {
+        const dataPath = randomDirectory();
+        const kuboRepoPath = path.join(dataPath, "repo");
+        await fs.mkdir(kuboRepoPath, { recursive: true });
+        await fs.mkdir(reachabilityDir(dataPath), { recursive: true });
+        await fs.writeFile(path.join(kuboRepoPath, "config"), JSON.stringify({ Addresses: { Swarm: [], AppendAnnounce: [] }, Swarm: {} }));
+        const admin = http.createServer((request, response) => {
+            if (request.url === "/config/") response.end(JSON.stringify({ storage: { root: caddyDataDir(dataPath).replaceAll("\\", "/") } }));
+            else response.end();
+        });
+        await new Promise<void>((resolve) => admin.listen(0, "127.0.0.1", resolve));
+        const adminPort = (admin.address() as AddressInfo).port;
+        if (!caddyUp) await new Promise((resolve) => admin.close(resolve));
+        const config = { ...previous, caddyAdminPort: adminPort };
+        await applyKuboConfig(config, { dataPath, kuboRepoPath }, true);
+        await fs.writeFile(
+            caddyfilePath(dataPath),
+            generateCaddyfile({ ips: previous.publicIps, domains: [DOMAIN], wsPort: 4002, adminPort, dataDirectory: caddyDataDir(dataPath), acmeDirectory: LETS_ENCRYPT_DIRECTORY })
+        );
+        if (certificate) {
+            const directory = path.join(caddyDataDir(dataPath), "certificates", "acme-v02.api.letsencrypt.org-directory", IP);
+            await fs.mkdir(directory, { recursive: true });
+            await fs.writeFile(path.join(directory, `${IP}.crt`), CERTIFICATE_EXPIRING_2126);
+        }
+        const options: SetupOptions = { dataPath, kuboRepoPath, kuboRpcUrl: new URL("http://127.0.0.1:1/api/v0"), staging: false, nonInteractive: true, overrides: { publicIps: [IP] } };
+        const deps: SetupDependencies = {
+            log: () => {},
+            warn: () => {},
+            confirm: async () => false,
+            platform: process.platform,
+            inContainer: false,
+            isCi: false,
+            kuboBinaryPath: "",
+            discoverRouter: async () => undefined,
+            probePort: async () => "free",
+            findHolder: async () => undefined,
+            publicIpsFromInterfaces: () => [],
+            lanIpv4: () => undefined,
+            ensureCaddy: async () => path.join(dataPath, "no-such-caddy"),
+            resolveDomain: async () => ELSEWHERE,
+            dial: async () => ({ peerId: "peer" }),
+            certificateTimeoutMs: 0
+        };
+        const caddyfile = () => fs.readFile(caddyfilePath(dataPath), "utf-8");
+        // The daemon's next check, once the record points here again.
+        const dnsRecovers = async () => {
+            const runtime = new ReachabilityRuntime({
+                dataPath,
+                kuboRepoPath,
+                kuboRpcUrl: options.kuboRpcUrl,
+                log: () => {},
+                warn: () => {},
+                derivePublicIps: async () => [IP],
+                resolveDomain: async () => HERE,
+                restartKubo: async () => {},
+                caddy: { start: async () => {}, stop: async () => {}, reload: async () => {}, isUp: async () => true }
+            });
+            await runtime.runChecks();
+        };
+        return { dataPath, options, deps, caddyfile, dnsRecovers, stopAdmin: () => new Promise((resolve) => admin.close(resolve)) };
+    };
+
+    it("after the daemon already dropped it: keeps its site, so browsers get its certificate when the daemon restores it", async () => {
+        const { options, deps, dataPath, caddyfile, dnsRecovers, stopAdmin } = await prepare(node({ droppedAnnounce: [DOMAIN_ADDRESS] }));
+        try {
+            await runReachabilitySetup(options, deps);
+            expect(await caddyfile()).toContain(`https://${DOMAIN}`);
+            await dnsRecovers();
+            expect((await readReachabilityConfig(dataPath))!.announce).toContain(DOMAIN_ADDRESS);
+            expect(await caddyfile()).toContain(`https://${DOMAIN}`);
+        } finally {
+            await stopAdmin();
+        }
+    });
+
+    it("during a shorter outage: stops announcing it now, and the daemon announces it again on recovery", async () => {
+        const { options, deps, dataPath, caddyfile, dnsRecovers, stopAdmin } = await prepare(node({ mode: "ip+domain", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+        try {
+            const result = await runReachabilitySetup(options, deps);
+            expect(result).toMatchObject({ mode: "ip", announce: [IP_ADDRESS], domain: DOMAIN, droppedAnnounce: [DOMAIN_ADDRESS] });
+            expect(await caddyfile()).toContain(`https://${DOMAIN}`);
+            await dnsRecovers();
+            const config = (await readReachabilityConfig(dataPath))!;
+            expect(config.announce).toEqual([IP_ADDRESS, DOMAIN_ADDRESS]);
+            expect(config.droppedAnnounce).toBeUndefined();
+            expect(await caddyfile()).toContain(`https://${DOMAIN}`);
+        } finally {
+            await stopAdmin();
+        }
+    });
+
+    it("on a node with nothing else to serve: keeps kubo's listener and the site, so it can come back", async () => {
+        const { options, deps, caddyfile, stopAdmin } = await prepare(node({ mode: "webtransport-only", publicIps: [], announce: [], droppedAnnounce: [DOMAIN_ADDRESS] }), { certificate: false });
+        try {
+            const result = await runReachabilitySetup(options, deps);
+            expect(result.serveWss).not.toBe(false);
+            expect(result.droppedAnnounce).toEqual([DOMAIN_ADDRESS]);
+            expect(await caddyfile()).toContain(`https://${DOMAIN}`);
+        } finally {
+            await stopAdmin();
+        }
+    });
+
+    it("keeps nothing for a name that never had an address here", async () => {
+        const { options, deps, caddyfile, stopAdmin } = await prepare(node({}));
+        try {
+            const result = await runReachabilitySetup(options, deps);
+            expect(result.droppedAnnounce).toBeUndefined();
+            expect(await caddyfile()).not.toContain(`https://${DOMAIN}`);
+        } finally {
+            await stopAdmin();
+        }
+    });
+
+    it("keeps no site once another server holds the port, because our Caddy could not start with one", async () => {
+        const { options, deps, caddyfile } = await prepare(node({ mode: "ip+domain", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }), { caddyUp: false });
+        const result = await runReachabilitySetup(options, { ...deps, probePort: async () => "busy" });
+        expect(result.droppedAnnounce).toBeUndefined();
+        expect(await caddyfile()).not.toMatch(/^https:\/\//m);
+    });
+});
+
+const CERTIFICATE_EXPIRING_2126 = `-----BEGIN CERTIFICATE-----
+MIIBwTCCAWigAwIBAgIULCKX6LXG4To/wQObUkjGcK75nXswCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRcmVhY2hhYmlsaXR5LXRlc3QwIBcNMjYxMTAyMTI1NzQxWhgP
+MjEyNjEwMDkxMjU3NDFaMBwxGjAYBgNVBAMMEXJlYWNoYWJpbGl0eS10ZXN0MFkw
+EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELndqlPuOzVu5TN+hSkn0IrB98qbFHS7K
+iCj2zWR7niAi/octeM1WJe7hMYPSOHLKVeb6l9musqzB+oKJgf6BlqOBhTCBgjAd
+BgNVHQ4EFgQU59HJ9KLzGmnyywqsFgO0q+SIQ44wHwYDVR0jBBgwFoAU59HJ9KLz
+GmnyywqsFgO0q+SIQ44wDwYDVR0TAQH/BAUwAwEB/zAvBgNVHREEKDAmhwTLAHEH
+hxAgAQ24AAAAAAAAAAAAAAAHggxub2RlLmV4YW1wbGUwCgYIKoZIzj0EAwIDRwAw
+RAIgY0U1lu/j1wXrOBhZ09CaVWyCrwxwSJ8hIMqO7XAq2SACIFPBLDHJ67dGGXq+
+Kd6p8xQWxlusPWNMReJkdwGvoLKZ
+-----END CERTIFICATE-----
+`;

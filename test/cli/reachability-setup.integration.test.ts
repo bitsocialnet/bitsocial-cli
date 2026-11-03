@@ -2,6 +2,7 @@
 // in place of a public address. Only an env-gated manual run can prove reachability from the internet.
 import { spawn, type ChildProcess } from "child_process";
 import net from "net";
+import tls from "tls";
 import fs from "fs/promises";
 import path from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -274,6 +275,21 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
         expect(result.stderr).toContain("does not point at this machine");
         const { stdout } = await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env);
         expect(JSON.parse(stdout)).toMatchObject({ mode: "ip", addresses: [`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`], domain: "node.test" });
+
+        // The daemon announces the name again when its DNS recovers, and nothing would add its site back then.
+        // Real Caddy, asked the way a browser asks for that name, must still answer with the name's certificate.
+        let names = "";
+        const answers = await waitForCondition(async () => {
+            names = await new Promise<string>((resolve) => {
+                const socket = tls.connect({ host: "127.0.0.1", port: httpsPort, servername: "node.test", rejectUnauthorized: false }, () => {
+                    resolve(socket.getPeerCertificate().subjectaltname ?? "");
+                    socket.destroy();
+                });
+                socket.once("error", (error) => resolve(`TLS error: ${error.message}`));
+            });
+            return names.includes("DNS:node.test");
+        }, 15_000, 500);
+        expect(answers, `Caddy presented: ${names}`).toBe(true);
     });
 
     it("drops our sites from the Caddyfile once another server takes the HTTPS port", async () => {
