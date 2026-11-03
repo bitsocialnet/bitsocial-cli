@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.122 (2026-11-03)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.134 ([8d443fe](https://github.com/bitsocialnet/bitsocial-cli/commit/8d443fe))
+  * pkc-js [0.0.134](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.134) (2026-11-03)
+    * fix(pages): rebuild reply pages exactly as signed so the update cycle can't wedge ([#477](https://github.com/pkcprotocol/pkc-js/issues/477)) ([#478](https://github.com/pkcprotocol/pkc-js/issues/478)) ([e3f2d9a](https://github.com/pkcprotocol/pkc-js/commit/e3f2d9a11c34e3633d86cda2e0281ebb8c103581))
+
 ## <small>0.19.121 (2026-11-03)</small>
 
 * fix(daemon): accept localhost for a loopback kubo listener in the mismatch warning ([64da698](https://github.com/bitsocialnet/bitsocial-cli/commit/64da698))
