@@ -18,21 +18,43 @@ const runCli = (args: string[], env: Record<string, string>): Promise<{ stdout: 
         let stderr = "";
         child.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
         child.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
+        // Fails with what the command printed, where the test's own timeout would only say that it timed out.
+        const timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            reject(new Error(`bitsocial ${args.join(" ")} did not finish in 150 s\nstdout: ${stdout}\nstderr: ${stderr}`));
+        }, 150_000);
         child.once("error", reject);
-        child.once("close", (exitCode) => resolve({ stdout, stderr: stderr.replace(/[\s›]+/g, " "), exitCode }));
+        child.once("close", (exitCode) => {
+            clearTimeout(timer);
+            resolve({ stdout, stderr: stderr.replace(/[\s›]+/g, " "), exitCode });
+        });
     });
 
 // These tests stand in 127.0.0.1 for a public address, and a repo created by the daemon hides loopback through
 // Addresses.NoAnnounce. A real public address is not filtered, so this removes the stand-in's only obstacle.
+// pkc-js sets kubo's Routing config in the background right after the daemon starts, and kubo does that by reading
+// the file and writing it back, which can undo an edit made at the same moment. So this repeats until the running
+// kubo has loaded the edit.
 const allowLoopbackAnnounce = async (dataPath: string, kuboApiUrl: string) => {
+    const LOOPBACK_FILTER = "/ip4/127.0.0.0/ipcidr/8";
     const configPath = path.join(dataPath, ".bitsocial-cli.ipfs", "config");
-    const config = JSON.parse(await fs.readFile(configPath, "utf-8"));
-    config.Addresses.NoAnnounce = (config.Addresses.NoAnnounce ?? []).filter((entry: string) => entry !== "/ip4/127.0.0.0/ipcidr/8");
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
-    const isUp = async () => Boolean((await fetch(`${kuboApiUrl}/id`, { method: "POST" }).catch(() => undefined))?.ok);
-    await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
-    await waitForCondition(async () => !(await isUp()), 15_000, 200);
-    if (!(await waitForCondition(isUp, 60_000, 500))) throw new Error("kubo did not come back after the restart");
+    const runningConfig = async () => {
+        const response = await fetch(`${kuboApiUrl}/config/show`, { method: "POST" }).catch(() => undefined);
+        return response?.ok ? ((await response.json()) as { Addresses: { NoAnnounce?: string[] } }) : undefined;
+    };
+    for (let attempt = 1; attempt <= 4; attempt++) {
+        const config = JSON.parse(await fs.readFile(configPath, "utf-8"));
+        config.Addresses.NoAnnounce = (config.Addresses.NoAnnounce ?? []).filter((entry: string) => entry !== LOOPBACK_FILTER);
+        await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+        await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
+        await waitForCondition(async () => !(await runningConfig()), 15_000, 200);
+        if (!(await waitForCondition(async () => Boolean(await runningConfig()), 60_000, 500))) throw new Error("kubo did not come back after the restart");
+        if (!(await runningConfig())?.Addresses.NoAnnounce?.includes(LOOPBACK_FILTER)) {
+            if (attempt > 1) console.log(`allowLoopbackAnnounce: the kubo config edit was undone ${attempt - 1} time(s) before it held`);
+            return;
+        }
+    }
+    throw new Error(`kubo still has ${LOOPBACK_FILTER} in Addresses.NoAnnounce after 4 attempts: ${await fs.readFile(configPath, "utf-8")}`);
 };
 
 it("--announce with no daemon running is refused before anything changes", { timeout: 60_000 }, async () => {
