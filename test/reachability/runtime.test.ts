@@ -191,6 +191,86 @@ describe("ReachabilityRuntime", () => {
         expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
     });
 
+    describe("a node with an address setup does not manage (#222)", () => {
+        const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+        const wss = "/ip4/93.184.216.34/tcp/443/tls/ws";
+        const announced = async () => ({ peerId, addresses: [`${wss}/p2p/${peerId}`] });
+
+        it("logs what a handshake showed, and does not warn", async () => {
+            const { runtime, events } = await setup(undefined, { kuboIdentity: announced, dialAddress: async () => ({ peerId }), browserAddressRetryMs: 1 });
+            await runtime.start();
+            await vi.waitFor(() => expect(events.some((event) => event.startsWith("log:") && event.includes(wss))).toBe(true));
+            await runtime.stop();
+            expect(events.filter((event) => event.startsWith("warn:"))).toEqual([]);
+        });
+
+        it("does not hold up start while it verifies", async () => {
+            let release: (() => void) | undefined;
+            const dialAddress = () => new Promise<{ peerId: string }>((resolve) => (release = () => resolve({ peerId })));
+            const { runtime, events } = await setup(undefined, { kuboIdentity: announced, dialAddress, browserAddressRetryMs: 1 });
+            await runtime.start();
+            expect(events).toEqual([]);
+            await vi.waitFor(() => expect(release).toBeDefined());
+            release!();
+            await runtime.stop();
+        });
+
+        it("retries while kubo settles, so one early failure is not reported", async () => {
+            let dials = 0;
+            const dialAddress = async () => {
+                if (++dials < 3) throw new Error("connection refused");
+                return { peerId };
+            };
+            const { runtime, events } = await setup(undefined, { kuboIdentity: announced, dialAddress, browserAddressRetryMs: 1 });
+            await runtime.start();
+            await vi.waitFor(() => expect(events.some((event) => event.startsWith("log:") && event.includes(wss))).toBe(true));
+            await runtime.stop();
+            expect(dials).toBe(3);
+            expect(events.filter((event) => event.startsWith("warn:"))).toEqual([]);
+        });
+
+        it("warns once, naming the address and why, when every attempt fails", async () => {
+            const { runtime, events } = await setup(undefined, {
+                kuboIdentity: announced,
+                dialAddress: async () => {
+                    throw new Error("connection refused");
+                },
+                browserAddressRetryMs: 1
+            });
+            await runtime.start();
+            await vi.waitFor(() => expect(events.some((event) => event.startsWith("warn:"))).toBe(true));
+            await runtime.stop();
+            const warnings = events.filter((event) => event.startsWith("warn:"));
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain(NOT_CONFIGURED_MESSAGE);
+            expect(warnings[0]).toContain(wss);
+            expect(warnings[0]).toContain("connection refused");
+        });
+
+        it("stops verifying when the daemon stops, and reports nothing", async () => {
+            let signalSeen: AbortSignal | undefined;
+            const dialAddress = (_address: string, options: { signal?: AbortSignal }) =>
+                new Promise<{ peerId: string }>((_resolve, reject) => {
+                    signalSeen = options.signal;
+                    options.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+                });
+            const { runtime, events } = await setup(undefined, { kuboIdentity: announced, dialAddress, browserAddressRetryMs: 1 });
+            await runtime.start();
+            await vi.waitFor(() => expect(signalSeen).toBeDefined());
+            await runtime.stop();
+            expect(signalSeen!.aborted).toBe(true);
+            expect(events).toEqual([]);
+        });
+
+        it("leaves a node setup manages alone", async () => {
+            const dialAddress = vi.fn(async () => ({ peerId }));
+            const { runtime } = await setup(baseConfig({ enabled: false }), { kuboIdentity: announced, dialAddress, browserAddressRetryMs: 1 });
+            await runtime.start();
+            await runtime.stop();
+            expect(dialAddress).not.toHaveBeenCalled();
+        });
+    });
+
     it("stays quiet when the operator disabled it", async () => {
         const { runtime, events } = await setup(baseConfig({ enabled: false }));
         await runtime.start();

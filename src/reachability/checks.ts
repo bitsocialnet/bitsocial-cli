@@ -5,7 +5,7 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 import { caddyBinaryPath, isOurCaddyRunning } from "./caddy.js";
-import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type PortState } from "./discovery.js";
+import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
 import { setcapCommand, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
 import type { CertificateInfo } from "./state.js";
 import { loadKuboConfigFile } from "../util.js";
@@ -111,6 +111,9 @@ export interface CheckFacts {
     kuboRunningAnnounce: string[] | undefined;
     firewall: FirewallState | undefined;
     certificates: CertificateInfo[];
+    // Addresses setup does not manage that passed a handshake from this machine. Only `status` fills these two in.
+    verifiedWss?: string[];
+    kuboAutonat?: KuboAutonat;
 }
 
 const bindFix = (facts: CheckFacts, binaryPath: string) => {
@@ -137,6 +140,41 @@ function kuboAnnounceCheck(facts: CheckFacts): ReachabilityCheck | undefined {
     return { id: "kubo-announce", status: "ok", detail: `kubo announces ${facts.announce.length === 1 ? "the browser address" : `all ${facts.announce.length} browser addresses`}` };
 }
 
+// AutoNAT tests UDP 4001 and the like, not the UDP 443 this check is about.
+const isUdpFallback = (address: string) => {
+    const port = address.match(/\/udp\/(\d+)\/quic-v1/)?.[1];
+    return port !== undefined && port !== "443";
+};
+
+// What losing UDP 443 costs a node that browsers already reach over WSS: WebTransport has only its other UDP port left.
+function udpUnavailableBesideWorkingWss(facts: CheckFacts): ReachabilityCheck {
+    const isHeld = facts.udp443 === "busy";
+    const held = isHeld ? `UDP 443 is held by ${facts.udp443Holder ?? "another program"}` : "kubo has no permission to bind UDP 443";
+    const fix = isHeld ? "Stop whatever holds UDP 443, so kubo can listen there" : bindFix(facts, facts.kuboPath);
+    const reachable = facts.kuboAutonat?.reachable.filter(isUdpFallback) ?? [];
+    if (reachable.length > 0) {
+        const port = reachable[0]!.match(/\/udp\/(\d+)\//)![1];
+        return { id: "udp-443", status: "ok", detail: `${held}, but AutoNAT reached kubo on UDP ${port}, which WebTransport can use: ${reachable.join(", ")}` };
+    }
+    const unreachable = facts.kuboAutonat?.unreachable.filter(isUdpFallback) ?? [];
+    if (unreachable.length > 0) return { id: "udp-443", status: "warn", detail: `${held}, and AutoNAT could not reach kubo's other UDP addresses, so WebTransport may not work: ${unreachable.join(", ")}`, fix };
+    return { id: "udp-443", status: "warn", detail: `${held}, and whether WebTransport works on kubo's other UDP port has not been tested yet`, fix };
+}
+
+function inboundCheck(facts: CheckFacts): ReachabilityCheck {
+    const { reachable = [], unreachable = [], unknown = [] } = facts.kuboAutonat ?? {};
+    // Nothing on this machine can prove this, including a cloud provider's firewall, which is invisible from here.
+    const unproven = "Only a connection from another network can prove inbound traffic reaches this machine. A provider firewall cannot be seen from here";
+    if (reachable.length + unreachable.length + unknown.length === 0) return { id: "inbound", status: "unknown", detail: unproven };
+    const results = [
+        ...(reachable.length > 0 ? [`AutoNAT reached: ${reachable.join(", ")}`] : []),
+        ...(unreachable.length > 0 ? [`AutoNAT could not reach: ${unreachable.join(", ")}`] : []),
+        ...(unknown.length > 0 ? [`Not tested yet: ${unknown.join(", ")}`] : [])
+    ].join(". ");
+    const status = reachable.length > 0 ? "ok" : unreachable.length > 0 ? "warn" : "unknown";
+    return { id: "inbound", status, detail: `${results}. This does not cover WSS through a reverse proxy, which only a connection from another network can prove` };
+}
+
 export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
     const checks: ReachabilityCheck[] = [];
     const port = facts.httpsPort;
@@ -152,7 +190,10 @@ export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
               }
     );
 
+    const verifiedOnPort = facts.verifiedWss?.find((address) => address.includes(`/tcp/${port}/`));
     if (facts.ourCaddyRunning) checks.push({ id: "tcp-443", status: "ok", detail: `TCP ${port} is served by this node's Caddy` });
+    else if (verifiedOnPort)
+        checks.push({ id: "tcp-443", status: "ok", detail: facts.tcp443 === "busy" ? `TCP ${port} is held by ${facts.tcp443Holder ?? "another program"}, which serves ${verifiedOnPort}` : `TCP ${port} serves ${verifiedOnPort}` });
     else if (facts.tcp443 === "busy")
         checks.push({
             id: "tcp-443",
@@ -168,8 +209,9 @@ export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
 
     const kuboHoldsUdp = facts.kuboListen?.some((address) => address.includes("/udp/443/quic-v1/webtransport")) === true;
     if (kuboHoldsUdp) checks.push({ id: "udp-443", status: "ok", detail: "kubo is listening for WebTransport on UDP 443" });
+    else if ((facts.udp443 === "busy" || facts.kuboBind === "denied") && facts.verifiedWss?.length) checks.push(udpUnavailableBesideWorkingWss(facts));
     else if (facts.udp443 === "busy")
-        checks.push({ id: "udp-443", status: "fail", detail: `UDP 443 is held by ${facts.udp443Holder ?? "another program"}, so kubo cannot listen there`, fix: "Stop whatever holds it. WebTransport then falls back to UDP 4001, which some ISPs filter" });
+        checks.push({ id: "udp-443", status: "fail", detail: `UDP 443 is held by ${facts.udp443Holder ?? "another program"}, so kubo cannot listen there`, fix: "Stop whatever holds it. Until then WebTransport depends on kubo's other UDP port" });
     else if (facts.kuboBind === "denied")
         checks.push({ id: "udp-443", status: "fail", detail: "kubo has no permission to bind UDP 443. It would start normally and silently not listen", fix: bindFix(facts, facts.kuboPath) });
     else if (facts.kuboBind === "unknown") checks.push({ id: "udp-443", status: "unknown", detail: "getcap is not installed, so kubo's permission to bind UDP 443 could not be read" });
@@ -206,8 +248,7 @@ export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
                 checks.push({ id: "certificate", status: "warn", detail: `The certificate for ${certificate.names.join(", ")} has ${certificate.hoursLeft} hours left`, fix: "Check that TCP 80 or 443 still reaches this machine" });
     }
 
-    // Nothing on this machine can prove this, including a cloud provider's firewall, which is invisible from here.
-    checks.push({ id: "inbound", status: "unknown", detail: "Only a connection from another network can prove inbound traffic reaches this machine. A provider firewall cannot be seen from here" });
+    checks.push(inboundCheck(facts));
     return checks;
 }
 
@@ -299,6 +340,8 @@ export async function gatherCheckFacts(input: {
     caddyAdminPort?: number;
     certificates?: CertificateInfo[];
     announce?: string[];
+    // Only for `status`: setup warns on everything it gets, and AutoNAT has no answer for a kubo that just started.
+    autonat?: boolean;
 }): Promise<CheckFacts> {
     const platform = process.platform;
     const httpsPort = input.httpsPort ?? 443;
@@ -311,6 +354,7 @@ export async function gatherCheckFacts(input: {
     const kuboListen = await kuboListenAddresses(input.kuboRpcUrl);
     const kuboConfig = await loadKuboConfigFile(input.dataPath).catch(() => undefined);
     const ourCaddyRunning = input.caddyAdminPort ? await isOurCaddyRunning(input.caddyAdminPort, input.dataPath) : false;
+    const autonat = input.autonat ? await kuboAutonat(input.kuboRpcUrl) : undefined;
     const [tcp443, tcp80, udp443] = await Promise.all([probeTcpPort(httpsPort), probeTcpPort(httpPort), probeUdpPort(443)]);
     return {
         platform,
@@ -337,7 +381,8 @@ export async function gatherCheckFacts(input: {
         kuboConfigAnnounce: kuboConfig ? [...(kuboConfig.Addresses?.Announce ?? []), ...(kuboConfig.Addresses?.AppendAnnounce ?? [])] : undefined,
         kuboRunningAnnounce: (await kuboIdentity(input.kuboRpcUrl))?.addresses,
         firewall: await readFirewall(platform),
-        certificates: input.certificates ?? []
+        certificates: input.certificates ?? [],
+        ...(autonat ? { kuboAutonat: autonat } : {})
     };
 }
 

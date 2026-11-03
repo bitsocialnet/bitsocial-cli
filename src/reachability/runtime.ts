@@ -1,6 +1,7 @@
 import type { ChildProcess } from "child_process";
 import fs from "fs/promises";
 import net from "net";
+import path from "path";
 import { caddyBinaryPath, caddyfilePath, caddyfileServesDomain, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
 import { detectContainer, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
 import { bindDeniedGuidance, isBindDenied } from "./guidance.js";
@@ -17,6 +18,7 @@ import {
     type ReachabilityConfig,
     type ReachabilityRuntimeStatus
 } from "./state.js";
+import { handshakeFailedMessage, handshakeSucceededMessage, isBrowserAddress, unverifiedMessage, verifyUnmanagedAddresses, type DialAddress } from "./unmanaged.js";
 
 export const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 export const LEASE_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
@@ -27,6 +29,8 @@ export const CERTIFICATE_WARNING_HOURS = 24;
 const ISSUANCE_RETRY_MIN_MS = HOUR_MS;
 const ISSUANCE_RETRY_MAX_MS = 24 * HOUR_MS;
 
+const BROWSER_ADDRESS_ATTEMPTS = 8;
+const BROWSER_ADDRESS_RETRY_MS = 15_000;
 export const NOT_CONFIGURED_MESSAGE = "Browsers cannot reach this node. To fix that, run: bitsocial reachability setup";
 
 // The IPs we should now serve, or undefined for no change. A family we find nothing for is left alone,
@@ -110,6 +114,9 @@ export interface RuntimeDependencies {
     lanIpv4?: () => string | undefined;
     platform?: string;
     detectContainer?: () => Promise<boolean>;
+    kuboIdentity?: () => Promise<{ peerId: string; addresses: string[] } | undefined>;
+    dialAddress?: DialAddress;
+    browserAddressRetryMs?: number;
 }
 
 export class ReachabilityRuntime {
@@ -132,6 +139,7 @@ export class ReachabilityRuntime {
     private readonly lastWarned = new Map<string, number>();
     private timers: NodeJS.Timeout[] = [];
     private checkInFlight: Promise<void> | undefined;
+    private browserAddressCheck: Promise<void> | undefined;
 
     constructor(deps: RuntimeDependencies) {
         this.deps = deps;
@@ -152,7 +160,7 @@ export class ReachabilityRuntime {
     async start(): Promise<void> {
         const config = await this.readConfig();
         if (!config) {
-            this.deps.warn(NOT_CONFIGURED_MESSAGE);
+            await this.reportNotConfigured();
         } else if (config.enabled) {
             await this.printAddresses(config);
         }
@@ -166,6 +174,52 @@ export class ReachabilityRuntime {
         this.timers.push(setInterval(() => void this.runChecks().catch((error) => this.deps.warn(String(error))), CHECK_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
         for (const timer of this.timers) timer.unref();
+    }
+
+    private async reportNotConfigured() {
+        const identity = this.deps.kuboIdentity ?? (() => kuboIdentity(this.deps.kuboRpcUrl));
+        const kuboConfig = await fs.readFile(path.join(this.deps.kuboRepoPath, "config"), "utf-8").then((text) => JSON.parse(text), () => undefined);
+        const inConfig: string[] = [...(kuboConfig?.Addresses?.Announce ?? []), ...(kuboConfig?.Addresses?.AppendAnnounce ?? [])];
+        const running = (await identity())?.addresses;
+        if (![...(running ?? []), ...inConfig].some((address) => isBrowserAddress(address))) {
+            this.deps.warn(NOT_CONFIGURED_MESSAGE);
+            return;
+        }
+        // kubo may have only just started, and its certificates may be on their way, so one failed dial proves little.
+        this.browserAddressCheck = this.verifyBrowserAddresses(identity, inConfig).catch((error) => this.deps.warn(String(error)));
+    }
+
+    private async verifyBrowserAddresses(identity: NonNullable<RuntimeDependencies["kuboIdentity"]>, inConfig: string[]) {
+        const { signal } = this.stopController;
+        for (let attempt = 1; ; attempt++) {
+            const results = await verifyUnmanagedAddresses({
+                running: (await identity())?.addresses,
+                config: inConfig,
+                signal,
+                ...(this.deps.dialAddress ? { dial: this.deps.dialAddress } : {}),
+                ...(this.deps.resolveDomain ? { resolve: this.deps.resolveDomain } : {})
+            });
+            // setup may have taken over while this ran.
+            if (this.stopping || (await this.readConfig())) return;
+            const succeeded = results.filter(({ status }) => status === "ok");
+            if (succeeded.length > 0) {
+                for (const { address } of succeeded) this.deps.log(handshakeSucceededMessage(address));
+                return;
+            }
+            if (attempt >= BROWSER_ADDRESS_ATTEMPTS) {
+                const failed = results.filter(({ status }) => status === "failed");
+                const unverified = results.filter(({ status }) => status === "unverified");
+                const reasons = [...(failed.length > 0 ? [handshakeFailedMessage(failed)] : []), ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])];
+                this.deps.warn([NOT_CONFIGURED_MESSAGE, ...reasons].join(". "));
+                return;
+            }
+            await new Promise<void>((resolve) => {
+                const timer = setTimeout(resolve, this.deps.browserAddressRetryMs ?? BROWSER_ADDRESS_RETRY_MS);
+                timer.unref();
+                signal.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+            });
+            if (this.stopping) return;
+        }
     }
 
     private async readConfig(): Promise<ReachabilityConfig | undefined> {
@@ -504,6 +558,7 @@ export class ReachabilityRuntime {
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
         await this.checkInFlight?.catch(() => {});
+        await this.browserAddressCheck;
         await this.watchQueue;
         await this.leases;
         await this.router?.release().catch(() => {});

@@ -192,6 +192,24 @@ export async function kuboIdentity(kuboRpcUrl: URL): Promise<{ peerId: string; a
 export const addressesNotAnnounced = (expected: string[], announced: string[]): string[] =>
     expected.filter((address) => !announced.some((entry) => entry === address || entry.startsWith(`${address}/p2p/`)));
 
+// AutoNAT v2's verdict on each address, from servers on other networks. It tests kubo's own listeners, AutoTLS included, and did not list a /tls/ws address that was only announced, as one behind a reverse proxy is.
+export interface KuboAutonat {
+    reachable: string[];
+    unreachable: string[];
+    unknown: string[];
+}
+
+export async function kuboAutonat(kuboRpcUrl: URL): Promise<KuboAutonat | undefined> {
+    try {
+        const response = await kuboPost(kuboRpcUrl, "swarm/addrs/autonat");
+        if (!response.ok) return undefined;
+        const body = (await response.json()) as { reachable?: string[] | null; unreachable?: string[] | null; unknown?: string[] | null };
+        return { reachable: body.reachable ?? [], unreachable: body.unreachable ?? [], unknown: body.unknown ?? [] };
+    } catch {
+        return undefined;
+    }
+}
+
 export async function kuboListenAddresses(kuboRpcUrl: URL): Promise<string[] | undefined> {
     try {
         const response = await kuboPost(kuboRpcUrl, "swarm/addrs/listen");

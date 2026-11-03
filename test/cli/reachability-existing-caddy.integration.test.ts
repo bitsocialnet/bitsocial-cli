@@ -143,6 +143,122 @@ describe("another Caddy already holds the HTTPS port, no domain given", { timeou
     });
 });
 
+// Issue #222: everything setup would do, done by hand, and setup never run. The operator's Caddy holds the HTTPS port.
+describe("a browser address set up by hand, without setup", { timeout: 300_000 }, () => {
+    let pebble: RunningPebble;
+    let daemon: DynamicDaemonResult;
+    let operator: ChildProcess | undefined;
+    let operatorAdmin: number;
+    let dataPath: string;
+    let httpsPort: number;
+    let announce: string;
+    let env: Record<string, string>;
+    const LOOPBACK = "/ip4/127.0.0.0/ipcidr/8";
+
+    const status = async () => {
+        const result = await runCli(["reachability", "status", "--pkcOptions.dataPath", dataPath], env);
+        const json = JSON.parse((await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env)).stdout);
+        return { text: result.stdout, json };
+    };
+
+    beforeAll(async () => {
+        dataPath = randomDirectory();
+        pebble = await startPebble(randomDirectory());
+        let httpPort: number;
+        let wsPort: number;
+        [httpsPort, httpPort, operatorAdmin, wsPort] = await Promise.all([allocateFreePort("0.0.0.0"), allocateFreePort("0.0.0.0"), allocateFreePort(), allocateFreePort()]);
+        announce = `/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`;
+        const operatorData = randomDirectory();
+        await fs.mkdir(path.join(operatorData, "reachability"), { recursive: true });
+        await fs.writeFile(
+            caddyfilePath(operatorData),
+            generateCaddyfile({
+                ips: ["127.0.0.1"],
+                domains: [],
+                wsPort,
+                adminPort: operatorAdmin,
+                httpsPort,
+                httpPort,
+                dataDirectory: path.join(operatorData, "reachability", "caddy-data"),
+                acmeDirectory: pebble.directoryUrl,
+                acmeTrustedRootsPath: pebble.listenerRootPath
+            })
+        );
+        operator = startCaddy(operatorData, await ensureCaddyBinary(operatorData));
+        expect((await waitForCertificates(operatorData, pebble.directoryUrl, ["127.0.0.1"], 60_000)).missing).toEqual([]);
+
+        daemon = await startPkcDaemonWithDynamicPorts((e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl]);
+        env = {
+            KUBO_RPC_URL: daemon.kuboRpcUrl,
+            NODE_EXTRA_CA_CERTS: pebble.issuingRootPath,
+            BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1",
+            BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT: String(httpsPort)
+        };
+
+        // pkc-js rewrites this file in the background just after the daemon starts, so repeat until running kubo has the edit.
+        const configPath = path.join(dataPath, ".bitsocial-cli.ipfs", "config");
+        const runningAnnounces = async () => {
+            const response = await fetch(`${daemon.kuboApiUrl}/id`, { method: "POST" }).catch(() => undefined);
+            return response?.ok ? ((await response.json()) as { Addresses: string[] | null }).Addresses ?? [] : undefined;
+        };
+        let loaded = false;
+        for (let attempt = 1; attempt <= 4 && !loaded; attempt++) {
+            const config = JSON.parse(await fs.readFile(configPath, "utf-8"));
+            config.Addresses.Swarm = [...config.Addresses.Swarm.filter((entry: string) => !entry.endsWith("/ws")), `/ip4/127.0.0.1/tcp/${wsPort}/ws`];
+            config.Addresses.AppendAnnounce = [announce];
+            config.Addresses.NoAnnounce = (config.Addresses.NoAnnounce ?? []).filter((entry: string) => entry !== LOOPBACK);
+            config.Swarm.AddrFilters = (config.Swarm.AddrFilters ?? []).filter((entry: string) => entry !== LOOPBACK);
+            await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+            await fetch(`${daemon.kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
+            await waitForCondition(async () => !(await runningAnnounces()), 15_000, 200);
+            await waitForCondition(async () => Boolean(await runningAnnounces()), 60_000, 500);
+            loaded = (await runningAnnounces())?.some((address) => address.startsWith(announce)) === true;
+        }
+        expect(loaded, "running kubo never announced the hand-made address").toBe(true);
+    }, 300_000);
+
+    afterAll(async () => {
+        if (operatorAdmin) await stopCaddy(operatorAdmin).catch(() => {});
+        await killChildProcess(operator);
+        await stopPkcDaemon(daemon?.daemonProcess);
+        if (daemon?.kuboApiUrl) await ensureKuboNodeStopped(daemon.kuboApiUrl);
+        await pebble?.stop();
+    }, 60_000);
+
+    it("reports the working address through a real handshake, instead of saying browsers cannot reach it", async () => {
+        // Retried, because running kubo may still be coming up behind the operator's Caddy.
+        let last: Awaited<ReturnType<typeof status>> | undefined;
+        const verified = await waitForCondition(
+            async () => {
+                last = await status();
+                return last.json.unmanagedAddresses?.[0]?.status === "ok";
+            },
+            60_000,
+            1000
+        );
+        expect(verified, JSON.stringify(last?.json.unmanagedAddresses)).toBe(true);
+        expect(last!.json.configured).toBe(false);
+        expect(last!.text).not.toContain("Browsers cannot reach this node");
+        expect(last!.text).toContain(announce);
+        expect(last!.text).toContain("does not manage");
+        expect(last!.json.checks.find((check: { id: string }) => check.id === "browser-address")).toMatchObject({ status: "ok" });
+    });
+
+    it("does not call the operator's Caddy on the HTTPS port a problem", async () => {
+        const { json } = await status();
+        expect(json.checks.find((check: { id: string }) => check.id === "tcp-443")).toMatchObject({ status: "ok" });
+    });
+
+    it("says browsers cannot reach it, naming the address, once the handshake stops working", async () => {
+        await stopCaddy(operatorAdmin).catch(() => {});
+        await killChildProcess(operator);
+        const { text, json } = await status();
+        expect(json.unmanagedAddresses[0]).toMatchObject({ address: announce, status: "failed" });
+        expect(text).toContain("Browsers cannot reach this node");
+        expect(text).toContain(announce);
+    });
+});
+
 // With Pebble really validating: http-01 on the port the other Caddy holds cannot work, so the certificate
 // only exists if validation through the HTTPS port succeeded.
 describe("another Caddy holds only the HTTP port", { timeout: 300_000 }, () => {
