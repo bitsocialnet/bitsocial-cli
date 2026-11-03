@@ -424,20 +424,20 @@ export default class Daemon extends Command {
                     const kuboConfigPath = path.join(resolveKuboRepoPath(mergedPkcOptions.dataPath!), "config");
                     const mismatches = [
                         process.env["KUBO_RPC_URL"] && !pkcOptionsFromFlag?.kuboRpcClientsOptions
-                            ? describeKuboEndpointMismatch({
+                            ? await describeKuboEndpointMismatch({
                                   envVar: "KUBO_RPC_URL",
                                   configField: "Addresses.API",
                                   configPath: kuboConfigPath,
-                                  configured: await kuboRpcUrlFromKuboConfig(ipfsConfig),
+                                  configured: ipfsConfig?.Addresses?.API,
                                   chosen: kuboRpcEndpoint
                               })
                             : undefined,
                         process.env["IPFS_GATEWAY_URL"] && !pkcOptionsFromFlag?.ipfsGatewayUrls
-                            ? describeKuboEndpointMismatch({
+                            ? await describeKuboEndpointMismatch({
                                   envVar: "IPFS_GATEWAY_URL",
                                   configField: "Addresses.Gateway",
                                   configPath: kuboConfigPath,
-                                  configured: await ipfsGatewayUrlFromKuboConfig(ipfsConfig),
+                                  configured: ipfsConfig?.Addresses?.Gateway,
                                   chosen: ipfsGatewayEndpoint
                               })
                             : undefined

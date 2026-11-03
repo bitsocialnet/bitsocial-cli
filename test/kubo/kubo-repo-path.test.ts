@@ -136,62 +136,94 @@ describe("toConnectableHostname", () => {
 // override that differs from the config leaves kubo on one port and the daemon dialling another.
 describe("describeKuboEndpointMismatch", () => {
     const configPath = "/data/.bitsocial-cli.ipfs/config";
-    const describeApi = (configured: URL | undefined, chosen: URL) =>
-        describeKuboEndpointMismatch({ envVar: "KUBO_RPC_URL", configField: "Addresses.API", configPath, configured, chosen });
+    const describeApi = (configured: unknown, chosen: string) =>
+        describeKuboEndpointMismatch({
+            envVar: "KUBO_RPC_URL",
+            configField: "Addresses.API",
+            configPath,
+            configured,
+            chosen: new URL(chosen)
+        });
+    const chosen = "http://127.0.0.1:5001/api/v0";
 
-    it("says nothing before kubo has a config", () => {
-        expect(describeApi(undefined, new URL("http://127.0.0.1:5001/api/v0"))).toBeUndefined();
+    it("says nothing before kubo has a config, or when the API is disabled or a unix socket", async () => {
+        expect(await describeApi(undefined, chosen)).toBeUndefined();
+        expect(await describeApi("", chosen)).toBeUndefined();
+        expect(await describeApi([], chosen)).toBeUndefined();
+        expect(await describeApi("/unix/tmp/kubo-api.sock", chosen)).toBeUndefined();
     });
 
-    it("says nothing when the env override reaches the configured listener", () => {
-        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://127.0.0.1:5001/api/v0"))).toBeUndefined();
-        // Bound on the wildcard, reached over loopback.
-        expect(describeApi(new URL("http://0.0.0.0:5001/api/v0"), new URL("http://127.0.0.1:5001/api/v0"))).toBeUndefined();
-        expect(describeApi(new URL("http://[::]:5001/api/v0"), new URL("http://[::1]:5001/api/v0"))).toBeUndefined();
+    it("says nothing when the env override reaches the configured listener", async () => {
+        expect(await describeApi("/ip4/127.0.0.1/tcp/5001", chosen)).toBeUndefined();
+        expect(await describeApi("/ip6/::1/tcp/5001", "http://[::1]:5001/api/v0")).toBeUndefined();
     });
 
-    it("accepts localhost for a loopback or wildcard listener", () => {
-        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://localhost:5001/api/v0"))).toBeUndefined();
-        expect(describeApi(new URL("http://[::1]:5001/api/v0"), new URL("http://localhost:5001/api/v0"))).toBeUndefined();
-        expect(describeApi(new URL("http://0.0.0.0:5001/api/v0"), new URL("http://localhost:5001/api/v0"))).toBeUndefined();
-        expect(describeApi(new URL("http://localhost:5001/api/v0"), new URL("http://127.0.0.1:5001/api/v0"))).toBeUndefined();
-    });
-
-    it("warns when the env override uses https, since kubo serves plain http", () => {
-        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("https://localhost:5001/api/v0"))).toContain(
-            "KUBO_RPC_URL is https://localhost:5001/api/v0"
+    it("treats a wildcard bind as reachable on any host with that port", async () => {
+        for (const bind of ["/ip4/0.0.0.0/tcp/5001", "/ip6/::/tcp/5001"]) {
+            expect(await describeApi(bind, chosen)).toBeUndefined();
+            expect(await describeApi(bind, "http://[::1]:5001/api/v0")).toBeUndefined();
+            expect(await describeApi(bind, "http://192.168.1.10:5001/api/v0")).toBeUndefined();
+            // What the Docker image's ENV writes on first init, and then keeps dialling.
+            expect(await describeApi(bind, "http://0.0.0.0:5001/api/v0")).toBeUndefined();
+        }
+        expect(await describeApi("/ip4/0.0.0.0/tcp/5001", "http://192.168.1.10:5002/api/v0")).toContain(
+            "KUBO_RPC_URL is http://192.168.1.10:5002/api/v0"
         );
     });
 
-    it("still warns when the IP families of two loopback literals differ", () => {
-        // A kubo bound on /ip4/127.0.0.1 refuses a dial to [::1].
-        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://[::1]:5001/api/v0"))).toContain(
-            "KUBO_RPC_URL is http://[::1]:5001/api/v0"
+    it("accepts localhost for a loopback listener, and a localhost bind for a loopback literal", async () => {
+        expect(await describeApi("/ip4/127.0.0.1/tcp/5001", "http://localhost:5001/api/v0")).toBeUndefined();
+        expect(await describeApi("/ip6/::1/tcp/5001", "http://localhost:5001/api/v0")).toBeUndefined();
+        expect(await describeApi("/dns4/localhost/tcp/5001", chosen)).toBeUndefined();
+    });
+
+    it("checks every entry when Addresses.API is a list, since kubo listens on all of them", async () => {
+        const list = ["/ip4/127.0.0.1/tcp/5001", "/ip4/127.0.0.1/tcp/5002"];
+        expect(await describeApi(list, "http://127.0.0.1:5002/api/v0")).toBeUndefined();
+        expect(await describeApi(list, "http://127.0.0.1:5003/api/v0")).toContain(
+            'Addresses.API in /data/.bitsocial-cli.ipfs/config is ["/ip4/127.0.0.1/tcp/5001","/ip4/127.0.0.1/tcp/5002"].'
         );
     });
 
-    it("names the env var, the config field and both URLs when the ports differ", () => {
-        const message = describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://127.0.0.1:5002/api/v0"));
+    it("says nothing for a DNS name it cannot judge offline", async () => {
+        expect(await describeApi("/ip4/127.0.0.1/tcp/5001", "http://host.docker.internal:5001/api/v0")).toBeUndefined();
+    });
+
+    it("names the env var, the config field and the configured value when the ports differ", async () => {
+        const message = await describeApi("/ip4/127.0.0.1/tcp/5001", "http://127.0.0.1:5002/api/v0");
         expect(message).toBe(
-            "KUBO_RPC_URL is http://127.0.0.1:5002/api/v0 but Addresses.API in /data/.bitsocial-cli.ipfs/config is http://127.0.0.1:5001/api/v0. " +
+            "KUBO_RPC_URL is http://127.0.0.1:5002/api/v0 but Addresses.API in /data/.bitsocial-cli.ipfs/config is /ip4/127.0.0.1/tcp/5001. " +
                 "The daemon starts kubo from that config and dials KUBO_RPC_URL, so it will not reach kubo. " +
                 "Unset KUBO_RPC_URL to follow the config, or edit Addresses.API to match."
         );
     });
 
-    it("warns when only the host differs", () => {
-        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://192.168.1.10:5001/api/v0"))).toContain(
+    it("warns when only the host differs", async () => {
+        expect(await describeApi("/ip4/127.0.0.1/tcp/5001", "http://192.168.1.10:5001/api/v0")).toContain(
             "KUBO_RPC_URL is http://192.168.1.10:5001/api/v0"
         );
     });
 
-    it("treats a URL without a port as the scheme default", () => {
+    it("warns when the env override uses https, since kubo serves plain http", async () => {
+        expect(await describeApi("/ip4/127.0.0.1/tcp/5001", "https://localhost:5001/api/v0")).toContain(
+            "KUBO_RPC_URL is https://localhost:5001/api/v0"
+        );
+    });
+
+    it("still warns when the IP families of two loopback literals differ", async () => {
+        // A kubo bound on /ip4/127.0.0.1 refuses a dial to [::1].
+        expect(await describeApi("/ip4/127.0.0.1/tcp/5001", "http://[::1]:5001/api/v0")).toContain(
+            "KUBO_RPC_URL is http://[::1]:5001/api/v0"
+        );
+    });
+
+    it("treats a URL without a port as the scheme default", async () => {
         expect(
-            describeKuboEndpointMismatch({
+            await describeKuboEndpointMismatch({
                 envVar: "IPFS_GATEWAY_URL",
                 configField: "Addresses.Gateway",
                 configPath,
-                configured: new URL("http://127.0.0.1:80/"),
+                configured: "/ip4/127.0.0.1/tcp/80",
                 chosen: new URL("http://127.0.0.1/")
             })
         ).toBeUndefined();

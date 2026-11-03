@@ -1,6 +1,7 @@
 import os from "os";
 import path from "path";
 import fs from "fs";
+import net from "net";
 import * as fsPromises from "fs/promises";
 import stripJsonComments from "strip-json-comments";
 import PKCLogger from "@pkcprotocol/pkc-logger";
@@ -134,6 +135,24 @@ export function ipfsGatewayUrlFromKuboConfig(kuboConfig: any): Promise<URL | und
 
 const urlPort = (url: URL) => Number(url.port || (url.protocol === "https:" ? 443 : 80));
 
+/** Every usable listener in a kubo Addresses.API / Addresses.Gateway value (string or list), with
+ * the host exactly as bound. Empty entries, /unix sockets and unparsable entries are skipped. */
+async function kuboListenersFromAddresses(addresses: unknown): Promise<{ host: string; port: number }[]> {
+    const listeners: { host: string; port: number }[] = [];
+    for (const address of Array.isArray(addresses) ? addresses : [addresses]) {
+        if (typeof address !== "string" || !address) continue;
+        try {
+            const parsed = multiAddrToHostPort(await parseMultiAddr(address));
+            if (parsed) listeners.push(parsed);
+        } catch {
+            continue;
+        }
+    }
+    return listeners;
+}
+
+const isWildcardBind = (host: string) => host === "0.0.0.0" || host === "::";
+
 const isLoopbackLiteral = (host: string) => host === "127.0.0.1" || host === "::1";
 
 /** Whether two connectable hostnames reach the same listener. `localhost` resolves to either loopback
@@ -144,8 +163,10 @@ const sameConnectableHost = (a: string, b: string) =>
 
 /** For a locally managed kubo the daemon never rewrites Addresses.* of an existing repo, so an env
  * override that differs from the config leaves kubo on one port and the daemon dialling another.
- * Returns the warning to print, or undefined when the override reaches the configured listener. */
-export function describeKuboEndpointMismatch({
+ * `configured` is the raw Addresses.API / Addresses.Gateway value, since kubo listens on every entry
+ * of a list and a wildcard bind is reachable on any host. Returns the warning to print, or undefined
+ * when the override reaches a configured listener or that cannot be judged offline. */
+export async function describeKuboEndpointMismatch({
     envVar,
     configField,
     configPath,
@@ -155,18 +176,25 @@ export function describeKuboEndpointMismatch({
     envVar: string;
     configField: string;
     configPath: string;
-    configured: URL | undefined;
+    configured: unknown;
     chosen: URL;
-}): string | undefined {
-    if (!configured) return undefined;
+}): Promise<string | undefined> {
+    const listeners = await kuboListenersFromAddresses(configured);
+    if (listeners.length === 0) return undefined;
+    const chosenHost = toConnectableHostname(chosen.hostname);
+    // A DNS name other than localhost needs a lookup to compare; stay quiet rather than guess.
+    if (chosenHost !== "localhost" && net.isIP(chosenHost) === 0) return undefined;
     // Kubo serves its RPC and gateway over plain http, so an https override never reaches it.
-    const sameListener =
-        configured.protocol === chosen.protocol &&
-        urlPort(configured) === urlPort(chosen) &&
-        sameConnectableHost(toConnectableHostname(configured.hostname), toConnectableHostname(chosen.hostname));
-    if (sameListener) return undefined;
+    const reachable =
+        chosen.protocol === "http:" &&
+        listeners.some(
+            (listener) =>
+                listener.port === urlPort(chosen) && (isWildcardBind(listener.host) || sameConnectableHost(listener.host, chosenHost))
+        );
+    if (reachable) return undefined;
+    const configuredText = typeof configured === "string" ? configured : JSON.stringify(configured);
     return (
-        `${envVar} is ${chosen} but ${configField} in ${configPath} is ${configured}. ` +
+        `${envVar} is ${chosen} but ${configField} in ${configPath} is ${configuredText}. ` +
         `The daemon starts kubo from that config and dials ${envVar}, so it will not reach kubo. ` +
         `Unset ${envVar} to follow the config, or edit ${configField} to match.`
     );

@@ -246,9 +246,11 @@ describe("kubo endpoint precedence (issue #200)", () => {
         const output = handle.output();
         expect(warned, `daemon never warned about the mismatch:\n${output}`).toBe(true);
         const configPath = path.join(handle.dataPath, ".bitsocial-cli.ipfs", "config");
-        expect(output).toContain(`KUBO_RPC_URL is ${envKuboApiUrl} but Addresses.API in ${configPath} is ${handle.configKuboApiUrl}`);
         expect(output).toContain(
-            `IPFS_GATEWAY_URL is ${envGatewayUrl}/ but Addresses.Gateway in ${configPath} is http://127.0.0.1:${handle.configGatewayPort}/`
+            `KUBO_RPC_URL is ${envKuboApiUrl} but Addresses.API in ${configPath} is /ip4/127.0.0.1/tcp/${handle.configApiPort}.`
+        );
+        expect(output).toContain(
+            `IPFS_GATEWAY_URL is ${envGatewayUrl}/ but Addresses.Gateway in ${configPath} is /ip4/127.0.0.1/tcp/${handle.configGatewayPort}.`
         );
     });
 });
