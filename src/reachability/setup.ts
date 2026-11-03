@@ -18,6 +18,7 @@ import {
     type CaddyfileSpec
 } from "./caddy.js";
 import {
+    addressesNotAnnounced,
     findPortHolder,
     isCgnatIp,
     isTcpPortFree,
@@ -293,12 +294,14 @@ export async function applyKuboConfig(
 
 // The daemon restarts kubo within seconds. Without a daemon there is nothing to restart or to check yet.
 async function restartAndVerifyKubo(config: ReachabilityConfig, restart: boolean, options: SetupOptions, deps: SetupDependencies) {
-    if (!(await kuboIdentity(options.kuboRpcUrl))) {
+    const identity = await kuboIdentity(options.kuboRpcUrl);
+    if (!identity) {
         deps.log("The daemon is not running. Start it with: bitsocial daemon");
         return;
     }
     const deadline = Date.now() + (deps.certificateTimeoutMs ?? 60_000);
-    if (restart) {
+    // The file can be right while kubo still runs from an older copy of it, and only a restart loads it.
+    if (restart || addressesNotAnnounced(config.announce, identity.addresses).length > 0) {
         await shutdownKubo(options.kuboRpcUrl);
         // The old kubo can answer for a moment after the request, and its answer says nothing about the new one.
         const downBy = Date.now() + 10_000;
@@ -319,6 +322,8 @@ async function restartAndVerifyKubo(config: ReachabilityConfig, restart: boolean
     }
     if (!listen.some((address) => address.includes("/udp/443/quic-v1/webtransport")))
         deps.warn(webTransportNotListeningGuidance({ inContainer: deps.inContainer, kuboPath: deps.kuboBinaryPath, platform: deps.platform }));
+    const stillMissing = addressesNotAnnounced(config.announce, (await kuboIdentity(options.kuboRpcUrl))?.addresses ?? config.announce);
+    if (stillMissing.length > 0) deps.warn(`kubo does not announce ${stillMissing.join(", ")} after a restart. Check Addresses.NoAnnounce in kubo's config.`);
 }
 
 export async function runReachabilitySetup(options: SetupOptions, deps: SetupDependencies): Promise<ReachabilityConfig> {

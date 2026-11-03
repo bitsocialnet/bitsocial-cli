@@ -5,9 +5,10 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 import { caddyBinaryPath, isOurCaddyRunning } from "./caddy.js";
-import { detectContainer, findPortHolder, worstPortState, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type PortState } from "./discovery.js";
+import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type PortState } from "./discovery.js";
 import { setcapCommand, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
 import type { CertificateInfo } from "./state.js";
+import { loadKuboConfigFile } from "../util.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,6 +91,10 @@ export interface CheckFacts {
     caddyBind: BindPermission;
     kuboBind: BindPermission;
     kuboListen: string[] | undefined;
+    // What setup applied, against what kubo's config file says and what running kubo reports.
+    announce: string[];
+    kuboConfigAnnounce: string[] | undefined;
+    kuboRunningAnnounce: string[] | undefined;
     firewall: FirewallState | undefined;
     certificates: CertificateInfo[];
 }
@@ -98,6 +103,25 @@ const bindFix = (facts: CheckFacts, binaryPath: string) => {
     if (facts.inContainer) return "Add cap_add: [NET_BIND_SERVICE] to your compose file";
     return `Run ${UNPRIVILEGED_PORT_SYSCTL} (persist it in /etc/sysctl.d/) or ${setcapCommand(binaryPath)}`;
 };
+
+// "Announced addresses" in status is our own record, so only this says whether kubo really announces them.
+function kuboAnnounceCheck(facts: CheckFacts): ReachabilityCheck | undefined {
+    if (facts.announce.length === 0) return undefined;
+    if (facts.kuboConfigAnnounce === undefined && facts.kuboRunningAnnounce === undefined) return undefined;
+    const fix = "Run: bitsocial reachability enable";
+    const missingFromConfig = addressesNotAnnounced(facts.announce, facts.kuboConfigAnnounce ?? facts.announce);
+    if (missingFromConfig.length > 0)
+        return { id: "kubo-announce", status: "fail", detail: `kubo's config does not announce ${missingFromConfig.join(", ")}, so browsers cannot learn it from this node`, fix };
+    const notRunning = addressesNotAnnounced(facts.announce, facts.kuboRunningAnnounce ?? facts.announce);
+    if (notRunning.length > 0)
+        return {
+            id: "kubo-announce",
+            status: "fail",
+            detail: `Running kubo does not announce ${notRunning.join(", ")}, so browsers cannot learn it from this node`,
+            fix: `${fix}. If that does not help, check Addresses.NoAnnounce in kubo's config`
+        };
+    return { id: "kubo-announce", status: "ok", detail: `kubo announces ${facts.announce.length === 1 ? "the browser address" : `all ${facts.announce.length} browser addresses`}` };
+}
 
 export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
     const checks: ReachabilityCheck[] = [];
@@ -161,6 +185,8 @@ export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {
                     : { id: "kubo-ws", status: "fail", detail: `kubo is not listening on 127.0.0.1:${facts.wsPort}, so WSS cannot reach it`, fix: "Run: bitsocial reachability enable" }
             );
         }
+        const announceCheck = kuboAnnounceCheck(facts);
+        if (announceCheck) checks.push(announceCheck);
         for (const certificate of facts.certificates)
             if (certificate.hoursLeft < 24)
                 checks.push({ id: "certificate", status: "warn", detail: `The certificate for ${certificate.names.join(", ")} has ${certificate.hoursLeft} hours left`, fix: "Check that TCP 80 or 443 still reaches this machine" });
@@ -258,6 +284,7 @@ export async function gatherCheckFacts(input: {
     wsPort?: number;
     caddyAdminPort?: number;
     certificates?: CertificateInfo[];
+    announce?: string[];
 }): Promise<CheckFacts> {
     const platform = process.platform;
     const httpsPort = input.httpsPort ?? 443;
@@ -268,6 +295,7 @@ export async function gatherCheckFacts(input: {
         bindPermission({ platform, port, uid: process.getuid?.(), effectiveCapabilities, unprivilegedPortStart, fileCapabilities: await fileCapabilities(binaryPath) });
 
     const kuboListen = await kuboListenAddresses(input.kuboRpcUrl);
+    const kuboConfig = await loadKuboConfigFile(input.dataPath).catch(() => undefined);
     const ourCaddyRunning = input.caddyAdminPort ? await isOurCaddyRunning(input.caddyAdminPort, input.dataPath) : false;
     const [tcp443, tcp80, udp443] = await Promise.all([probeTcpPort(httpsPort), probeTcpPort(httpPort), probeUdpPort(443)]);
     return {
@@ -291,6 +319,9 @@ export async function gatherCheckFacts(input: {
         caddyBind: await permissionFor(caddyPath, httpsPort),
         kuboBind: await permissionFor(input.kuboPath, 443),
         kuboListen,
+        announce: input.announce ?? [],
+        kuboConfigAnnounce: kuboConfig ? [...(kuboConfig.Addresses?.Announce ?? []), ...(kuboConfig.Addresses?.AppendAnnounce ?? [])] : undefined,
+        kuboRunningAnnounce: (await kuboIdentity(input.kuboRpcUrl))?.addresses,
         firewall: await readFirewall(platform),
         certificates: input.certificates ?? []
     };

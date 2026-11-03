@@ -39,7 +39,7 @@ browser ──WebTransport, UDP 443───────────────
 2. **Find public addresses:** from interfaces and kubo's addresses, excluding the addresses we told kubo to announce, so an old IP cannot confirm itself. With no public IPv4 on an interface, it also asks the router over UPnP for its external IP and to forward TCP 443, TCP 80 and UDP 443. No third-party "what is my IP" service is used.
 3. **Report requirements** (see [Troubleshooting](#troubleshooting)). It reports and carries on: each path below says what it managed.
 4. **Choose a path** and get certificates, waiting up to 90 s. Issuance succeeding is the proof that the internet reached this machine.
-5. **Apply the kubo config** and restart kubo through `POST /api/v0/shutdown`, only if the config changed. The daemon's watchdog brings kubo back.
+5. **Apply the kubo config** and restart kubo through `POST /api/v0/shutdown`, only if the config changed or running kubo is not announcing the addresses. The daemon's watchdog brings kubo back.
 6. **Check what kubo really listens on**, because kubo keeps running and logs nothing when it cannot bind a port.
 
 Reruns keep the stored choices and only add or repair. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
@@ -125,6 +125,7 @@ The daemon sends stderr only to its log file, so these messages go to stdout whe
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
 | `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |
 | `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to |
+| `kubo-announce` | With reachability enabled: an address is missing from kubo's config, or running kubo does not announce it, so browsers cannot learn it. `reachability enable` repairs the config and restarts kubo. An entry in `Addresses.NoAnnounce` that matches the address hides it even then |
 | `certificate` | Under 24 hours left |
 | `inbound` | Always `unknown`. Nothing on the machine can prove inbound traffic arrives, or see a cloud provider's firewall |
 

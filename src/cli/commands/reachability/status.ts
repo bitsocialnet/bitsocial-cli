@@ -33,6 +33,7 @@ export default class Status extends Command {
                 kuboRpcUrl: await resolveKuboRpcUrl(dataPath, process.env["KUBO_RPC_URL"], defaults.KUBO_RPC_URL),
                 enabled: status.enabled,
                 certificates: status.certificates,
+                announce: status.addresses,
                 ...(override ? { publicIps: override.split(",") } : config?.publicIps.length ? { publicIps: config.publicIps } : {}),
                 ...(config?.httpsPort ? { httpsPort: config.httpsPort } : {}),
                 ...(config?.httpPort ? { httpPort: config.httpPort } : {}),

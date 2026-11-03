@@ -46,6 +46,9 @@ const facts = (overrides: Partial<CheckFacts> = {}): CheckFacts => ({
     caddyBind: "allowed",
     kuboBind: "allowed",
     kuboListen: undefined,
+    announce: [],
+    kuboConfigAnnounce: undefined,
+    kuboRunningAnnounce: undefined,
     firewall: undefined,
     certificates: [],
     ...overrides
@@ -57,6 +60,39 @@ describe("evaluateChecks", () => {
         const result = evaluateChecks(facts());
         expect(result.filter((entry) => entry.status !== "ok").map((entry) => entry.id)).toEqual(["inbound"]);
         expect(check(result, "inbound")!.status).toBe("unknown");
+    });
+
+    describe("kubo announcing what setup applied (#216)", () => {
+        const address = "/ip4/93.184.216.34/tcp/443/tls/ws";
+        const peer = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+        const announceCheck = (overrides: Partial<CheckFacts>) => check(evaluateChecks(facts({ enabled: true, announce: [address], ...overrides })), "kubo-announce");
+
+        it("fails on an address missing from the config", () => {
+            expect(announceCheck({ kuboConfigAnnounce: [] })).toMatchObject({ status: "fail", detail: expect.stringContaining(address), fix: expect.stringContaining("reachability enable") });
+        });
+        it("accepts the address under Announce too", () => {
+            expect(announceCheck({ kuboConfigAnnounce: [address] })).toMatchObject({ status: "ok" });
+        });
+        it("compares running kubo's addresses without their /p2p suffix", () => {
+            expect(announceCheck({ kuboConfigAnnounce: [address], kuboRunningAnnounce: [`${address}/p2p/${peer}`] })).toMatchObject({ status: "ok" });
+        });
+        it("does not take a longer address for the expected one", () => {
+            expect(announceCheck({ kuboConfigAnnounce: [address], kuboRunningAnnounce: [`${address}/extra/p2p/${peer}`] })).toMatchObject({ status: "fail" });
+        });
+        it("fails when running kubo lacks it, and names NoAnnounce for when a restart does not help", () => {
+            expect(announceCheck({ kuboConfigAnnounce: [address], kuboRunningAnnounce: [] })).toMatchObject({ status: "fail", fix: expect.stringContaining("NoAnnounce") });
+        });
+        it("checks running kubo alone when the config file cannot be read", () => {
+            expect(announceCheck({ kuboRunningAnnounce: [] })).toMatchObject({ status: "fail" });
+        });
+        it("reports the config problem first, since a restart alone would not fix it", () => {
+            expect(announceCheck({ kuboConfigAnnounce: [], kuboRunningAnnounce: [] })!.detail).toContain("kubo's config");
+        });
+        it("has nothing to say with nothing to compare, nothing announced, or reachability off", () => {
+            expect(announceCheck({})).toBeUndefined();
+            expect(announceCheck({ announce: [], kuboConfigAnnounce: [] })).toBeUndefined();
+            expect(announceCheck({ enabled: false, kuboConfigAnnounce: [] })).toBeUndefined();
+        });
     });
 
     describe("UDP 443", () => {

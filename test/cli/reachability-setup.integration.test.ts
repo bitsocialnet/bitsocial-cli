@@ -22,6 +22,19 @@ const runCli = (args: string[], env: Record<string, string>): Promise<{ stdout: 
         child.once("close", (exitCode) => resolve({ stdout, stderr: stderr.replace(/[\s›]+/g, " "), exitCode }));
     });
 
+// These tests stand in 127.0.0.1 for a public address, and a repo created by the daemon hides loopback through
+// Addresses.NoAnnounce. A real public address is not filtered, so this removes the stand-in's only obstacle.
+const allowLoopbackAnnounce = async (dataPath: string, kuboApiUrl: string) => {
+    const configPath = path.join(dataPath, ".bitsocial-cli.ipfs", "config");
+    const config = JSON.parse(await fs.readFile(configPath, "utf-8"));
+    config.Addresses.NoAnnounce = (config.Addresses.NoAnnounce ?? []).filter((entry: string) => entry !== "/ip4/127.0.0.0/ipcidr/8");
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+    const isUp = async () => Boolean((await fetch(`${kuboApiUrl}/id`, { method: "POST" }).catch(() => undefined))?.ok);
+    await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
+    await waitForCondition(async () => !(await isUp()), 15_000, 200);
+    if (!(await waitForCondition(isUp, 60_000, 500))) throw new Error("kubo did not come back after the restart");
+};
+
 it("--announce with no daemon running is refused before anything changes", { timeout: 60_000 }, async () => {
     const dataPath = randomDirectory();
     const repo = path.join(dataPath, ".bitsocial-cli.ipfs");
@@ -49,6 +62,7 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
         dataPath = randomDirectory();
         pebble = await startPebble(randomDirectory());
         daemon = await startPkcDaemonWithDynamicPorts((e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl]);
+        await allowLoopbackAnnounce(dataPath, daemon.kuboApiUrl);
         httpsPort = await allocateFreePort("0.0.0.0");
         env = {
             KUBO_RPC_URL: daemon.kuboRpcUrl,
@@ -109,6 +123,73 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
         expect(await status()).toEqual(certificatesBefore);
     });
 
+    // Issue #216. These run against real kubo, because /id decides what the check sees.
+    describe("when kubo does not announce what setup applied", () => {
+        const kuboConfigPath = () => path.join(dataPath, ".bitsocial-cli.ipfs", "config");
+        const address = () => `/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`;
+        const editKuboConfig = async (edit: (addresses: any) => void) => {
+            const config = JSON.parse(await fs.readFile(kuboConfigPath(), "utf-8"));
+            edit(config.Addresses);
+            await fs.writeFile(kuboConfigPath(), JSON.stringify(config, null, 2));
+        };
+        const announcedByKubo = async () => {
+            const response = await fetch(`${daemon.kuboApiUrl}/id`, { method: "POST" }).catch(() => undefined);
+            return response?.ok ? ((await response.json()) as { Addresses: string[] | null }).Addresses ?? [] : undefined;
+        };
+        const isAnnounced = async () => (await announcedByKubo())?.some((announced) => announced.startsWith(`${address()}/p2p/`)) === true;
+        const announceCheck = async () => {
+            const { stdout } = await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env);
+            return JSON.parse(stdout).checks.find((check: { id: string }) => check.id === "kubo-announce");
+        };
+        // The daemon's watchdog brings kubo back and it loads the file as it stands now.
+        const restartKubo = async () => {
+            await fetch(`${daemon.kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
+            await waitForCondition(async () => (await announcedByKubo()) === undefined, 15_000, 200);
+            expect(await waitForCondition(async () => (await announcedByKubo()) !== undefined, 60_000, 500), "kubo did not come back").toBe(true);
+        };
+        const enable = async () => {
+            const result = await runCli(["reachability", "enable", "--pkcOptions.dataPath", dataPath], env);
+            expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+            return result;
+        };
+
+        it("real kubo's /id shows the address, and status agrees", async () => {
+            expect(await isAnnounced()).toBe(true);
+            expect(await announceCheck()).toMatchObject({ status: "ok" });
+        });
+
+        it("status fails, and enable repairs, an address removed from kubo's config", async () => {
+            await editKuboConfig((addresses) => (addresses.AppendAnnounce = []));
+            expect(await announceCheck()).toMatchObject({ status: "fail", fix: expect.stringContaining("reachability enable") });
+            await enable();
+            expect(JSON.parse(await fs.readFile(kuboConfigPath(), "utf-8")).Addresses.AppendAnnounce).toEqual([address()]);
+            expect(await waitForCondition(isAnnounced, 60_000, 500)).toBe(true);
+            expect(await announceCheck()).toMatchObject({ status: "ok" });
+        });
+
+        it("status fails, and enable restarts kubo, when the config is right but kubo has not loaded it", async () => {
+            await editKuboConfig((addresses) => (addresses.AppendAnnounce = []));
+            await restartKubo();
+            expect(await isAnnounced()).toBe(false);
+            await editKuboConfig((addresses) => (addresses.AppendAnnounce = [address()]));
+            expect(await announceCheck()).toMatchObject({ status: "fail", fix: expect.stringContaining("reachability enable") });
+            await enable();
+            expect(await waitForCondition(isAnnounced, 60_000, 500), "enable left kubo running without the address").toBe(true);
+            expect(await announceCheck()).toMatchObject({ status: "ok" });
+        });
+
+        it("enable says so when kubo still does not announce it, because NoAnnounce hides it", async () => {
+            await editKuboConfig((addresses) => (addresses.NoAnnounce = [...(addresses.NoAnnounce ?? []), address()]));
+            await restartKubo();
+            const { stdout, stderr } = await enable();
+            expect(`${stdout} ${stderr}`).toContain("NoAnnounce");
+            expect(await announceCheck()).toMatchObject({ status: "fail", fix: expect.stringContaining("NoAnnounce") });
+            await editKuboConfig((addresses) => (addresses.NoAnnounce = addresses.NoAnnounce.filter((entry: string) => entry !== address())));
+            await enable();
+            expect(await waitForCondition(isAnnounced, 60_000, 500)).toBe(true);
+        });
+    });
+
     it("refuses production Let's Encrypt when CI is set", async () => {
         const { BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: _omit, ...withoutPebble } = env;
         const { BITSOCIAL_TEST_REACHABILITY_ACME_DIRECTORY: _inherited, ...rest } = process.env;
@@ -139,6 +220,13 @@ describe("bitsocial reachability setup", { timeout: 240_000 }, () => {
         expect(status.mode).toBe("ip+domain");
         expect(status.addresses).toEqual([`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`, `/dns4/node.test/tcp/${httpsPort}/tls/ws`]);
         expect(status.certificates.flatMap((certificate: { names: string[] }) => certificate.names).sort()).toEqual(["127.0.0.1", "node.test"]);
+    });
+
+    it("real kubo announces a domain address the way status expects, so there is no false alarm", async () => {
+        const { stdout } = await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env);
+        const status = JSON.parse(stdout);
+        expect(status.addresses.some((address: string) => address.startsWith("/dns"))).toBe(true);
+        expect(status.checks.find((check: { id: string }) => check.id === "kubo-announce")).toMatchObject({ status: "ok" });
     });
 
     it("a rerun keeps a domain that was forced, since a proxy answers for it", async () => {
@@ -203,6 +291,7 @@ describe("bitsocial reachability setup behind the operator's proxy", { timeout: 
         dataPath = randomDirectory();
         pebble = await startPebble(randomDirectory());
         daemon = await startPkcDaemonWithDynamicPorts((e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl]);
+        await allowLoopbackAnnounce(dataPath, daemon.kuboApiUrl);
         const busyPort = await allocateFreePort("0.0.0.0");
         occupier = net.createServer();
         await new Promise<void>((resolve) => occupier.listen(busyPort, "0.0.0.0", () => resolve()));

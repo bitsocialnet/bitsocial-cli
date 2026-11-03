@@ -188,6 +188,10 @@ export async function kuboIdentity(kuboRpcUrl: URL): Promise<{ peerId: string; a
     }
 }
 
+// kubo reports its announced addresses with /p2p/<peer id> on the end.
+export const addressesNotAnnounced = (expected: string[], announced: string[]): string[] =>
+    expected.filter((address) => !announced.some((entry) => entry === address || entry.startsWith(`${address}/p2p/`)));
+
 export async function kuboListenAddresses(kuboRpcUrl: URL): Promise<string[] | undefined> {
     try {
         const response = await kuboPost(kuboRpcUrl, "swarm/addrs/listen");
