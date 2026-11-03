@@ -6,7 +6,7 @@ import * as remeda from "remeda";
 import assert from "assert";
 import tcpPortUsed from "tcp-port-used";
 import { path as ipfsExePathFunc } from "kubo";
-import { PKCLogger } from "../util.js";
+import { PKCLogger, resolveKuboRepoPath, toConnectableHostname } from "../util.js";
 
 async function getKuboExePath(): Promise<string> {
     return ipfsExePathFunc();
@@ -237,7 +237,7 @@ async function ensureIpfsPortsAreAvailable(log: any, configPath: string, apiUrl:
     if (apiMultiAddr) addCheck("IPFS API", apiMultiAddr.host, apiMultiAddr.port, addresses.API);
     else if (apiUrl?.hostname) {
         const fallbackPort = Number(apiUrl.port || (apiUrl.protocol === "https:" ? 443 : 80));
-        if (Number.isFinite(fallbackPort) && fallbackPort > 0) addCheck("IPFS API", apiUrl.hostname, fallbackPort, apiUrl.toString());
+        if (Number.isFinite(fallbackPort) && fallbackPort > 0) addCheck("IPFS API", toConnectableHostname(apiUrl.hostname), fallbackPort, apiUrl.toString());
     }
 
     const gatewayMultiAddr = typeof addresses.Gateway === "string" ? await parseTcpMultiaddr(addresses.Gateway) : undefined;
@@ -245,7 +245,7 @@ async function ensureIpfsPortsAreAvailable(log: any, configPath: string, apiUrl:
     else if (gatewayUrl?.hostname) {
         const fallbackPort = Number(gatewayUrl.port || (gatewayUrl.protocol === "https:" ? 443 : 80));
         if (Number.isFinite(fallbackPort) && fallbackPort > 0)
-            addCheck("IPFS Gateway", gatewayUrl.hostname, fallbackPort, gatewayUrl.toString());
+            addCheck("IPFS Gateway", toConnectableHostname(gatewayUrl.hostname), fallbackPort, gatewayUrl.toString());
     }
 
     const swarmAddresses: string[] = Array.isArray(addresses.Swarm)
@@ -281,7 +281,7 @@ export async function startKuboNode(
     // throws as unhandledRejections and the promise never settles, which wedges the daemon's
     // pendingKuboStart tracking and hangs its shutdown (issue #70).
     const log = PKCLogger("bitsocial-cli:ipfs:startKuboNode");
-    const ipfsDataPath = process.env["IPFS_PATH"] || path.join(dataPath, ".bitsocial-cli.ipfs");
+    const ipfsDataPath = resolveKuboRepoPath(dataPath);
     await fs.promises.mkdir(ipfsDataPath, { recursive: true });
     const ipfsConfigPath = path.join(ipfsDataPath, "config");
 
