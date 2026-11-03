@@ -42,7 +42,7 @@ browser ──WebTransport, UDP 443───────────────
 5. **Apply the kubo config** and restart kubo through `POST /api/v0/shutdown`, only if the config changed or running kubo is not announcing the addresses. The daemon's watchdog brings kubo back.
 6. **Check what kubo really listens on**, because kubo keeps running and logs nothing when it cannot bind a port.
 
-Reruns keep the stored choices and only add or repair. A rerun that cannot get any certificate leaves a node already serving WSS exactly as it was, and with `--announce` it is refused. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
+Reruns keep the stored choices and only add or repair. A rerun that cannot get any certificate, or finds no public address, leaves a node already serving WSS exactly as it was, and with `--announce` it is refused. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
 
 ## Choosing a path
 

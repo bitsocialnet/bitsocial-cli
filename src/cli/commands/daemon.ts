@@ -774,33 +774,6 @@ export default class Daemon extends Command {
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
             await createOrConnectRpc();
 
-            // Only for a kubo this daemon runs. Failing here must never take the node down: browsers
-            // being unable to dial it is a far smaller problem than it being offline.
-            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) {
-                try {
-                    const { ReachabilityRuntime } = await import("../../reachability/runtime.js");
-                    const reachabilityLog = PKCLogger("bitsocial-cli:reachability");
-                    reachabilityRuntime = new ReachabilityRuntime({
-                        dataPath: mergedPkcOptions.dataPath!,
-                        kuboRepoPath: resolveKuboRepoPath(mergedPkcOptions.dataPath!),
-                        kuboRpcUrl: kuboRpcEndpoint,
-                        log: (message) => {
-                            console.log(message);
-                            reachabilityLog(message);
-                        },
-                        // stdout, because stderr goes only to the log file and operators need to see these.
-                        warn: (message) => {
-                            console.log(`Warning: ${message}`);
-                            reachabilityLog.error(message);
-                        }
-                    });
-                    await reachabilityRuntime.start();
-                } catch (error) {
-                    log.error("Reachability failed to start", error);
-                    console.log(`Warning: reachability failed to start: ${error instanceof Error ? error.message : String(error)}`);
-                }
-            }
-
             // Runs against whichever kubo the daemon ends up talking to, including one started by
             // another program (--pkcOptions.kuboRpcClientsOptions). pkc-js also GCs, but only from
             // a started local community's IPNS sync — a daemon that is up with no community
@@ -825,6 +798,34 @@ export default class Daemon extends Command {
                     onError: (msg) => log.trace(msg)
                 });
             }, 5000);
+
+            // Only for a kubo this daemon runs. Failing here must never take the node down: browsers
+            // being unable to dial it is a far smaller problem than it being offline. Last, because the
+            // first start can spend minutes downloading Caddy, and kubo's watchdog must not wait for that.
+            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) {
+                try {
+                    const { ReachabilityRuntime } = await import("../../reachability/runtime.js");
+                    const reachabilityLog = PKCLogger("bitsocial-cli:reachability");
+                    reachabilityRuntime = new ReachabilityRuntime({
+                        dataPath: mergedPkcOptions.dataPath!,
+                        kuboRepoPath: resolveKuboRepoPath(mergedPkcOptions.dataPath!),
+                        kuboRpcUrl: kuboRpcEndpoint,
+                        log: (message) => {
+                            console.log(message);
+                            reachabilityLog(message);
+                        },
+                        // stdout, because stderr goes only to the log file and operators need to see these.
+                        warn: (message) => {
+                            console.log(`Warning: ${message}`);
+                            reachabilityLog.error(message);
+                        }
+                    });
+                    await reachabilityRuntime.start();
+                } catch (error) {
+                    log.error("Reachability failed to start", error);
+                    console.log(`Warning: reachability failed to start: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             stdoutWrite(`\nDaemon failed to start: ${errorMsg}\n\n`);

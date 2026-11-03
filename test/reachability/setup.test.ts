@@ -333,6 +333,60 @@ describe("a setup run that cannot issue any certificate", () => {
         }
     });
 
+    describe("because discovery found no public address", () => {
+        const NOTHING_FOUND = { overrides: { publicIps: [] } };
+
+        // A router not answering says nothing about the address, and with no stored IPs the daemon would stop
+        // looking at IPs, so this would otherwise end WSS until someone reran setup.
+        it("leaves a node serving WSS as it was", async () => {
+            const { options, deps, warnings, snapshot } = await prepare(servingNode());
+            const before = await snapshot();
+            const result = await runReachabilitySetup(options(NOTHING_FOUND), deps);
+            expect(await snapshot()).toEqual(before);
+            expect(result).toMatchObject({ publicIps: [HELD_IP], announce: [HELD_ADDRESS] });
+            expect(warnings.some((warning) => warning.includes("No public address") && warning.includes(HELD_ADDRESS))).toBe(true);
+        });
+
+        it("does not read a domain-only node's name as stale, with nothing to compare it to", async () => {
+            const domainAddress = "/dns4/node.example/tcp/443/tls/ws";
+            const { options, deps, snapshot } = await prepare(servingNode({ mode: "domain", publicIps: [], announce: [domainAddress], domain: "node.example" }));
+            const before = await snapshot();
+            await runReachabilitySetup(options(NOTHING_FOUND), { ...deps, resolveDomain: async () => ({ v4: [HELD_IP], v6: [] }) });
+            expect(await snapshot()).toEqual(before);
+        });
+
+        it("refuses --announce rather than dropping the addresses it holds, and changes nothing", async () => {
+            const server = http.createServer((_request, response) => response.end(JSON.stringify({ ID: "peer", Addresses: [] })));
+            await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+            try {
+                const { options, deps, dialed, snapshot } = await prepare(servingNode());
+                const before = await snapshot();
+                const kuboRpcUrl = new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v0`);
+                await expect(runReachabilitySetup(options({ ...NOTHING_FOUND, kuboRpcUrl, announce: "/dns4/proxy.example/tcp/443/tls/ws" }), deps)).rejects.toBeInstanceOf(SetupRefusedError);
+                expect(dialed).toEqual([]);
+                expect(await snapshot()).toEqual(before);
+            } finally {
+                await new Promise((resolve) => server.close(resolve));
+            }
+        });
+
+        it("keeps a proxy-only node's addresses, which never depended on discovery", async () => {
+            const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+            const { options, deps } = await prepare(servingNode({ mode: "reverse-proxy", publicIps: [], announce: [proxied], externalAnnounce: [proxied] }));
+            expect(await runReachabilitySetup(options(NOTHING_FOUND), deps)).toMatchObject({ mode: "reverse-proxy", announce: [proxied] });
+        });
+
+        it("still records the attempt on a first run", async () => {
+            const { options, deps } = await prepare();
+            expect(await runReachabilitySetup(options(NOTHING_FOUND), deps)).toMatchObject({ enabled: true, serveWss: false, publicIps: [], announce: [] });
+        });
+
+        it("still replaces a disabled node", async () => {
+            const { options, deps } = await prepare(servingNode({ enabled: false }));
+            expect(await runReachabilitySetup(options(NOTHING_FOUND), deps)).toMatchObject({ enabled: true, publicIps: [], announce: [] });
+        });
+    });
+
     it("still records the attempt on a first run, when there is nothing to keep", async () => {
         const { options, deps } = await prepare();
         expect(await runReachabilitySetup(options(), deps)).toMatchObject({ enabled: true, serveWss: false, publicIps: [], announce: [] });

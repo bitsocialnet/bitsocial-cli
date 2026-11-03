@@ -407,20 +407,26 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}),
         ...(options.overrides?.acmeTrustedRootsPath ? { acmeTrustedRootsPath: options.overrides.acmeTrustedRootsPath } : {})
     };
+    // Reruns only add or repair, so a failed attempt must not cost a node the WSS it already serves. The daemon's
+    // checks follow an address that moved. A proxy's addresses survive below without this.
+    const servedByUs = previous?.enabled && previous.announce.length > (previous.externalAnnounce?.length ?? 0) ? previous : undefined;
+    const keepServing = (served: ReachabilityConfig, reason: string): ReachabilityConfig => {
+        const message = `${reason}, so nothing changed and this node still announces ${served.announce.join(", ")}.`;
+        if (options.announce) throw new SetupRefusedError(message);
+        deps.warn(message);
+        return served;
+    };
+    // A router not answering says nothing about the address. Storing no IPs would also stop the daemon looking for them.
+    if (servedByUs && publicIps.length === 0 && certificateNames.length === 0 && !portBusy) return keepServing(servedByUs, "No public address was found");
     if (certificateNames.length > 0) {
         deps.log(ACME_NOTICE);
         const previousCaddyfile = await fs.readFile(caddyfilePath(options.dataPath), "utf-8").catch(() => undefined);
         const result = await issueCertificates(spec, certificateNames, previous !== undefined && previous.acmeDirectory !== acmeDirectory, options, deps);
         issued = result.issued;
         failure = result.failure;
-        // Reruns only add or repair, so a failed attempt must not cost a node the WSS it already serves.
-        // The daemon's checks retry an address that moved. A proxy's addresses survive below without this.
-        if (issued.length === 0 && previous?.enabled && previous.announce.length > (previous.externalAnnounce?.length ?? 0)) {
+        if (servedByUs && issued.length === 0) {
             if (previousCaddyfile !== undefined) await fs.writeFile(caddyfilePath(options.dataPath), previousCaddyfile);
-            const message = `No certificate could be issued, so nothing changed and this node still announces ${previous.announce.join(", ")}. ${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443."}`;
-            if (options.announce) throw new SetupRefusedError(message);
-            deps.warn(message);
-            return previous;
+            return keepServing(servedByUs, `No certificate could be issued (${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443"})`);
         }
         // Keep only what worked, so the daemon's Caddy does not retry a name forever.
         await fs.writeFile(

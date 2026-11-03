@@ -2,13 +2,15 @@
 // through it, and Caddy comes back if it dies and goes away with the daemon.
 import { execFile, spawn } from "child_process";
 import fs from "fs/promises";
+import net from "net";
 import path from "path";
 import { promisify } from "util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import { allocateFreePort, ensureKuboNodeStopped, startPkcDaemonWithDynamicPorts, stopPkcDaemon, waitForCondition, type DynamicDaemonResult } from "../helpers/daemon-helpers.js";
 import { startPebble, type RunningPebble } from "../helpers/pebble.js";
-import { acmeIssuerKey } from "../../src/reachability/state.js";
+import { caddyBinaryPath, caddyfilePath, generateCaddyfile } from "../../src/reachability/caddy.js";
+import { acmeIssuerKey, caddyDataDir, reachabilityDir, writeReachabilityConfig } from "../../src/reachability/state.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -184,6 +186,45 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
         }, 20_000, 250);
         expect(gone).toBe(true);
     });
+});
+
+// GitHub being slow or unreachable must not cost the node its kubo watchdog: the first Caddy start can spend up
+// to 15 minutes downloading after an upgrade that changes CADDY_VERSION.
+it("keeps kubo up while the Caddy download is stalled", { timeout: 180_000 }, async () => {
+    const dataPath = randomDirectory();
+    const adminPort = await allocateFreePort();
+    const acmeDirectory = "https://127.0.0.1:9/dir";
+    await fs.mkdir(reachabilityDir(dataPath), { recursive: true });
+    await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "ip", wsPort: await allocateFreePort(), announce: [], publicIps: ["127.0.0.1"], staging: false, acmeDirectory, caddyAdminPort: adminPort });
+    await fs.writeFile(caddyfilePath(dataPath), generateCaddyfile({ ips: ["127.0.0.1"], domains: [], wsPort: 4002, adminPort, dataDirectory: caddyDataDir(dataPath), acmeDirectory }));
+    // In a data: URL because NODE_OPTIONS splits on spaces and a file path can hold one.
+    const stallCaddyDownload = `const real = globalThis.fetch; globalThis.fetch = (url, init) => String(url).includes("caddyserver/caddy/releases") ? new Promise(() => {}) : real(url, init);`;
+    let daemon: DynamicDaemonResult | undefined;
+    try {
+        daemon = await startPkcDaemonWithDynamicPorts(
+            (e) => ["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", e.rpcWsUrl],
+            () => ({ NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(stallCaddyDownload)}` })
+        );
+        const { kuboApiUrl, kuboPort } = daemon;
+        const kuboAnswers = () => fetch(`${kuboApiUrl}/bitswap/stat`, { method: "POST" }).then((response) => response.ok, () => false);
+        expect(await waitForCondition(kuboAnswers, 45_000, 250), "kubo did not start").toBe(true);
+        await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
+        expect(await waitForCondition(async () => !(await kuboAnswers()), 10_000, 100), "kubo did not stop").toBe(true);
+        // Makes the restart on kubo's exit fail, so that only the watchdog interval can bring it back.
+        const blocker = net.createServer((socket) => socket.destroy());
+        await new Promise<void>((resolve, reject) => {
+            blocker.once("error", reject);
+            blocker.listen(kuboPort, "127.0.0.1", () => resolve());
+        });
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await new Promise((resolve) => blocker.close(resolve));
+
+        expect(await waitForCondition(kuboAnswers, 30_000, 500), "the daemon did not bring kubo back").toBe(true);
+        await expect(fs.access(caddyBinaryPath(dataPath)), "the download was meant to still be stalled").rejects.toThrow();
+    } finally {
+        await stopPkcDaemon(daemon?.daemonProcess);
+        if (daemon?.kuboApiUrl) await ensureKuboNodeStopped(daemon.kuboApiUrl);
+    }
 });
 
 describe("reachability enable and disable without a daemon", { timeout: 120_000 }, () => {
