@@ -1,5 +1,16 @@
 # Changelog
 
+## <small>0.19.121 (2026-11-03)</small>
+
+* fix(daemon): accept localhost for a loopback kubo listener in the mismatch warning ([64da698](https://github.com/bitsocialnet/bitsocial-cli/commit/64da698))
+* fix(daemon): dial a wildcard kubo bind over loopback ([1e14e1d](https://github.com/bitsocialnet/bitsocial-cli/commit/1e14e1d))
+* fix(daemon): judge the kubo config mismatch against every bound listener ([a72664d](https://github.com/bitsocialnet/bitsocial-cli/commit/a72664d))
+* fix(daemon): keep env overrides and connect to IPv6 kubo addresses ([379ee1b](https://github.com/bitsocialnet/bitsocial-cli/commit/379ee1b))
+* fix(daemon): probe an existing kubo at /api/v0/version ([2d1faa4](https://github.com/bitsocialnet/bitsocial-cli/commit/2d1faa4))
+* fix(daemon): read the kubo config from the repo kubo actually runs in ([b1996fa](https://github.com/bitsocialnet/bitsocial-cli/commit/b1996fa))
+* fix(daemon): treat an https env override as a kubo config mismatch ([cfb1edf](https://github.com/bitsocialnet/bitsocial-cli/commit/cfb1edf))
+* fix(daemon): warn when env overrides disagree with the kubo config ([4307f21](https://github.com/bitsocialnet/bitsocial-cli/commit/4307f21))
+
 ## <small>0.19.120 (2026-11-02)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.133 ([ae55002](https://github.com/bitsocialnet/bitsocial-cli/commit/ae55002))
