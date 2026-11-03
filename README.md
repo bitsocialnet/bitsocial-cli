@@ -247,6 +247,35 @@ Once `bitsocial daemon` is running, you can create and manage your communities t
 
 If you need to view detailed protocol or IPFS logs for debugging, you can use `bitsocial logs`. For example, `bitsocial logs --tail 50` shows the last 50 lines, or `bitsocial logs --since 1h` shows logs from the past hour.
 
+#### Making your node reachable from browsers
+
+This sets up two of the ways a browser can dial a node: WebSocket Secure, which needs a certificate browsers trust, and WebTransport. Without either, the daemon prints a line at start saying browsers cannot reach this node. To fix that, run this while the daemon is running:
+
+```sh-session
+$ bitsocial reachability setup
+```
+
+It finds this machine's public addresses, asks the router to forward ports through UPnP if it is behind NAT, gets a Let's Encrypt certificate for the IP address (or for your domain with `--domain`), configures kubo and checks the result. It is safe to rerun. The daemon then keeps Caddy running, renews certificates and follows IP changes.
+
+| Command | What it does |
+| ------- | ------------ |
+| `bitsocial reachability setup` | Discover, configure, get a certificate, verify |
+| `bitsocial reachability status` | Show mode, addresses, certificate expiry and last checks (`--json` for scripts) |
+| `bitsocial reachability enable` | Repair and turn back on from the stored choices, without asking anything |
+| `bitsocial reachability disable` | Stop serving and restore the kubo config. `--purge` also moves the state to a timestamped backup |
+
+`status` and `setup` both check what this machine needs and say how to fix anything missing: permission for Caddy and kubo to bind port 443 (kubo otherwise keeps running and silently does not listen on UDP 443), whether TCP 80, TCP 443 and UDP 443 are held by another program, an active `ufw` or `firewalld`, and what kubo is really listening on. Nothing on the machine can prove inbound traffic reaches it, or see a cloud provider's firewall, so test from another network too.
+
+- **Port 443 already in use:** pass `--domain`, and setup prints a snippet for nginx, Apache or Caddy that forwards the name to kubo. Then pass `--announce` with the address your server serves. It is announced only after a real libp2p handshake through it succeeds.
+- **Linux, not root:** Caddy and kubo both need to bind port 443. `sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443` covers both; persist it in `/etc/sysctl.d/`. Setup offers to run `setcap` on Caddy instead, and prints what kubo needs if it could not bind UDP 443.
+- **Docker:** add `cap_add: [NET_BIND_SERVICE]` and publish `443:443/tcp`, `443:443/udp` and `80:80/tcp`.
+- **Windows:** setup prints the firewall rules to add.
+- **Testing:** `--staging` uses the Let's Encrypt staging CA, whose certificates browsers do not trust.
+
+See [docs/reachability.md](docs/reachability.md) for how it works, choosing a path and troubleshooting.
+
+Caddy is downloaded on the first `setup` from its GitHub release and checked against a hash pinned in this repository. State lives in `<data path>/reachability/`. Running `setup` means accepting the [Let's Encrypt Subscriber Agreement](https://letsencrypt.org/repository/); no email address is sent.
+
 #### Creating your first community
 
 ```sh-session
@@ -327,6 +356,10 @@ $ bitsocial community edit mysub.bso '--roles["author-address.bso"]' null
 * [`bitsocial page-sort rm NAME`](#bitsocial-page-sort-rm-name)
 * [`bitsocial page-sort un NAME`](#bitsocial-page-sort-un-name)
 * [`bitsocial page-sort uninstall NAME`](#bitsocial-page-sort-uninstall-name)
+* [`bitsocial reachability disable`](#bitsocial-reachability-disable)
+* [`bitsocial reachability enable`](#bitsocial-reachability-enable)
+* [`bitsocial reachability setup`](#bitsocial-reachability-setup)
+* [`bitsocial reachability status`](#bitsocial-reachability-status)
 * [`bitsocial update check`](#bitsocial-update-check)
 * [`bitsocial update install [VERSION]`](#bitsocial-update-install-version)
 * [`bitsocial update versions`](#bitsocial-update-versions)
@@ -1297,6 +1330,112 @@ EXAMPLES
 
   $ bitsocial page-sort remove @pkcprotocol/active-page-sort --force
 ```
+
+## `bitsocial reachability disable`
+
+Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates
+
+```
+USAGE
+  $ bitsocial reachability disable [--pkcOptions.dataPath <value>] [--purge]
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path of the node
+  --purge                        Also move the state directory, including the ACME account and certificates, to a
+                                 timestamped backup
+
+DESCRIPTION
+  Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates
+
+EXAMPLES
+  $ bitsocial reachability disable
+
+  $ bitsocial reachability disable --purge
+```
+
+_See code: [src/cli/commands/reachability/disable.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.120/src/cli/commands/reachability/disable.ts)_
+
+## `bitsocial reachability enable`
+
+Turn reachability back on: re-run discovery and repair from the stored choices, without asking anything
+
+```
+USAGE
+  $ bitsocial reachability enable [--pkcOptions.dataPath <value>]
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path of the node
+
+DESCRIPTION
+  Turn reachability back on: re-run discovery and repair from the stored choices, without asking anything
+
+EXAMPLES
+  $ bitsocial reachability enable
+```
+
+_See code: [src/cli/commands/reachability/enable.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.120/src/cli/commands/reachability/enable.ts)_
+
+## `bitsocial reachability setup`
+
+Make this node dialable from browsers: discover public addresses, obtain a certificate, configure kubo and verify. Safe to rerun
+
+```
+USAGE
+  $ bitsocial reachability setup [--pkcOptions.dataPath <value>] [--domain <value>] [--announce <value>] [--force]
+    [--staging] [--non-interactive]
+
+FLAGS
+  --announce=<value>             A multiaddr your own proxy serves, e.g. /dns4/node.example/tcp/443/tls/ws. Announced
+                                 only after a real libp2p dial succeeds
+  --domain=<value>               A domain pointing at this machine, to get a certificate for or to forward through your
+                                 own proxy
+  --force                        Continue when the domain does not resolve to this machine, for proxies in front of it
+  --non-interactive              Never ask. Exit non-zero with the reason if an answer would be needed
+  --pkcOptions.dataPath=<value>  Data path of the node
+  --staging                      Use the Let's Encrypt staging CA. Its certificates are not trusted by browsers
+
+DESCRIPTION
+  Make this node dialable from browsers: discover public addresses, obtain a certificate, configure kubo and verify.
+  Safe to rerun
+
+EXAMPLES
+  $ bitsocial reachability setup
+
+  $ bitsocial reachability setup --staging
+
+  $ bitsocial reachability setup --domain node.example
+
+  $ bitsocial reachability setup --domain node.example --announce /dns4/node.example/tcp/443/tls/ws
+
+  $ bitsocial reachability setup --non-interactive
+```
+
+_See code: [src/cli/commands/reachability/setup.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.120/src/cli/commands/reachability/setup.ts)_
+
+## `bitsocial reachability status`
+
+Show whether browsers can reach this node: mode, announced addresses, certificate expiry and last checks
+
+```
+USAGE
+  $ bitsocial reachability status [--json] [--pkcOptions.dataPath <value>]
+
+FLAGS
+  --pkcOptions.dataPath=<value>  Data path of the node
+
+GLOBAL FLAGS
+  --json  Format output as json.
+
+DESCRIPTION
+  Show whether browsers can reach this node: mode, announced addresses, certificate expiry and last checks
+
+EXAMPLES
+  $ bitsocial reachability status
+
+  $ bitsocial reachability status --json
+```
+
+_See code: [src/cli/commands/reachability/status.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.120/src/cli/commands/reachability/status.ts)_
 
 ## `bitsocial update check`
 

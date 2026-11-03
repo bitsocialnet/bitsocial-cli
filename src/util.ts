@@ -69,6 +69,12 @@ export async function loadKuboConfigFile(pkcDataPath: string): Promise<any | und
     return kuboConfig;
 }
 
+// Which kubo RPC this data path talks to, for commands that have no daemon flags to consider.
+export async function resolveKuboRpcUrl(pkcDataPath: string, envValue: string | undefined, fallback: URL): Promise<URL> {
+    if (envValue) return new URL(envValue);
+    return (await kuboRpcUrlFromKuboConfig(await loadKuboConfigFile(pkcDataPath))) ?? fallback;
+}
+
 async function parseMultiAddr(multiAddrString: string) {
     const module = await import("@multiformats/multiaddr");
     return module.multiaddr(multiAddrString);
@@ -83,6 +89,13 @@ function multiAddrToHostPort(multiAddrObj: { getComponents: () => { name: string
     if (!host || !port || !Number.isFinite(port) || port <= 0) return undefined;
     return { host, port };
 }
+
+// new URL(route, base) would drop the /api/v0 prefix, because the base has no trailing slash.
+export const kuboApiRouteUrl = (endpoint: URL, route: string) => {
+    const url = new URL(endpoint.toString());
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/${route}`;
+    return url;
+};
 
 export const hostForUrl = (host: string) => (host.includes(":") && !host.startsWith("[") ? `[${host}]` : host);
 

@@ -14,6 +14,7 @@ import {
     kuboRpcUrlFromKuboConfig,
     ipfsGatewayUrlFromKuboConfig,
     hostForUrl,
+    kuboApiRouteUrl,
     toConnectableHostname,
     resolveKuboRepoPath,
     describeKuboEndpointMismatch
@@ -392,8 +393,7 @@ export default class Daemon extends Command {
                     connectableEndpoint.hostname = hostForUrl(connectHostname);
                     // Relative to ".../api/v0" a bare "version" resolves to "/api/version", which kubo
                     // answers 404, so a healthy kubo looked like a foreign listener and startup failed.
-                    const versionPath = `${connectableEndpoint.pathname.replace(/\/$/, "")}/version`;
-                    const versionUrl = new URL(versionPath, connectableEndpoint);
+                    const versionUrl = kuboApiRouteUrl(connectableEndpoint, "version");
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), 2000);
                     let isHealthyKubo = false;
@@ -590,6 +590,7 @@ export default class Daemon extends Command {
             };
 
             let keepKuboUpInterval: NodeJS.Timeout | undefined;
+            let reachabilityRuntime: import("../../reachability/runtime.js").ReachabilityRuntime | undefined;
             let stopRepoGcScheduler: (() => void) | undefined;
             const { asyncExitHook } = await import("exit-hook");
             const killKuboProcessGroup = (pid: number, signal: NodeJS.Signals) => {
@@ -682,6 +683,7 @@ export default class Daemon extends Command {
                 // Start killing Kubo immediately, in parallel with daemon server destroy.
                 // This way Kubo receives SIGINT right away, even if daemonServer.destroy() hangs.
                 const kuboKillPromise = killKuboProcess();
+                const reachabilityStopPromise = reachabilityRuntime?.stop().catch((error) => log.error("Error stopping reachability", error));
 
                 if (daemonServer)
                     try {
@@ -692,6 +694,7 @@ export default class Daemon extends Command {
                     }
 
                 await kuboKillPromise;
+                await reachabilityStopPromise;
             };
             // Run kubo/daemon cleanup on SIGINT/SIGTERM/beforeExit. Capture the unsubscribe handle
             // and the shutdown fn so the startup-failure catch (and the force-quit guard below) can
@@ -709,6 +712,7 @@ export default class Daemon extends Command {
             // synchronously SIGKILL every live kubo's process group. This is a no-op if
             // killKuboProcess() already ran (it clears kuboProcess and liveKuboPids).
             process.on("exit", () => {
+                reachabilityRuntime?.killCaddySync();
                 if (kuboProcess?.pid) {
                     killKuboProcessGroup(kuboProcess.pid, "SIGKILL");
                 }
@@ -794,6 +798,34 @@ export default class Daemon extends Command {
                     onError: (msg) => log.trace(msg)
                 });
             }, 5000);
+
+            // Only for a kubo this daemon runs. Failing here must never take the node down: browsers
+            // being unable to dial it is a far smaller problem than it being offline. Last, because the
+            // first start can spend minutes downloading Caddy, and kubo's watchdog must not wait for that.
+            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) {
+                try {
+                    const { ReachabilityRuntime } = await import("../../reachability/runtime.js");
+                    const reachabilityLog = PKCLogger("bitsocial-cli:reachability");
+                    reachabilityRuntime = new ReachabilityRuntime({
+                        dataPath: mergedPkcOptions.dataPath!,
+                        kuboRepoPath: resolveKuboRepoPath(mergedPkcOptions.dataPath!),
+                        kuboRpcUrl: kuboRpcEndpoint,
+                        log: (message) => {
+                            console.log(message);
+                            reachabilityLog(message);
+                        },
+                        // stdout, because stderr goes only to the log file and operators need to see these.
+                        warn: (message) => {
+                            console.log(`Warning: ${message}`);
+                            reachabilityLog.error(message);
+                        }
+                    });
+                    await reachabilityRuntime.start();
+                } catch (error) {
+                    log.error("Reachability failed to start", error);
+                    console.log(`Warning: reachability failed to start: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             stdoutWrite(`\nDaemon failed to start: ${errorMsg}\n\n`);

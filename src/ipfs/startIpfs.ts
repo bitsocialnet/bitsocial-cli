@@ -269,6 +269,34 @@ async function ensureIpfsPortsAreAvailable(log: any, configPath: string, apiUrl:
         }
     }
 }
+// Shared with `reachability setup`, which can run before the daemon has ever created the repo.
+export async function initKuboRepoIfNeeded(log: any, dataPath: string, apiUrl: URL, gatewayUrl: URL): Promise<void> {
+    const ipfsDataPath = resolveKuboRepoPath(dataPath);
+    await fs.promises.mkdir(ipfsDataPath, { recursive: true });
+    const kuboExePath = await getKuboExePath();
+    const env = { IPFS_PATH: ipfsDataPath, DEBUG_COLORS: "1" };
+    let configJustInitialized = false;
+    try {
+        await _spawnAsync(log, kuboExePath, ["init"], { env, hideWindows: true });
+        configJustInitialized = true;
+    } catch (e) {
+        const error = <Error>e;
+        if (!error?.message?.includes("ipfs configuration file already exists!")) throw new Error("Failed to call ipfs init" + error);
+    }
+    if (configJustInitialized) {
+        await _spawnAsync(log, kuboExePath, ["config", "profile", "apply", `server`], {
+            env,
+            hideWindows: true
+        });
+        log("Called 'ipfs config profile apply server' successfully");
+        await mergeCliDefaultsIntoIpfsConfig(log, path.join(ipfsDataPath, "config"), apiUrl, gatewayUrl);
+    } else {
+        log("IPFS config already exists; skipping config overrides to preserve user changes.");
+    }
+}
+
+export const resolveKuboBinaryPath = getKuboExePath;
+
 export async function startKuboNode(
     apiUrl: URL,
     gatewayUrl: URL,
@@ -293,24 +321,7 @@ export async function startKuboNode(
 
     const env = { IPFS_PATH: ipfsDataPath, DEBUG_COLORS: "1" };
 
-    let configJustInitialized = false;
-    try {
-        await _spawnAsync(log, kuboExePath, ["init"], { env, hideWindows: true });
-        configJustInitialized = true;
-    } catch (e) {
-        const error = <Error>e;
-        if (!error?.message?.includes("ipfs configuration file already exists!")) throw new Error("Failed to call ipfs init" + error);
-    }
-    if (configJustInitialized) {
-        await _spawnAsync(log, kuboExePath, ["config", "profile", "apply", `server`], {
-            env,
-            hideWindows: true
-        });
-        log("Called 'ipfs config profile apply server' successfully");
-        await mergeCliDefaultsIntoIpfsConfig(log, ipfsConfigPath, apiUrl, gatewayUrl);
-    } else {
-        log("IPFS config already exists; skipping config overrides to preserve user changes.");
-    }
+    await initKuboRepoIfNeeded(log, dataPath, apiUrl, gatewayUrl);
 
     // Replaces the deprecated `--enable-namesys-pubsub` daemon flag; must run for existing repos too.
     await ensureIpnsPubsubEnabled(log, ipfsConfigPath);
