@@ -157,6 +157,12 @@ describe("describeKuboEndpointMismatch", () => {
         expect(describeApi(new URL("http://localhost:5001/api/v0"), new URL("http://127.0.0.1:5001/api/v0"))).toBeUndefined();
     });
 
+    it("warns when the env override uses https, since kubo serves plain http", () => {
+        expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("https://localhost:5001/api/v0"))).toContain(
+            "KUBO_RPC_URL is https://localhost:5001/api/v0"
+        );
+    });
+
     it("still warns when the IP families of two loopback literals differ", () => {
         // A kubo bound on /ip4/127.0.0.1 refuses a dial to [::1].
         expect(describeApi(new URL("http://127.0.0.1:5001/api/v0"), new URL("http://[::1]:5001/api/v0"))).toContain(

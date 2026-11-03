@@ -159,7 +159,9 @@ export function describeKuboEndpointMismatch({
     chosen: URL;
 }): string | undefined {
     if (!configured) return undefined;
+    // Kubo serves its RPC and gateway over plain http, so an https override never reaches it.
     const sameListener =
+        configured.protocol === chosen.protocol &&
         urlPort(configured) === urlPort(chosen) &&
         sameConnectableHost(toConnectableHostname(configured.hostname), toConnectableHostname(chosen.hostname));
     if (sameListener) return undefined;
