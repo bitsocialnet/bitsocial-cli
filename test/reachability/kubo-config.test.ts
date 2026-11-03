@@ -159,6 +159,23 @@ describe("computeKuboConfig when disabled", () => {
         expect(kubo.Swarm.AddrFilters).toEqual([...SERVER_ADDR_FILTERS, "/ip4/192.0.2.0/ipcidr/24"]);
     });
 
+    it("keeps one copy of an entry the operator added while enabled, identical to ours", () => {
+        const enabled = enable(serverProfileConfig(), reachability());
+        enabled.kubo.Addresses.Swarm.push(WEBTRANSPORT_SWARM_ADDRESSES[0]);
+        enabled.kubo.Addresses.AppendAnnounce.push(ANNOUNCE_V4);
+        const { kubo } = disable(enabled.kubo, enabled.input);
+        expect(kubo.Addresses.Swarm).toEqual([...DEFAULT_SWARM, WEBTRANSPORT_SWARM_ADDRESSES[0]]);
+        expect(kubo.Addresses.AppendAnnounce).toEqual([ANNOUNCE_V4]);
+    });
+
+    it("keeps that copy through a repair too", () => {
+        const enabled = enable(serverProfileConfig(), reachability());
+        enabled.kubo.Addresses.AppendAnnounce.push(ANNOUNCE_V4);
+        const repaired = enable(enabled.kubo, enabled.input);
+        expect(repaired.kubo.Addresses.AppendAnnounce.filter((entry: string) => entry === ANNOUNCE_V4)).toHaveLength(1);
+        expect(disable(repaired.kubo, repaired.input).kubo.Addresses.AppendAnnounce).toEqual([ANNOUNCE_V4]);
+    });
+
     it("does not override an operator's AutoTLS flip", () => {
         const original = serverProfileConfig();
         original.AutoTLS.Enabled = false;

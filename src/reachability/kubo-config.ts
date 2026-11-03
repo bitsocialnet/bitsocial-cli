@@ -57,10 +57,21 @@ const restoreShape = (parent: any, key: string, shape: OriginalShape) => {
     else parent[key] = null;
 };
 
+// Removes one occurrence of each, because that is all we added. Any other copy is the operator's.
+const withoutOneOfEach = (list: unknown, entries: string[]) => {
+    if (!Array.isArray(list)) return list;
+    const remaining = [...list];
+    for (const entry of entries) {
+        const index = remaining.indexOf(entry);
+        if (index !== -1) remaining.splice(index, 1);
+    }
+    return remaining;
+};
+
 function undoListEdits(config: any, edits: KuboEditRecord) {
     if (config.Addresses) {
-        config.Addresses.Swarm = withoutEntries(config.Addresses.Swarm, edits.addedSwarm);
-        config.Addresses.AppendAnnounce = withoutEntries(config.Addresses.AppendAnnounce, edits.addedAppendAnnounce);
+        config.Addresses.Swarm = withoutOneOfEach(config.Addresses.Swarm, edits.addedSwarm);
+        config.Addresses.AppendAnnounce = withoutOneOfEach(config.Addresses.AppendAnnounce, edits.addedAppendAnnounce);
         restoreShape(config.Addresses, "Swarm", edits.swarmListShape);
         restoreShape(config.Addresses, "AppendAnnounce", edits.appendAnnounceListShape);
         restoreShape(config, "Addresses", edits.addressesShape);

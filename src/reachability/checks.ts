@@ -59,7 +59,7 @@ export interface FirewallState {
 export const parseUfwStatus = (output: string): FirewallState | undefined => {
     if (!/^Status:/m.test(output)) return undefined;
     const active = /^Status: active/m.test(output);
-    const allows = (protocol: string) => new RegExp(`^(443|443/${protocol}|Anywhere)(\\s|\\(v6\\)).*ALLOW`, "m").test(output) || /^(Caddy|Nginx|Apache)\b.*ALLOW/m.test(output);
+    const allows = (protocol: string) => new RegExp(`^(443|443/${protocol}|Anywhere)(\\s|\\(v6\\)).*ALLOW`, "m").test(output) || /^(Caddy|Nginx (HTTPS|Full)|Apache (Secure|Full))\b.*ALLOW/m.test(output);
     return { name: "ufw", active, allowsTcp443: allows("tcp"), allowsUdp443: new RegExp("^(443|443/udp)(\\s|\\(v6\\)).*ALLOW", "m").test(output) };
 };
 

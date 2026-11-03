@@ -1,6 +1,6 @@
 # Reachability
 
-`bitsocial reachability` makes this machine's kubo dialable from browsers, checks that it worked, and keeps it working from the daemon. A browser can only dial a node two ways:
+`bitsocial reachability` makes this machine's kubo dialable from browsers, checks that it worked, and keeps it working from the daemon. It sets up two of the ways a browser can dial a node:
 
 - **WebSocket Secure (WSS):** needs a certificate browsers trust. kubo cannot load a certificate itself, so a TLS terminator sits in front of it.
 - **WebTransport:** needs no certificate authority, but only works for browsers that support it, and only if inbound UDP reaches the machine. Some ISPs filter UDP 4001, so kubo also listens on UDP 443.
@@ -42,7 +42,7 @@ browser ──WebTransport, UDP 443───────────────
 5. **Apply the kubo config** and restart kubo through `POST /api/v0/shutdown`, only if the config changed or running kubo is not announcing the addresses. The daemon's watchdog brings kubo back.
 6. **Check what kubo really listens on**, because kubo keeps running and logs nothing when it cannot bind a port.
 
-Reruns keep the stored choices and only add or repair. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
+Reruns keep the stored choices and only add or repair. A rerun that cannot get any certificate leaves a node already serving WSS exactly as it was, and with `--announce` it is refused. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
 
 ## Choosing a path
 
@@ -76,7 +76,7 @@ All of it comes from one pure function, `computeKuboConfig` in `src/reachability
 
 Only the first row applies until something can terminate WSS.
 
-`config.json` records exactly what was changed (`kuboEdits`). That tells our entries apart from identical ones you wrote, so `disable` leaves yours alone, along with anything you added while enabled. One exception: a loopback filter you put back is removed again on the next apply, because it blocks the terminator.
+`config.json` records exactly what was changed (`kuboEdits`). That tells our entries apart from identical ones you wrote, so `disable` removes only the copies it added and leaves yours alone, along with anything you added while enabled. One exception: a loopback filter you put back is removed again on the next apply, because it blocks the terminator.
 
 ## Where things live
 

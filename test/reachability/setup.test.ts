@@ -1,8 +1,15 @@
+import fs from "fs/promises";
+import http from "http";
+import type { AddressInfo } from "net";
+import path from "path";
+import { directory as randomDirectory } from "tempy";
 import { describe, expect, it } from "vitest";
-import { LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
+import { caddyfilePath, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
+import { readReachabilityConfig, reachabilityDir, type ReachabilityConfig } from "../../src/reachability/state.js";
 import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, existingServerGuidance, noWssStatement, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
 import {
     assertAcmeDirectoryAllowed,
+    applyKuboConfig,
     assertAnnounceShape,
     chooseAcmeDirectory,
     deriveMode,
@@ -10,6 +17,8 @@ import {
     domainAnnounceAddress,
     domainPointsHere,
     existingLoopbackWsPort,
+    runReachabilitySetup,
+    SetupRefusedError,
     type SetupDependencies,
     type SetupOptions
 } from "../../src/reachability/setup.js";
@@ -225,5 +234,111 @@ describe("existingLoopbackWsPort", () => {
         ["a secure one", { Addresses: { Swarm: ["/ip4/127.0.0.1/tcp/4002/tls/ws"] } }]
     ])("finds nothing with %s", (_label, config) => {
         expect(existingLoopbackWsPort(config)).toBeUndefined();
+    });
+});
+
+describe("a setup run that cannot issue any certificate", () => {
+    const HELD_IP = "93.184.216.34";
+    const NEW_IP = "93.184.216.35";
+    const HELD_ADDRESS = `/ip4/${HELD_IP}/tcp/443/tls/ws`;
+    const CADDYFILE = `{\n}\n\nhttps://${HELD_IP} {\n}\n`;
+    const servingNode = (overrides: Partial<ReachabilityConfig> = {}): ReachabilityConfig => ({
+        version: 1,
+        enabled: true,
+        mode: "ip",
+        wsPort: 4002,
+        announce: [HELD_ADDRESS],
+        publicIps: [HELD_IP],
+        staging: false,
+        acmeDirectory: LETS_ENCRYPT_DIRECTORY,
+        caddyAdminPort: 2019,
+        ...overrides
+    });
+
+    const prepare = async (previous?: ReachabilityConfig) => {
+        const dataPath = randomDirectory();
+        const kuboRepoPath = path.join(dataPath, "repo");
+        await fs.mkdir(kuboRepoPath, { recursive: true });
+        await fs.mkdir(reachabilityDir(dataPath), { recursive: true });
+        await fs.writeFile(path.join(kuboRepoPath, "config"), JSON.stringify({ Addresses: { Swarm: [], AppendAnnounce: [] }, Swarm: {} }));
+        if (previous) {
+            await applyKuboConfig(previous, { dataPath, kuboRepoPath }, previous.enabled);
+            await fs.writeFile(caddyfilePath(dataPath), CADDYFILE);
+        }
+        const warnings: string[] = [];
+        const dialed: string[] = [];
+        const options = (overrides: Partial<SetupOptions> = {}): SetupOptions => ({
+            dataPath,
+            kuboRepoPath,
+            kuboRpcUrl: new URL("http://127.0.0.1:1/api/v0"),
+            staging: false,
+            nonInteractive: true,
+            overrides: { publicIps: [NEW_IP] },
+            ...overrides
+        });
+        const deps: SetupDependencies = {
+            log: () => {},
+            warn: (message) => warnings.push(message),
+            platform: process.platform,
+            inContainer: false,
+            isCi: false,
+            kuboBinaryPath: "",
+            discoverRouter: async () => undefined,
+            probePort: async () => "free",
+            findHolder: async () => undefined,
+            publicIpsFromInterfaces: () => [],
+            lanIpv4: () => undefined,
+            // A Caddy that cannot run, which is a real failure on every OS.
+            ensureCaddy: async () => path.join(dataPath, "no-such-caddy"),
+            resolveDomain: async () => ({ v4: [], v6: [] }),
+            dial: async (address) => (dialed.push(address), { peerId: "peer" })
+        };
+        const snapshot = async () => ({
+            config: await readReachabilityConfig(dataPath),
+            caddyfile: await fs.readFile(caddyfilePath(dataPath), "utf-8"),
+            kubo: await fs.readFile(path.join(kuboRepoPath, "config"), "utf-8")
+        });
+        return { options, deps, warnings, dialed, snapshot };
+    };
+
+    it("leaves a node serving WSS as it was when its address moved", async () => {
+        const { options, deps, warnings, snapshot } = await prepare(servingNode());
+        const before = await snapshot();
+        const result = await runReachabilitySetup(options(), deps);
+        expect(await snapshot()).toEqual(before);
+        expect(result).toMatchObject({ publicIps: [HELD_IP], announce: [HELD_ADDRESS] });
+        expect(warnings.some((warning) => warning.includes("No certificate could be issued") && warning.includes(HELD_ADDRESS))).toBe(true);
+    });
+
+    it("stays on the old CA when moving to another one fails", async () => {
+        const { options, deps, snapshot } = await prepare(servingNode({ acmeDirectory: LETS_ENCRYPT_STAGING_DIRECTORY, staging: true }));
+        const before = await snapshot();
+        await runReachabilitySetup(options({ overrides: { publicIps: [HELD_IP] } }), deps);
+        expect(await snapshot()).toEqual(before);
+    });
+
+    it("refuses --announce rather than dropping the addresses it holds, and changes nothing", async () => {
+        const server = http.createServer((_request, response) => response.end(JSON.stringify({ ID: "peer", Addresses: [] })));
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        try {
+            const { options, deps, dialed, snapshot } = await prepare(servingNode());
+            const before = await snapshot();
+            const kuboRpcUrl = new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v0`);
+            await expect(runReachabilitySetup(options({ kuboRpcUrl, announce: "/dns4/proxy.example/tcp/443/tls/ws" }), deps)).rejects.toBeInstanceOf(SetupRefusedError);
+            expect(dialed).toEqual([]);
+            expect(await snapshot()).toEqual(before);
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
+    it("still records the attempt on a first run, when there is nothing to keep", async () => {
+        const { options, deps } = await prepare();
+        expect(await runReachabilitySetup(options(), deps)).toMatchObject({ enabled: true, serveWss: false, publicIps: [], announce: [] });
+    });
+
+    it("still replaces a node that was disabled, which has nothing being served to protect", async () => {
+        const { options, deps } = await prepare(servingNode({ enabled: false }));
+        expect(await runReachabilitySetup(options(), deps)).toMatchObject({ enabled: true, publicIps: [], announce: [] });
     });
 });

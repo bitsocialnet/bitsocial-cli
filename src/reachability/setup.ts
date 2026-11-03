@@ -401,9 +401,19 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     };
     if (certificateNames.length > 0) {
         deps.log(ACME_NOTICE);
+        const previousCaddyfile = await fs.readFile(caddyfilePath(options.dataPath), "utf-8").catch(() => undefined);
         const result = await issueCertificates(spec, certificateNames, previous !== undefined && previous.acmeDirectory !== acmeDirectory, options, deps);
         issued = result.issued;
         failure = result.failure;
+        // Reruns only add or repair, so a failed attempt must not cost a node the WSS it already serves.
+        // The daemon's checks retry an address that moved. A proxy's addresses survive below without this.
+        if (issued.length === 0 && previous?.enabled && previous.announce.length > (previous.externalAnnounce?.length ?? 0)) {
+            if (previousCaddyfile !== undefined) await fs.writeFile(caddyfilePath(options.dataPath), previousCaddyfile);
+            const message = `No certificate could be issued, so nothing changed and this node still announces ${previous.announce.join(", ")}. ${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443."}`;
+            if (options.announce) throw new SetupRefusedError(message);
+            deps.warn(message);
+            return previous;
+        }
         // Keep only what worked, so the daemon's Caddy does not retry a name forever.
         await fs.writeFile(
             caddyfilePath(options.dataPath),

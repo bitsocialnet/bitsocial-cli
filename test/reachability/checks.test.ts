@@ -189,6 +189,19 @@ describe("firewall parsing", () => {
         expect(neither).toMatchObject({ allowsTcp443: false, allowsUdp443: false });
     });
 
+    it.each([
+        ["Nginx Full", true],
+        ["Nginx HTTPS", true],
+        ["Apache Full", true],
+        ["Apache Secure", true],
+        ["Caddy", true],
+        ["Nginx HTTP", false],
+        ["Apache", false]
+    ])("knows whether the ufw app profile %s opens TCP 443", (profile, opens) => {
+        expect(parseUfwStatus(`Status: active\n\n${profile.padEnd(27)}ALLOW       Anywhere\n`)!.allowsTcp443).toBe(opens);
+        expect(parseUfwStatus(`Status: active\n\n${`${profile} (v6)`.padEnd(27)}ALLOW       Anywhere (v6)\n`)!.allowsTcp443).toBe(opens);
+    });
+
     it("does not read 8443 as 443", () => {
         expect(parseUfwStatus("Status: active\n\n8443/tcp                   ALLOW       Anywhere\n")!.allowsTcp443).toBe(false);
     });

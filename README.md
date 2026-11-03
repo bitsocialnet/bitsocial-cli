@@ -249,7 +249,7 @@ If you need to view detailed protocol or IPFS logs for debugging, you can use `b
 
 #### Making your node reachable from browsers
 
-A browser can only dial a node over WebSocket Secure, which needs a certificate browsers trust, or WebTransport. Without either, the daemon prints a line at start saying browsers cannot reach this node. To fix that, run this while the daemon is running:
+This sets up two of the ways a browser can dial a node: WebSocket Secure, which needs a certificate browsers trust, and WebTransport. Without either, the daemon prints a line at start saying browsers cannot reach this node. To fix that, run this while the daemon is running:
 
 ```sh-session
 $ bitsocial reachability setup
