@@ -184,8 +184,11 @@ describe("ReachabilityRuntime", () => {
     };
     const kuboAnnounce = async (repo: string) => JSON.parse(await fs.readFile(path.join(repo, "config"), "utf-8")).Addresses.AppendAnnounce;
 
-    it("prints one line when nothing is configured, and starts nothing", async () => {
-        const { runtime, events } = await setup();
+    const kuboConfigWithAutoTls = (autoTls: object) => JSON.stringify({ Addresses: { Swarm: [], AppendAnnounce: [] }, Swarm: {}, AutoTLS: autoTls });
+
+    it("prints one line when nothing is configured and AutoTLS is off, and starts nothing", async () => {
+        const { runtime, events, kuboRepoPath } = await setup();
+        await fs.writeFile(path.join(kuboRepoPath, "config"), kuboConfigWithAutoTls({ Enabled: false }));
         await runtime.start();
         await runtime.stop();
         expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
@@ -265,6 +268,59 @@ describe("ReachabilityRuntime", () => {
             expect(warnings[0]).not.toContain(NOT_CONFIGURED_MESSAGE);
             expect(warnings[0]).toContain(wss);
             expect(warnings[0]).toContain("timed out");
+        });
+
+        describe("while AutoTLS may still be getting its certificate", () => {
+            const noAddresses = async () => ({ peerId, addresses: [] });
+            const start = async (autoTls: object | undefined, overrides: Partial<RuntimeDependencies>) => {
+                const context = await setup(undefined, { browserAddressRetryMs: 1, ...overrides });
+                if (autoTls) await fs.writeFile(path.join(context.kuboRepoPath, "config"), kuboConfigWithAutoTls(autoTls));
+                await context.runtime.start();
+                return context;
+            };
+            const warnings = (events: string[]) => events.filter((event) => event.startsWith("warn:"));
+
+            it("says it is waiting, then reports the address once it appears, without warning", async () => {
+                let reads = 0;
+                const kuboIdentity = async () => ({ peerId, addresses: ++reads > 3 ? [`${wss}/p2p/${peerId}`] : [] });
+                const { runtime, events } = await start({ Enabled: true }, { kuboIdentity, dialAddress: async () => ({ peerId }) });
+                expect(events.some((event) => event.startsWith("log:") && event.includes("AutoTLS"))).toBe(true);
+                await vi.waitFor(() => expect(events.some((event) => event.startsWith("log:") && event.includes(wss))).toBe(true));
+                await runtime.stop();
+                expect(warnings(events)).toEqual([]);
+            });
+
+            it.each([
+                ["set to true, which skips kubo's registration delay", { Enabled: true }, 20],
+                ["left at kubo's default, which adds an hour", undefined, 80]
+            ])("warns once when nothing appears within the window, with AutoTLS %s", async (_name, autoTls, minutes) => {
+                const kuboIdentity = vi.fn(noAddresses);
+                const { runtime, events } = await start(autoTls, { kuboIdentity });
+                await vi.waitFor(() => expect(warnings(events)).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]), { timeout: 10_000 });
+                await runtime.stop();
+                // One read decides to wait, then one per 15 s attempt.
+                expect(kuboIdentity).toHaveBeenCalledTimes((minutes * 60) / 15 + 1);
+            });
+
+            it("reports nothing if the daemon stops while waiting", async () => {
+                const { runtime, events } = await start({ Enabled: true }, { kuboIdentity: noAddresses, browserAddressRetryMs: 60_000 });
+                await runtime.stop();
+                expect(warnings(events)).toEqual([]);
+            });
+
+            it("leaves no abort listeners behind between attempts", async () => {
+                const added = vi.spyOn(AbortSignal.prototype, "addEventListener");
+                const removed = vi.spyOn(AbortSignal.prototype, "removeEventListener");
+                try {
+                    const { runtime, events } = await start({ Enabled: true }, { kuboIdentity: noAddresses });
+                    await vi.waitFor(() => expect(warnings(events)).toHaveLength(1), { timeout: 10_000 });
+                    await runtime.stop();
+                    expect(added.mock.calls.length - removed.mock.calls.length).toBeLessThan(5);
+                } finally {
+                    added.mockRestore();
+                    removed.mockRestore();
+                }
+            });
         });
 
         it("still starts when kubo's config cannot be parsed, as while it is being rewritten", async () => {

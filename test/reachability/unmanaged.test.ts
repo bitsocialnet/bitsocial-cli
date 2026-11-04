@@ -9,7 +9,8 @@ describe("isBrowserAddress", () => {
         "/dns6/node.example/tcp/443/wss",
         `/dns4/node.example/tcp/443/tls/ws/p2p/${peerId}`,
         "/ip4/93.184.216.34/tcp/443/tls/ws",
-        "/ip4/93.184.216.34/tcp/4001/tls/sni/93-184-216-34.k51.libp2p.direct/ws"
+        "/ip4/93.184.216.34/tcp/4001/tls/sni/93-184-216-34.k51.libp2p.direct/ws",
+        "/dns4/93-184-216-34.k51.libp2p.direct/tcp/4001/tls/ws"
     ])("accepts %s", (address) => expect(isBrowserAddress(address)).toBe(true));
 
     it.each([
@@ -44,6 +45,11 @@ describe("verifyUnmanagedAddresses", () => {
         const dial = async () => {
             throw new Error("connection\n  refused");
         };
+        expect(await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "failed", error: "connection refused" }]);
+    });
+
+    it("reports a dial that rejects with something other than an Error", async () => {
+        const dial = () => Promise.reject("connection\n  refused");
         expect(await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "failed", error: "connection refused" }]);
     });
 

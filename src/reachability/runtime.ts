@@ -18,6 +18,7 @@ import {
     type ReachabilityConfig,
     type ReachabilityRuntimeStatus
 } from "./state.js";
+import { setTimeout as delay } from "timers/promises";
 import { handshakeFailedMessage, handshakeSucceededMessage, isBrowserAddress, unconfirmedMessage, unverifiedMessage, verifyUnmanagedAddresses, type DialAddress } from "./unmanaged.js";
 
 export const CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -31,6 +32,13 @@ const ISSUANCE_RETRY_MAX_MS = 24 * HOUR_MS;
 
 const BROWSER_ADDRESS_ATTEMPTS = 8;
 const BROWSER_ADDRESS_RETRY_MS = 15_000;
+// kubo documents 5-15 minutes for AutoTLS's certificate, plus an hour's registration delay unless AutoTLS.Enabled is explicitly true.
+const autoTlsAttempts = (minutes: number) => (minutes * 60_000) / BROWSER_ADDRESS_RETRY_MS;
+const autoTlsWaitMinutes = (kuboConfig: any): number | undefined => {
+    const enabled = kuboConfig?.AutoTLS?.Enabled;
+    if (kuboConfig === undefined || enabled === false) return undefined;
+    return enabled === true ? 20 : 80;
+};
 export const NOT_CONFIGURED_MESSAGE = "Browsers cannot reach this node. To fix that, run: bitsocial reachability setup";
 
 // The IPs we should now serve, or undefined for no change. A family we find nothing for is left alone,
@@ -186,15 +194,22 @@ export class ReachabilityRuntime {
             .catch(() => undefined);
         const inConfig: string[] = [...(kuboConfig?.Addresses?.Announce ?? []), ...(kuboConfig?.Addresses?.AppendAnnounce ?? [])];
         const running = (await identity())?.addresses;
+        let attempts = BROWSER_ADDRESS_ATTEMPTS;
         if (![...(running ?? []), ...inConfig].some((address) => isBrowserAddress(address))) {
-            this.deps.warn(NOT_CONFIGURED_MESSAGE);
-            return;
+            // kubo shows no AutoTLS address until the certificate arrives, and never does behind NAT, so this has to end in a warning.
+            const waitMinutes = autoTlsWaitMinutes(kuboConfig);
+            if (waitMinutes === undefined) {
+                this.deps.warn(NOT_CONFIGURED_MESSAGE);
+                return;
+            }
+            this.deps.log(`kubo has no browser address yet. AutoTLS may still be getting a certificate, so this will check again for up to ${waitMinutes} minutes.`);
+            attempts = autoTlsAttempts(waitMinutes);
         }
         // kubo may have only just started, and its certificates may be on their way, so one failed dial proves little.
-        this.browserAddressCheck = this.verifyBrowserAddresses(identity, inConfig).catch((error) => this.deps.warn(String(error)));
+        this.browserAddressCheck = this.verifyBrowserAddresses(identity, inConfig, attempts).catch((error) => this.deps.warn(String(error)));
     }
 
-    private async verifyBrowserAddresses(identity: NonNullable<RuntimeDependencies["kuboIdentity"]>, inConfig: string[]) {
+    private async verifyBrowserAddresses(identity: NonNullable<RuntimeDependencies["kuboIdentity"]>, inConfig: string[], attempts: number) {
         const { signal } = this.stopController;
         for (let attempt = 1; ; attempt++) {
             const results = await verifyUnmanagedAddresses({
@@ -212,7 +227,7 @@ export class ReachabilityRuntime {
                 for (const { address } of succeeded) this.deps.log(handshakeSucceededMessage(address));
                 return;
             }
-            if (attempt >= BROWSER_ADDRESS_ATTEMPTS) {
+            if (attempt >= attempts) {
                 const failed = results.filter(({ status }) => status === "failed");
                 const unconfirmed = results.filter(({ status }) => status === "unconfirmed");
                 const unverified = results.filter(({ status }) => status === "unverified");
@@ -224,11 +239,7 @@ export class ReachabilityRuntime {
                 this.deps.warn([...(unconfirmed.length > 0 ? [] : [NOT_CONFIGURED_MESSAGE]), ...reasons].join(". "));
                 return;
             }
-            await new Promise<void>((resolve) => {
-                const timer = setTimeout(resolve, this.deps.browserAddressRetryMs ?? BROWSER_ADDRESS_RETRY_MS);
-                timer.unref();
-                signal.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
-            });
+            await delay(this.deps.browserAddressRetryMs ?? BROWSER_ADDRESS_RETRY_MS, undefined, { signal, ref: false }).catch(() => {});
             if (this.stopping) return;
         }
     }

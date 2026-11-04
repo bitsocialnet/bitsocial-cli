@@ -66,7 +66,9 @@ A failed handshake is `failed` when every IP the address leads to is on one of t
 
 `status` says browsers cannot reach the node only when no such address exists or every handshake is `failed`. A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
 
-The daemon does the same check in the background when it starts. With no such address it warns straight away. Otherwise it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed or could not be confirmed.
+The daemon does the same check in the background when it starts. With an address to check, it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed or could not be confirmed.
+
+With no such address, the daemon warns straight away only if `AutoTLS.Enabled` is `false` or kubo's config cannot be read. Otherwise it logs that AutoTLS may still be getting a certificate and keeps checking, because kubo shows no AutoTLS address until then: for 20 minutes if `AutoTLS.Enabled` is `true`, as on repos this CLI creates, and 80 minutes if it is unset, since kubo then adds an hour's delay. If nothing appears, it warns once. Behind NAT without inbound access, the certificate never comes, so this warning is correct there, just later. `status` reports the moment it runs and does not wait, so it can say browsers cannot reach a node whose certificate is still on its way.
 
 Until something can terminate WSS, kubo only gets its UDP 443 listeners. AutoTLS and the loopback filter stay as they were, so a failed attempt costs nothing.
 

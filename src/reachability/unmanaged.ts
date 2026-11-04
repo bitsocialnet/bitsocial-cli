@@ -58,7 +58,7 @@ export async function verifyUnmanagedAddresses(input: {
             } catch (error) {
                 // A machine reaches its own IP directly, so that failure is real. Any other IP goes through a router, which may not send it back (no NAT hairpin).
                 const status = targets.every((ip) => localIps.includes(ip)) ? "failed" : "unconfirmed";
-                return { address, status, error: (error as Error).message.replace(/\s+/g, " ") };
+                return { address, status, error: (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ") };
             }
         })
     );
