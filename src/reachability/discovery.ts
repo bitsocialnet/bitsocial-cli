@@ -50,6 +50,12 @@ export function publicIpsFromInterfaces(interfaces: NodeJS.Dict<os.NetworkInterf
     return [...new Set(addresses.filter((info) => !info.internal && isPublicIp(info.address)).map((info) => info.address))];
 }
 
+export function localIpsFromInterfaces(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces()): string[] {
+    return Object.values(interfaces)
+        .flatMap((infos) => infos ?? [])
+        .map((info) => info.address);
+}
+
 export function lanIpv4FromInterfaces(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces()): string | undefined {
     return Object.values(interfaces)
         .flatMap((infos) => infos ?? [])

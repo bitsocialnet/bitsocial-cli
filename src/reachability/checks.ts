@@ -140,9 +140,9 @@ function kuboAnnounceCheck(facts: CheckFacts): ReachabilityCheck | undefined {
     return { id: "kubo-announce", status: "ok", detail: `kubo announces ${facts.announce.length === 1 ? "the browser address" : `all ${facts.announce.length} browser addresses`}` };
 }
 
-// AutoNAT tests UDP 4001 and the like, not the UDP 443 this check is about.
+// AutoNAT tests UDP 4001 and the like, not the UDP 443 this check is about. Plain QUIC doesn't count: browsers need WebTransport.
 const isUdpFallback = (address: string) => {
-    const port = address.match(/\/udp\/(\d+)\/quic-v1/)?.[1];
+    const port = address.match(/\/udp\/(\d+)\/quic-v1\/webtransport/)?.[1];
     return port !== undefined && port !== "443";
 };
 

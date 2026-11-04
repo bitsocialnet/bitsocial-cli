@@ -232,6 +232,7 @@ describe("ReachabilityRuntime", () => {
         it("warns once, naming the address and why, when every attempt fails", async () => {
             const { runtime, events } = await setup(undefined, {
                 kuboIdentity: announced,
+                localIps: ["93.184.216.34"],
                 dialAddress: async () => {
                     throw new Error("connection refused");
                 },
@@ -245,6 +246,33 @@ describe("ReachabilityRuntime", () => {
             expect(warnings[0]).toContain(NOT_CONFIGURED_MESSAGE);
             expect(warnings[0]).toContain(wss);
             expect(warnings[0]).toContain("connection refused");
+        });
+
+        it("does not say browsers cannot reach it when the address is not on this machine", async () => {
+            const { runtime, events } = await setup(undefined, {
+                kuboIdentity: announced,
+                localIps: ["192.168.1.5"],
+                dialAddress: async () => {
+                    throw new Error("timed out");
+                },
+                browserAddressRetryMs: 1
+            });
+            await runtime.start();
+            await vi.waitFor(() => expect(events.some((event) => event.startsWith("warn:"))).toBe(true));
+            await runtime.stop();
+            const warnings = events.filter((event) => event.startsWith("warn:"));
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).not.toContain(NOT_CONFIGURED_MESSAGE);
+            expect(warnings[0]).toContain(wss);
+            expect(warnings[0]).toContain("timed out");
+        });
+
+        it("still starts when kubo's config cannot be parsed, as while it is being rewritten", async () => {
+            const { runtime, events, kuboRepoPath } = await setup();
+            await fs.writeFile(path.join(kuboRepoPath, "config"), '{"Addresses": {"Sw');
+            await expect(runtime.start()).resolves.toBeUndefined();
+            await runtime.stop();
+            expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
         });
 
         it("stops verifying when the daemon stops, and reports nothing", async () => {

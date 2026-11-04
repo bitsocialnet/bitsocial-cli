@@ -18,7 +18,7 @@ import {
     type ReachabilityConfig,
     type ReachabilityRuntimeStatus
 } from "./state.js";
-import { handshakeFailedMessage, handshakeSucceededMessage, isBrowserAddress, unverifiedMessage, verifyUnmanagedAddresses, type DialAddress } from "./unmanaged.js";
+import { handshakeFailedMessage, handshakeSucceededMessage, isBrowserAddress, unconfirmedMessage, unverifiedMessage, verifyUnmanagedAddresses, type DialAddress } from "./unmanaged.js";
 
 export const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 export const LEASE_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
@@ -116,6 +116,7 @@ export interface RuntimeDependencies {
     detectContainer?: () => Promise<boolean>;
     kuboIdentity?: () => Promise<{ peerId: string; addresses: string[] } | undefined>;
     dialAddress?: DialAddress;
+    localIps?: string[];
     browserAddressRetryMs?: number;
 }
 
@@ -178,7 +179,11 @@ export class ReachabilityRuntime {
 
     private async reportNotConfigured() {
         const identity = this.deps.kuboIdentity ?? (() => kuboIdentity(this.deps.kuboRpcUrl));
-        const kuboConfig = await fs.readFile(path.join(this.deps.kuboRepoPath, "config"), "utf-8").then((text) => JSON.parse(text), () => undefined);
+        // pkc-js may be rewriting this file as the daemon starts, so a parse error is as possible as a missing file.
+        const kuboConfig = await fs
+            .readFile(path.join(this.deps.kuboRepoPath, "config"), "utf-8")
+            .then((text) => JSON.parse(text))
+            .catch(() => undefined);
         const inConfig: string[] = [...(kuboConfig?.Addresses?.Announce ?? []), ...(kuboConfig?.Addresses?.AppendAnnounce ?? [])];
         const running = (await identity())?.addresses;
         if (![...(running ?? []), ...inConfig].some((address) => isBrowserAddress(address))) {
@@ -197,7 +202,8 @@ export class ReachabilityRuntime {
                 config: inConfig,
                 signal,
                 ...(this.deps.dialAddress ? { dial: this.deps.dialAddress } : {}),
-                ...(this.deps.resolveDomain ? { resolve: this.deps.resolveDomain } : {})
+                ...(this.deps.resolveDomain ? { resolve: this.deps.resolveDomain } : {}),
+                ...(this.deps.localIps ? { localIps: this.deps.localIps } : {})
             });
             // setup may have taken over while this ran.
             if (this.stopping || (await this.readConfig())) return;
@@ -208,9 +214,14 @@ export class ReachabilityRuntime {
             }
             if (attempt >= BROWSER_ADDRESS_ATTEMPTS) {
                 const failed = results.filter(({ status }) => status === "failed");
+                const unconfirmed = results.filter(({ status }) => status === "unconfirmed");
                 const unverified = results.filter(({ status }) => status === "unverified");
-                const reasons = [...(failed.length > 0 ? [handshakeFailedMessage(failed)] : []), ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])];
-                this.deps.warn([NOT_CONFIGURED_MESSAGE, ...reasons].join(". "));
+                const reasons = [
+                    ...(failed.length > 0 ? [handshakeFailedMessage(failed)] : []),
+                    ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : []),
+                    ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])
+                ];
+                this.deps.warn([...(unconfirmed.length > 0 ? [] : [NOT_CONFIGURED_MESSAGE]), ...reasons].join(". "));
                 return;
             }
             await new Promise<void>((resolve) => {

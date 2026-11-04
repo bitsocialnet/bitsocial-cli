@@ -1,12 +1,12 @@
 import type { ReachabilityCheck } from "./checks.js";
-import { isPublicIp } from "./discovery.js";
+import { isPublicIp, localIpsFromInterfaces } from "./discovery.js";
 import { dialWithLibp2p } from "./libp2p-dial.js";
 import { resolveDomainRecords, type ResolvedDomain } from "./setup.js";
 
 // Browser addresses kubo announces that `setup` did not put there: AutoTLS, or a reverse proxy set up by hand.
 export interface UnmanagedAddress {
     address: string;
-    status: "ok" | "failed" | "unverified";
+    status: "ok" | "failed" | "unconfirmed" | "unverified";
     error?: string;
 }
 
@@ -39,22 +39,26 @@ export async function verifyUnmanagedAddresses(input: {
     dial?: DialAddress;
     resolve?: (name: string) => Promise<ResolvedDomain>;
     signal?: AbortSignal;
+    localIps?: string[];
 }): Promise<UnmanagedAddress[]> {
-    const { treatAsPublic = [], dial = dialWithLibp2p, resolve = resolveDomainRecords, signal } = input;
+    const { treatAsPublic = [], dial = dialWithLibp2p, resolve = resolveDomainRecords, signal, localIps = localIpsFromInterfaces() } = input;
     if (input.running === undefined) return uniqueBrowserAddresses(input.config ?? [], treatAsPublic).map(([address]) => ({ address, status: "unverified" }));
     return Promise.all(
         uniqueBrowserAddresses(input.running, treatAsPublic).map(async ([address, dialable]): Promise<UnmanagedAddress> => {
+            let targets = [address.match(/^\/ip[46]\/([^/]+)\//)?.[1]].filter((ip) => ip !== undefined);
             try {
                 const name = address.match(/^\/dns[46]?\/([^/]+)\//)?.[1];
                 if (name) {
                     const records = await resolve(name);
-                    const resolved = [...records.v4, ...records.v6];
-                    if (resolved.length > 0 && !resolved.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) throw new Error(`${name} resolves only to private addresses`);
+                    targets = [...records.v4, ...records.v6];
+                    if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses` };
                 }
                 await dial(dialable, { timeoutMs: DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}) });
                 return { address, status: "ok" };
             } catch (error) {
-                return { address, status: "failed", error: (error as Error).message.replace(/\s+/g, " ") };
+                // A machine reaches its own IP directly, so that failure is real. Any other IP goes through a router, which may not send it back (no NAT hairpin).
+                const status = targets.every((ip) => localIps.includes(ip)) ? "failed" : "unconfirmed";
+                return { address, status, error: (error as Error).message.replace(/\s+/g, " ") };
             }
         })
     );
@@ -65,6 +69,8 @@ export const handshakeSucceededMessage = (address: string) =>
     `kubo announces ${address} and a handshake from this machine succeeded. \`bitsocial reachability\` does not manage it.`;
 export const handshakeFailedMessage = (failed: UnmanagedAddress[]) =>
     `Announced addresses that failed a handshake: ${failed.map(({ address, error }) => `${address} (${error})`).join(", ")}`;
+export const unconfirmedMessage = (unconfirmed: UnmanagedAddress[]) =>
+    `Could not connect from this machine to ${unconfirmed.map(({ address, error }) => `${address} (${error})`).join(", ")}. Browsers may still be able to, as a router often will not connect a machine to its own public address`;
 export const unverifiedMessage = (unverified: UnmanagedAddress[]) =>
     `kubo's config announces ${unverified.map(({ address }) => address).join(", ")}, which cannot be verified while the daemon is not running.`;
 
@@ -74,26 +80,30 @@ export function browserAddressCheck(addresses: UnmanagedAddress[]): Reachability
     if (addresses.length === 0) return undefined;
     const ok = ofStatus(addresses, "ok");
     const failed = ofStatus(addresses, "failed");
+    const unconfirmed = ofStatus(addresses, "unconfirmed");
     const unverified = ofStatus(addresses, "unverified");
     const fix = "Check the server in front of kubo, or run: bitsocial reachability setup";
     if (unverified.length > 0) return { id: "browser-address", status: "unknown", detail: unverifiedMessage(unverified) };
-    if (ok.length === 0) return { id: "browser-address", status: "fail", detail: handshakeFailedMessage(failed), fix };
-    const succeeded = `A handshake from this machine succeeded through ${ok.map(({ address }) => address).join(", ")}`;
-    if (failed.length > 0) return { id: "browser-address", status: "warn", detail: `${succeeded}. ${handshakeFailedMessage(failed)}`, fix };
-    return { id: "browser-address", status: "ok", detail: succeeded };
+    if (ok.length === 0 && unconfirmed.length === 0) return { id: "browser-address", status: "fail", detail: handshakeFailedMessage(failed), fix };
+    const succeeded = ok.length > 0 ? [`A handshake from this machine succeeded through ${ok.map(({ address }) => address).join(", ")}`] : [];
+    const problems = [...(failed.length > 0 ? [handshakeFailedMessage(failed)] : []), ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : [])];
+    if (problems.length > 0) return { id: "browser-address", status: "warn", detail: [...succeeded, ...problems].join(". "), fix };
+    return { id: "browser-address", status: "ok", detail: succeeded.join("") };
 }
 
 // The lines `status` opens with on a node that never ran setup, where this replaces "Browsers cannot reach this node" only if something is worth saying.
 export function notConfiguredSummary(addresses: UnmanagedAddress[]): string[] {
     const ok = ofStatus(addresses, "ok");
     const failed = ofStatus(addresses, "failed");
+    const unconfirmed = ofStatus(addresses, "unconfirmed");
     const unverified = ofStatus(addresses, "unverified");
     const failures = failed.length > 0 ? [handshakeFailedMessage(failed)] : [];
-    if (ok.length === 0 && unverified.length === 0) return ["Reachability is not configured. Browsers cannot reach this node. Run: bitsocial reachability setup", ...failures];
+    if (ok.length === 0 && unconfirmed.length === 0 && unverified.length === 0) return ["Reachability is not configured. Browsers cannot reach this node. Run: bitsocial reachability setup", ...failures];
     return [
         "`bitsocial reachability setup` has not been run on this node.",
         ...ok.map(({ address }) => handshakeSucceededMessage(address)),
         ...failures,
+        ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : []),
         ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])
     ];
 }

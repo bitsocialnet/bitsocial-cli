@@ -11,13 +11,15 @@ import { writeReachabilityConfig } from "../../src/reachability/state.js";
 const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
 // A closed port on an address the test hook below counts as public, so the handshake really runs and really fails.
 const deadWss = "/ip4/127.0.0.1/tcp/9/tls/ws";
+// Counted as public too, but not on this machine's interfaces, like a public IP behind a router.
+const notOnThisMachineWss = "/ip4/127.0.0.2/tcp/9/tls/ws";
 const CANNOT_REACH = "Browsers cannot reach this node";
 
 const run = (args: string[], kuboRpcUrl: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> =>
     new Promise((resolve, reject) => {
         const child = spawn("node", ["./bin/run", "reachability", "status", ...args], {
             stdio: ["ignore", "pipe", "pipe"],
-            env: { ...process.env, KUBO_RPC_URL: kuboRpcUrl, IPFS_PATH: "", BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1" }
+            env: { ...process.env, KUBO_RPC_URL: kuboRpcUrl, IPFS_PATH: "", BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1,127.0.0.2" }
         });
         let stdout = "";
         let stderr = "";
@@ -65,6 +67,18 @@ describe("reachability status on a node that never ran setup", () => {
             expect(parsed.configured).toBe(false);
             expect(parsed.unmanagedAddresses).toMatchObject([{ address: deadWss, status: "failed" }]);
             expect(parsed.checks.find((check: { id: string }) => check.id === "browser-address")).toMatchObject({ status: "fail" });
+        });
+    });
+
+    it("does not say browsers cannot reach it when the failed address is not on this machine", { timeout: 60_000 }, async () => {
+        await withKubo({ announced: [notOnThisMachineWss] }, async (url) => {
+            const human = await run(["--pkcOptions.dataPath", randomDirectory()], url);
+            expect(human.stdout).not.toContain(CANNOT_REACH);
+            expect(human.stdout).toContain(notOnThisMachineWss);
+
+            const parsed = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
+            expect(parsed.unmanagedAddresses).toMatchObject([{ address: notOnThisMachineWss, status: "unconfirmed" }]);
+            expect(parsed.checks.find((check: { id: string }) => check.id === "browser-address")).toMatchObject({ status: "warn" });
         });
     });
 

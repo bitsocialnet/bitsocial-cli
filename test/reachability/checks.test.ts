@@ -80,20 +80,25 @@ describe("evaluateChecks on a node with a verified address it does not manage", 
     });
 
     it("passes UDP 443 when AutoNAT confirmed the fallback UDP port", () => {
-        const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1"] }) })), "udp-443")!;
+        const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA"] }) })), "udp-443")!;
         expect(udp.status).toBe("ok");
         expect(udp.detail).toContain("UDP 4001");
     });
 
+    it("does not count plain QUIC as WebTransport on the fallback port", () => {
+        const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1"] }) })), "udp-443")!;
+        expect(udp.status).toBe("warn");
+    });
+
     it("warns on UDP 443, naming the address, when AutoNAT could not reach the fallback port", () => {
-        const address = "/ip4/93.184.216.34/udp/4001/quic-v1";
+        const address = "/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA";
         const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ unreachable: [address] }) })), "udp-443")!;
         expect(udp.status).toBe("warn");
         expect(udp.detail).toContain(address);
     });
 
     it("warns on UDP 443 when the fallback port has not been tested, including with no AutoNAT answer", () => {
-        for (const kuboAutonat of [autonat({ unknown: ["/ip4/93.184.216.34/udp/4001/quic-v1"] }), undefined]) {
+        for (const kuboAutonat of [autonat({ unknown: ["/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA"] }), undefined]) {
             const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], ...(kuboAutonat ? { kuboAutonat } : {}) })), "udp-443")!;
             expect(udp.status).toBe("warn");
             expect(udp.detail).toMatch(/not (been )?tested/);

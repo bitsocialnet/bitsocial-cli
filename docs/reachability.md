@@ -60,11 +60,13 @@ Reruns keep the stored choices and only add or repair. A rerun that cannot get a
 
 A node can already serve WSS without `setup`, through a reverse proxy set up by hand or an AutoTLS address. `configured` in `status --json` only means `setup` has run (`config.json` exists), so it stays `false` on these nodes and says nothing about whether browsers can connect.
 
-On a node without `config.json`, `status` tries a real libp2p handshake with every public `/tls/ws`, `/wss` and `/tls/sni/<name>/ws` address kubo announces, and lists the results in `unmanagedAddresses` (`--json`) and the `browser-address` check. Each is `ok`, `failed` with the reason, or `unverified`. It skips relay addresses and private IPs, and a name that resolves only to private addresses counts as failed. While kubo is down, `status` lists the addresses in kubo's config as `unverified`.
+On a node without `config.json`, `status` tries a real libp2p handshake with every public `/tls/ws`, `/wss` and `/tls/sni/<name>/ws` address kubo announces, and lists the results in `unmanagedAddresses` (`--json`) and the `browser-address` check. Each is `ok`, `failed` or `unconfirmed` with the reason, or `unverified`. It skips relay addresses and private IPs, and a name that resolves only to private addresses counts as failed. While kubo is down, `status` lists the addresses in kubo's config as `unverified`.
 
-`status` says browsers cannot reach the node only when no such address exists or every handshake fails. A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
+A failed handshake is `failed` when every IP the address leads to is on one of the node's own interfaces, or the name resolves to nothing, because the node reaches its own IP directly. Any other IP goes through a router, which may not connect a machine to its own public address (no NAT hairpin), so that failure is `unconfirmed`: the `browser-address` check warns instead of failing.
 
-The daemon does the same check in the background when it starts. With no such address it warns straight away. Otherwise it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed.
+`status` says browsers cannot reach the node only when no such address exists or every handshake is `failed`. A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
+
+The daemon does the same check in the background when it starts. With no such address it warns straight away. Otherwise it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed or could not be confirmed.
 
 Until something can terminate WSS, kubo only gets its UDP 443 listeners. AutoTLS and the loopback filter stay as they were, so a failed attempt costs nothing.
 
@@ -136,7 +138,7 @@ The daemon sends stderr only to its log file, so these messages go to stdout whe
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
 | `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage) |
 | `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, as the program is then serving it |
-| `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for kubo's other UDP port: `ok` if reached, otherwise `warn` |
+| `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn` |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
 | `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |
 | `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to. `kubo-ws` is skipped when `setup` left the node without WSS |
