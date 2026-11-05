@@ -78,10 +78,11 @@ describe("the daemon keeps a configured node reachable", { timeout: 240_000 }, (
         await pebble?.stop();
     }, 60_000);
 
-    it("says once on stdout at start that browsers cannot reach an unconfigured node", async () => {
-        const seen = await waitForCondition(() => daemonStdout.includes("bitsocial reachability setup"), 20_000, 200);
+    it("says once on stdout at start that AutoTLS may still be coming, rather than that browsers cannot reach the node", async () => {
+        const seen = await waitForCondition(() => daemonStdout.includes("AutoTLS may still be getting a certificate"), 20_000, 200);
         expect(seen, daemonStdout).toBe(true);
-        expect(daemonStdout.match(/Browsers cannot reach this node/g)).toHaveLength(1);
+        expect(daemonStdout.match(/AutoTLS may still be getting a certificate/g)).toHaveLength(1);
+        expect(daemonStdout).not.toContain("Browsers cannot reach this node");
     });
 
     it("picks up setup on a running daemon and serves a libp2p handshake through its own Caddy", async () => {

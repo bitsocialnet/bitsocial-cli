@@ -55,6 +55,96 @@ const facts = (overrides: Partial<CheckFacts> = {}): CheckFacts => ({
 });
 const check = (result: ReturnType<typeof evaluateChecks>, id: string) => result.find((entry) => entry.id === id);
 
+describe("evaluateChecks on a node with a verified address it does not manage", () => {
+    const wss = "/dns4/node.example/tcp/443/tls/ws";
+    const heldByProxy = { tcp443: "busy", tcp443Holder: "caddy", udp443: "busy", udp443Holder: "caddy" } as const;
+    const autonat = (fields: { reachable?: string[]; unreachable?: string[]; unknown?: string[] }) => ({ reachable: [], unreachable: [], unknown: [], ...fields });
+
+    it("does not call the proxy holding TCP 443 a problem", () => {
+        const tcp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss] })), "tcp-443")!;
+        expect(tcp.status).toBe("ok");
+        expect(tcp.detail).toContain("caddy");
+        expect(tcp.detail).toContain(wss);
+    });
+
+    it("ignores that address on the port's permission check too, as a non-root user cannot even probe the port", () => {
+        expect(check(evaluateChecks(facts({ tcp443: "no-permission", caddyBind: "denied", verifiedWss: [wss] })), "tcp-443")!.status).toBe("ok");
+    });
+
+    it("still reports TCP 443 when the verified address uses another port", () => {
+        expect(check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: ["/dns4/node.example/tcp/8443/tls/ws"] })), "tcp-443")!.status).toBe("fail");
+    });
+
+    it("still reports TCP 443 when nothing was verified", () => {
+        expect(check(evaluateChecks(facts({ ...heldByProxy })), "tcp-443")!.status).toBe("fail");
+    });
+
+    it("passes UDP 443 when AutoNAT confirmed the fallback UDP port", () => {
+        const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA"] }) })), "udp-443")!;
+        expect(udp.status).toBe("ok");
+        expect(udp.detail).toContain("UDP 4001");
+    });
+
+    it("does not count plain QUIC as WebTransport on the fallback port", () => {
+        const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1"] }) })), "udp-443")!;
+        expect(udp.status).toBe("warn");
+    });
+
+    it("warns on UDP 443, naming the address, when AutoNAT could not reach the fallback port", () => {
+        const address = "/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA";
+        const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ unreachable: [address] }) })), "udp-443")!;
+        expect(udp.status).toBe("warn");
+        expect(udp.detail).toContain(address);
+    });
+
+    it("warns on UDP 443 when the fallback port has not been tested, including with no AutoNAT answer", () => {
+        for (const kuboAutonat of [autonat({ unknown: ["/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA"] }), undefined]) {
+            const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], ...(kuboAutonat ? { kuboAutonat } : {}) })), "udp-443")!;
+            expect(udp.status).toBe("warn");
+            expect(udp.detail).toMatch(/not (been )?tested/);
+        }
+    });
+
+    it("warns rather than fails when a non-root kubo may not bind UDP 443, and still says how to fix it", () => {
+        const denied = { udp443: "no-permission", kuboBind: "denied" } as const;
+        const udp = check(evaluateChecks(facts({ ...denied, verifiedWss: [wss] })), "udp-443")!;
+        expect(udp.status).toBe("warn");
+        expect(udp.detail).toContain("no permission");
+        expect(udp.fix).toContain("setcap");
+    });
+
+    it("keeps that a problem without a verified address", () => {
+        expect(check(evaluateChecks(facts({ udp443: "no-permission", kuboBind: "denied" })), "udp-443")!.status).toBe("fail");
+    });
+
+    it("keeps UDP 443 as a problem without a verified address, and makes no claim about ISPs", () => {
+        const udp = check(evaluateChecks(facts({ ...heldByProxy })), "udp-443")!;
+        expect(udp.status).toBe("fail");
+        expect(`${udp.detail} ${udp.fix}`).not.toMatch(/ISP/);
+    });
+});
+
+describe("evaluateChecks inbound with AutoNAT results", () => {
+    const tcp = "/ip4/93.184.216.34/tcp/4001";
+    const inbound = (kuboAutonat: NonNullable<CheckFacts["kuboAutonat"]>) => check(evaluateChecks(facts({ kuboAutonat })), "inbound")!;
+
+    it("is ok once AutoNAT reached an address, and never claims that covers WSS", () => {
+        const result = inbound({ reachable: [tcp], unreachable: [], unknown: [] });
+        expect(result.status).toBe("ok");
+        expect(result.detail).toContain(tcp);
+        expect(result.detail).toMatch(/not cover WSS through a reverse proxy/);
+    });
+
+    it("warns when AutoNAT could reach nothing it tested", () => {
+        expect(inbound({ reachable: [], unreachable: [tcp], unknown: [] }).status).toBe("warn");
+    });
+
+    it("stays unknown until AutoNAT has a result", () => {
+        expect(inbound({ reachable: [], unreachable: [], unknown: [tcp] }).status).toBe("unknown");
+        expect(inbound({ reachable: [], unreachable: [], unknown: [] }).status).toBe("unknown");
+    });
+});
+
 describe("evaluateChecks", () => {
     it("passes a clean host, but never claims inbound is proven", () => {
         const result = evaluateChecks(facts());
