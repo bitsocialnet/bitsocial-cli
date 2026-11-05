@@ -78,6 +78,7 @@ Topic docs live flat under `docs/`; [docs/README.md](docs/README.md) is the inde
 | `src/common-utils/package-registry.ts`, package reload endpoints in `src/webui/daemon-server.ts` | both of the above |
 | `settings.challenges` / `settings.pages` examples in `src/cli/commands/community/edit.ts` | the matching doc above |
 | `src/reachability/`, `src/cli/commands/reachability/`                    | [docs/reachability.md](docs/reachability.md) |
+| `config/.release-it.json`, `.github/workflows/CI-build.yml`, `.github/workflows/docker-publish.yml`, `ci-bin/pkc-js-changelog.ts`, the package version, breaking changes | [docs/versioning.md](docs/versioning.md) |
 
 When a change alters behavior a doc describes (commands, flags, paths, endpoints, output), update the doc in the same PR.
 
@@ -139,7 +140,7 @@ npm run build:test:watch             # watch mode for test build
 
 ## Playbooks (Load On Demand)
 
-_No playbooks yet. As recurring workflows emerge (e.g., release process, adding a new command, upgrading pkc-js), create them as separate files and reference them here._
+_No playbooks yet. The release process is covered by [docs/versioning.md](docs/versioning.md). As other recurring workflows emerge (e.g., adding a new command, upgrading pkc-js), create them as separate files and reference them here._
 
 <!-- Example future entry:
 - [Adding a new CLI command](playbooks/new-command.md)
