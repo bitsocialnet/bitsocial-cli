@@ -11,4 +11,5 @@ When you add a topic doc under `docs/`, add a row here.
 | [reachability.md](reachability.md) | Making a node dialable from browsers: `bitsocial reachability setup/status/enable/disable`, choosing a path, what changes in the kubo config, what the daemon keeps doing, troubleshooting |
 | [tailscale-funnel.md](tailscale-funnel.md) | A browser address for a node behind NAT through Tailscale Funnel: when `setup` and `status` suggest it, the steps, the Docker sidecar, what Tailscale can see, limits |
 | [web-uis.md](web-uis.md) | Web UIs: the release manifest every web UI build must ship, how postinstall, the fast update and the daemon use it, what happens when a web UI cannot be installed |
+| [versioning.md](versioning.md) | How the next version is chosen (`preMajor`: breaking changes bump the minor, everything else the patch), what counts as a breaking-change marker, when CI publishes to npm and Docker, who receives a release, marking breaking changes, leaving `0.x` |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes (generated on release; do not edit by hand) |
