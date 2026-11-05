@@ -1,6 +1,6 @@
 # Contributing to bitsocial-cli
 
-bitsocial-cli is a Bitsocial node: an [oclif](https://oclif.io) CLI and daemon built on [pkc-js](https://github.com/pkcprotocol/pkc-js). It runs communities, a Kubo IPFS node, the PKC RPC WebSocket and the bundled web UIs. Every successful CI run on `master` publishes a release to npm and Docker, and operators receive it through `bitsocial update install` and the `latest` image, so `master` must stay releasable.
+bitsocial-cli is a Bitsocial node: an [oclif](https://oclif.io) CLI and daemon built on [pkc-js](https://github.com/pkcprotocol/pkc-js). It runs communities, a Kubo IPFS node, the PKC RPC WebSocket and the bundled web UIs. A successful CI run on `master` publishes a release to npm and Docker whenever there are commits since the last tag, and operators receive it through `bitsocial update install` and the `latest` image, so `master` must stay releasable.
 
 Before you start, read:
 
