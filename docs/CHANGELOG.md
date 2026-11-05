@@ -1,5 +1,13 @@
 # Changelog
 
+## <small>0.19.124 (2026-11-05)</small>
+
+* fix(cli): keep flush's default wait on commands that return a value ([a791f37](https://github.com/bitsocialnet/bitsocial-cli/commit/a791f37))
+* fix(reachability): address review findings on unmanaged WSS checks ([70149a2](https://github.com/bitsocialnet/bitsocial-cli/commit/70149a2))
+* fix(reachability): report WSS addresses that setup does not manage ([bcd5f1d](https://github.com/bitsocialnet/bitsocial-cli/commit/bcd5f1d))
+* fix(reachability): wait for AutoTLS before warning on daemon start ([290eb35](https://github.com/bitsocialnet/bitsocial-cli/commit/290eb35))
+* docs(agents): note that test:cli rejects an extra --bail flag ([b5f6bdd](https://github.com/bitsocialnet/bitsocial-cli/commit/b5f6bdd))
+
 ## <small>0.19.123 (2026-11-03)</small>
 
 * fix(reachability): back off failed certificates and fix review findings ([a025028](https://github.com/bitsocialnet/bitsocial-cli/commit/a025028))
