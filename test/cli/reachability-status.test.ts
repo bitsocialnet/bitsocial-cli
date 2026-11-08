@@ -6,7 +6,7 @@ import path from "path";
 import { describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import { planKuboConfig } from "../../src/reachability/kubo-config.js";
-import { writeReachabilityConfig, writeReachabilityRuntimeStatus } from "../../src/reachability/state.js";
+import { writeReachabilityConfig, writeReachabilityDeclined, writeReachabilityRuntimeStatus } from "../../src/reachability/state.js";
 
 const runStatus = (args: string[], kuboRpcUrl = "http://127.0.0.1:9/api/v0"): Promise<{ stdout: string; stderr: string; exitCode: number | null }> =>
     new Promise((resolve, reject) => {
@@ -67,6 +67,16 @@ describe("bitsocial reachability status", () => {
     it("names the setup command for a person when not configured", async () => {
         const { stdout } = await runStatus(["--pkcOptions.dataPath", randomDirectory()]);
         expect(stdout).toContain("bitsocial reachability setup");
+    });
+
+    it("says a declined node is off on purpose, and how to turn it on (#225)", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityDeclined(dataPath);
+        const { stdout } = await runStatus(["--pkcOptions.dataPath", dataPath]);
+        expect(stdout).toContain("Reachability: declined. To turn it on, run: bitsocial reachability setup");
+        expect(stdout).not.toContain("Browsers cannot reach this node");
+        const json = await runStatus(["--json", "--pkcOptions.dataPath", dataPath]);
+        expect(JSON.parse(json.stdout)).toMatchObject({ configured: false, declined: true });
     });
 
     it("exits non-zero on a config from a newer version", async () => {

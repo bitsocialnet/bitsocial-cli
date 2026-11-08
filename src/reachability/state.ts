@@ -72,6 +72,8 @@ export interface ReachabilityStatus {
     staging: boolean;
     certificates: CertificateInfo[];
     lastChecks: ReachabilityRuntimeStatus | null;
+    // True only while there is no config, because any config is already a decision.
+    declined: boolean;
 }
 
 export const reachabilityDir = (dataPath: string) => path.join(dataPath, "reachability");
@@ -146,6 +148,20 @@ export const writeReachabilityConfig = (dataPath: string, config: ReachabilityCo
 
 export const writeReachabilityRuntimeStatus = (dataPath: string, status: ReachabilityRuntimeStatus) =>
     writeJsonAtomic(reachabilityRuntimeStatusPath(dataPath), status);
+
+// Kept outside the state directory, so `disable --purge` moving that directory away keeps the decline.
+// Only matters while there is no config: any config is already a decision.
+export const reachabilityDeclinedPath = (dataPath: string) => path.join(dataPath, "reachability-declined");
+
+export const writeReachabilityDeclined = (dataPath: string, now: Date = new Date()) => writeJsonAtomic(reachabilityDeclinedPath(dataPath), { declinedAt: now.toISOString() });
+
+export const isReachabilityDeclined = (dataPath: string): Promise<boolean> =>
+    fs.access(reachabilityDeclinedPath(dataPath)).then(
+        () => true,
+        () => false
+    );
+
+export const clearReachabilityDeclined = (dataPath: string) => fs.rm(reachabilityDeclinedPath(dataPath), { force: true });
 
 const isPlainObject = (value: unknown): value is Record<string, any> => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -248,6 +264,7 @@ export async function readReachabilityStatus(dataPath: string, now: Date = new D
         domain: config?.domain ?? null,
         staging: config?.staging ?? false,
         certificates,
-        lastChecks
+        lastChecks,
+        declined: config === undefined && (await isReachabilityDeclined(dataPath))
     };
 }

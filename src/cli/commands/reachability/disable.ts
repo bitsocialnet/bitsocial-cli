@@ -4,7 +4,7 @@ import { resolveNodePaths } from "../../../reachability/cli-support.js";
 import { disableReachability, purgeReachability } from "../../../reachability/lifecycle.js";
 
 export default class Disable extends Command {
-    static override description = "Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates";
+    static override description = "Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates. On a node that was never set up, records that you declined, so the daemon stops reminding you";
 
     static override flags = {
         "pkcOptions.dataPath": Flags.directory({ description: "Data path of the node", required: false }),

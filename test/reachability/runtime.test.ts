@@ -8,15 +8,17 @@ import { applyKuboConfig } from "../../src/reachability/setup.js";
 import {
     announcedNames,
     CHECK_INTERVAL_MS,
+    DECLINED_MESSAGE,
     isNameHealthy,
     judgeName,
     NOT_CONFIGURED_MESSAGE,
     planIpChange,
     ReachabilityRuntime,
     STALE_NAME_DROP_AFTER_MS,
+    UNDECIDED_RECHECK_INTERVAL_MS,
     type RuntimeDependencies
 } from "../../src/reachability/runtime.js";
-import { readReachabilityConfig, readReachabilityRuntimeStatus, reachabilityDir, writeReachabilityConfig, type ReachabilityConfig } from "../../src/reachability/state.js";
+import { readReachabilityConfig, readReachabilityRuntimeStatus, reachabilityDir, writeReachabilityConfig, writeReachabilityDeclined, type ReachabilityConfig } from "../../src/reachability/state.js";
 
 const V4 = "93.184.216.34";
 const V4_NEW = "93.184.216.35";
@@ -352,6 +354,128 @@ describe("ReachabilityRuntime", () => {
             await runtime.start();
             await runtime.stop();
             expect(dialAddress).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("a node nobody has decided about (#225)", () => {
+        const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+        const wss = "/ip4/93.184.216.34/tcp/443/tls/ws";
+        const announced = async () => ({ peerId, addresses: [`${wss}/p2p/${peerId}`] });
+        const warnings = (events: string[]) => events.filter((event) => event.startsWith("warn:"));
+        const successes = (events: string[]) => events.filter((event) => event.startsWith("log:") && event.includes(wss));
+        const undecided = async (overrides: Partial<RuntimeDependencies> = {}) => {
+            const context = await setup(undefined, { browserAddressRetryMs: 1, ...overrides });
+            await fs.writeFile(path.join(context.kuboRepoPath, "config"), kuboConfigWithAutoTls({ Enabled: false }));
+            return context;
+        };
+
+        it("reminds again on the hourly check, not only at start", async () => {
+            const { runtime, events, advance } = await undecided();
+            await runtime.start();
+            advance(UNDECIDED_RECHECK_INTERVAL_MS);
+            await runtime.recheckUndecided();
+            advance(UNDECIDED_RECHECK_INTERVAL_MS);
+            await runtime.recheckUndecided();
+            await runtime.stop();
+            expect(warnings(events)).toEqual(Array(3).fill(`warn: ${NOT_CONFIGURED_MESSAGE}`));
+        });
+
+        it("checks once an hour", () => expect(UNDECIDED_RECHECK_INTERVAL_MS).toBe(60 * 60_000));
+
+        it("stops reminding once setup writes a config", async () => {
+            const { runtime, events, dataPath } = await undecided();
+            await runtime.start();
+            await writeReachabilityConfig(dataPath, baseConfig({ enabled: false }));
+            await runtime.recheckUndecided();
+            await runtime.stop();
+            expect(warnings(events)).toHaveLength(1);
+        });
+
+        it("stops reminding once the operator declines", async () => {
+            const { runtime, events, dataPath } = await undecided();
+            await runtime.start();
+            await writeReachabilityDeclined(dataPath);
+            await runtime.recheckUndecided();
+            await runtime.stop();
+            expect(warnings(events)).toHaveLength(1);
+        });
+
+        it("says once at start that a declined node is off, and never checks or warns", async () => {
+            const dialAddress = vi.fn(async () => ({ peerId }));
+            const { runtime, events, dataPath } = await undecided({ kuboIdentity: announced, dialAddress });
+            await writeReachabilityDeclined(dataPath);
+            await runtime.start();
+            await runtime.recheckUndecided();
+            await runtime.stop();
+            expect(events).toEqual([`log: ${DECLINED_MESSAGE}`]);
+            expect(dialAddress).not.toHaveBeenCalled();
+        });
+
+        it("logs a working address only when that changes, and warns each hour it does not work", async () => {
+            const outcomes = [true, true, false, false, true];
+            const dialAddress = async () => {
+                if (!outcomes.shift()) throw new Error("connection refused");
+                return { peerId };
+            };
+            const { runtime, events } = await undecided({ kuboIdentity: announced, dialAddress, localIps: ["93.184.216.34"] });
+            await runtime.start();
+            await vi.waitFor(() => expect(successes(events)).toHaveLength(1));
+            for (let check = 0; check < 4; check++) await runtime.recheckUndecided();
+            await runtime.stop();
+            expect(events.map((event) => (event.startsWith("warn:") ? "warn" : event.includes(wss) ? "ok" : event))).toEqual(["ok", "warn", "warn", "ok"]);
+        });
+
+        it("makes one attempt on the hourly check, without waiting for AutoTLS", async () => {
+            let dials = 0;
+            const kuboIdentity = vi.fn(async () => ({ peerId, addresses: [] as string[] }));
+            const { runtime, events, kuboRepoPath } = await undecided({ kuboIdentity, dialAddress: async () => (dials++, { peerId }) });
+            await runtime.start();
+            await fs.writeFile(path.join(kuboRepoPath, "config"), kuboConfigWithAutoTls({ Enabled: true }));
+            kuboIdentity.mockClear();
+            await runtime.recheckUndecided();
+            await runtime.stop();
+            expect(kuboIdentity.mock.calls.length).toBeLessThanOrEqual(2);
+            expect(warnings(events)).toEqual(Array(2).fill(`warn: ${NOT_CONFIGURED_MESSAGE}`));
+            expect(dials).toBe(0);
+        });
+
+        it("leaves the hourly check to the startup check while that still waits for AutoTLS", async () => {
+            const kuboIdentity = vi.fn(async () => ({ peerId, addresses: [] as string[] }));
+            const context = await setup(undefined, { kuboIdentity, browserAddressRetryMs: 60_000 });
+            await fs.writeFile(path.join(context.kuboRepoPath, "config"), kuboConfigWithAutoTls({ Enabled: true }));
+            await context.runtime.start();
+            const calls = kuboIdentity.mock.calls.length;
+            await context.runtime.recheckUndecided();
+            expect(kuboIdentity.mock.calls.length).toBe(calls);
+            await context.runtime.stop();
+            expect(warnings(context.events)).toEqual([]);
+        });
+
+        it("ends the startup wait for AutoTLS once the operator declines, and reports nothing", async () => {
+            const context: { dataPath?: string } = {};
+            let reads = 0;
+            const kuboIdentity = async () => {
+                if (++reads === 3) await writeReachabilityDeclined(context.dataPath!);
+                return { peerId, addresses: [] };
+            };
+            const started = await setup(undefined, { kuboIdentity, browserAddressRetryMs: 1 });
+            context.dataPath = started.dataPath;
+            await fs.writeFile(path.join(started.kuboRepoPath, "config"), kuboConfigWithAutoTls({ Enabled: true }));
+            await started.runtime.start();
+            await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(3));
+            // Without the decline the wait would go on, one read per millisecond.
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(reads).toBeLessThan(10);
+            await started.runtime.stop();
+            expect(warnings(started.events)).toEqual([]);
+        });
+
+        it("does not recheck once stopped", async () => {
+            const { runtime, events } = await undecided();
+            await runtime.start();
+            await runtime.stop();
+            await runtime.recheckUndecided();
+            expect(warnings(events)).toHaveLength(1);
         });
     });
 
