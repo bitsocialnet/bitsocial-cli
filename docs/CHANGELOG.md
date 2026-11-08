@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.126 (2026-11-08)</small>
+
+* fix(reachability): address review findings on mode tracking ([fa377fd](https://github.com/bitsocialnet/bitsocial-cli/commit/fa377fd))
+* fix(reachability): update mode when the daemon changes the announced addresses ([f9bfa7d](https://github.com/bitsocialnet/bitsocial-cli/commit/f9bfa7d))
+
 ## <small>0.19.125 (2026-11-08)</small>
 
 * feat(reachability): keep reminding while undecided, and let disable record a decline ([628f2b9](https://github.com/bitsocialnet/bitsocial-cli/commit/628f2b9))
