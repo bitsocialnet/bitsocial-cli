@@ -6,7 +6,7 @@ import { caddyBinaryPath, caddyfilePath, caddyfileServesDomain, ensureCaddyBinar
 import { detectContainer, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
 import { bindDeniedGuidance, isBindDenied } from "./guidance.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
-import { applyKuboConfig, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
+import { applyKuboConfig, modeChangedMessage, modeForAnnounced, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
 import {
     caddyDataDir,
     currentCertificates,
@@ -14,6 +14,7 @@ import {
     readIssuedCertificates,
     readReachabilityConfig,
     readReachabilityRuntimeStatus,
+    writeReachabilityConfig,
     writeReachabilityRuntimeStatus,
     type ReachabilityConfig,
     type ReachabilityRuntimeStatus
@@ -384,7 +385,9 @@ export class ReachabilityRuntime {
         const latest = await this.readConfig();
         if (!latest?.enabled) return latest ?? config;
         const { kuboEdits: _stale, ...rest } = config;
-        const { config: applied, kuboConfigChanged } = await applyKuboConfig({ ...rest, ...(latest.kuboEdits ? { kuboEdits: latest.kuboEdits } : {}) }, this.deps, true);
+        const mode = modeForAnnounced(config);
+        const { config: applied, kuboConfigChanged } = await applyKuboConfig({ ...rest, mode, ...(latest.kuboEdits ? { kuboEdits: latest.kuboEdits } : {}) }, this.deps, true);
+        if (mode !== config.mode) this.deps.log(modeChangedMessage(config.mode, mode));
         if (kuboConfigChanged) await this.restartKubo();
         return applied;
     }
@@ -530,6 +533,14 @@ export class ReachabilityRuntime {
         if (this.stopping) return;
         let config = await this.readConfig();
         if (!config?.enabled) return;
+        // Configs written before the daemon kept mode up to date can disagree with their own addresses.
+        const mode = modeForAnnounced(config);
+        if (mode !== config.mode) {
+            const previous = config.mode;
+            config = { ...config, mode };
+            await writeReachabilityConfig(this.deps.dataPath, config);
+            this.deps.log(modeChangedMessage(previous, mode));
+        }
         const status: ReachabilityRuntimeStatus = (await readReachabilityRuntimeStatus(this.deps.dataPath)) ?? { updatedAt: "" };
         const derived = await this.derivePublicIps(config);
         const nowIso = new Date(this.now()).toISOString();
