@@ -255,10 +255,12 @@ describe("reachability enable and disable without a daemon", { timeout: 120_000 
         expect(result.stderr).toContain("has not been set up");
     });
 
-    it("disable says there is nothing to do before setup", async () => {
-        const result = await runCli(["reachability", "disable", "--pkcOptions.dataPath", randomDirectory()], await offlineEnv());
+    it("disable before setup records the decline (#225)", async () => {
+        const dataPath = randomDirectory();
+        const result = await runCli(["reachability", "disable", "--pkcOptions.dataPath", dataPath], await offlineEnv());
         expect(result.exitCode).toBe(0);
-        expect(result.stdout).toContain("Nothing to disable");
+        expect(result.stdout).toContain("Recorded that you declined it");
+        expect(await fs.readdir(dataPath)).toContain("reachability-declined");
     });
 
     it("disable twice is safe", async () => {

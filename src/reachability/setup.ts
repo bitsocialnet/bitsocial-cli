@@ -53,7 +53,7 @@ import { formatCheck, type ReachabilityCheck } from "./checks.js";
 import { localWsSwarmAddress, planKuboConfig } from "./kubo-config.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
 import { dialWithLibp2p } from "./libp2p-dial.js";
-import { caddyDataDir, isSameCertificateName, readReachabilityConfig, reachabilityDir, writeJsonAtomic, writeReachabilityConfig, type ReachabilityConfig, type ReachabilityMode } from "./state.js";
+import { caddyDataDir, clearReachabilityDeclined, isSameCertificateName, readReachabilityConfig, reachabilityDir, writeJsonAtomic, writeReachabilityConfig, type ReachabilityConfig, type ReachabilityMode } from "./state.js";
 
 export class NeedsAnswerError extends Error {}
 export class SetupRefusedError extends Error {}
@@ -489,6 +489,8 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         options,
         true
     );
+    // The config is the decision now. A decline left behind would only show up again after a purge.
+    await clearReachabilityDeclined(options.dataPath);
     await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
 
     if (options.announce) {

@@ -1335,7 +1335,7 @@ EXAMPLES
 
 ## `bitsocial reachability disable`
 
-Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates
+Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates. On a node that was never set up, records that you declined, so the daemon stops reminding you
 
 ```
 USAGE
@@ -1347,7 +1347,7 @@ FLAGS
                                  timestamped backup
 
 DESCRIPTION
-  Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates
+  Stop serving browsers and restore the kubo config. State is kept, so `enable` does not need new certificates. On a node that was never set up, records that you declined, so the daemon stops reminding you
 
 EXAMPLES
   $ bitsocial reachability disable

@@ -6,6 +6,8 @@ import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus
 import { browserAddressCheck, notConfiguredSummary, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
 import { resolveKuboRpcUrl } from "../../../util.js";
 
+const DECLINED_STATUS_LINE = "Reachability: declined. To turn it on, run: bitsocial reachability setup";
+
 export default class Status extends Command {
     static override description =
         "Show whether browsers can reach this node: mode, announced addresses, certificate expiry, last checks, and whether each requirement is met, including permission to bind UDP 443";
@@ -59,7 +61,8 @@ export default class Status extends Command {
         };
 
         if (!status.configured) {
-            for (const line of notConfiguredSummary(unmanagedAddresses)) this.log(line);
+            if (status.declined) this.log(DECLINED_STATUS_LINE);
+            else for (const line of notConfiguredSummary(unmanagedAddresses)) this.log(line);
             printChecks();
             return { ...status, unmanagedAddresses, checks };
         }

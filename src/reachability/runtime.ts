@@ -12,6 +12,7 @@ import {
     currentCertificates,
     isSameCertificateName,
     readIssuedCertificates,
+    isReachabilityDeclined,
     readReachabilityConfig,
     readReachabilityRuntimeStatus,
     writeReachabilityRuntimeStatus,
@@ -39,6 +40,8 @@ const autoTlsWaitMinutes = (kuboConfig: any): number | undefined => {
     if (kuboConfig === undefined || enabled === false) return undefined;
     return enabled === true ? 20 : 80;
 };
+export const UNDECIDED_RECHECK_INTERVAL_MS = HOUR_MS;
+export const DECLINED_MESSAGE = "Reachability is off because it was declined. To turn it on, run: bitsocial reachability setup";
 export const NOT_CONFIGURED_MESSAGE = "Browsers cannot reach this node. To fix that, run: bitsocial reachability setup";
 
 // The IPs we should now serve, or undefined for no change. A family we find nothing for is left alone,
@@ -149,6 +152,8 @@ export class ReachabilityRuntime {
     private timers: NodeJS.Timeout[] = [];
     private checkInFlight: Promise<void> | undefined;
     private browserAddressCheck: Promise<void> | undefined;
+    // What the last check of an undecided node found, so an hourly check repeats warnings but not successes.
+    private browserAddressesWork: boolean | undefined;
 
     constructor(deps: RuntimeDependencies) {
         this.deps = deps;
@@ -169,7 +174,8 @@ export class ReachabilityRuntime {
     async start(): Promise<void> {
         const config = await this.readConfig();
         if (!config) {
-            await this.reportNotConfigured();
+            if (await isReachabilityDeclined(this.deps.dataPath)) this.deps.log(DECLINED_MESSAGE);
+            else await this.reportNotConfigured();
         } else if (config.enabled) {
             await this.printAddresses(config);
         }
@@ -182,10 +188,16 @@ export class ReachabilityRuntime {
         this.timers.push(setInterval(() => void this.watchCaddy().catch((error) => this.warnCaddyStartFailed(error)), CADDY_WATCH_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.runChecks().catch((error) => this.deps.warn(String(error))), CHECK_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
+        this.timers.push(setInterval(() => void this.recheckUndecided().catch((error) => this.deps.warn(String(error))), UNDECIDED_RECHECK_INTERVAL_MS));
         for (const timer of this.timers) timer.unref();
     }
 
-    private async reportNotConfigured() {
+    // Setup writing a config or the operator declining both end the reminders, including a wait already under way.
+    private async isDecided(): Promise<boolean> {
+        return (await this.readConfig()) !== undefined || (await isReachabilityDeclined(this.deps.dataPath));
+    }
+
+    private async browserAddressSources() {
         const identity = this.deps.kuboIdentity ?? (() => kuboIdentity(this.deps.kuboRpcUrl));
         // pkc-js may be rewriting this file as the daemon starts, so a parse error is as possible as a missing file.
         const kuboConfig = await fs
@@ -194,19 +206,55 @@ export class ReachabilityRuntime {
             .catch(() => undefined);
         const inConfig: string[] = [...(kuboConfig?.Addresses?.Announce ?? []), ...(kuboConfig?.Addresses?.AppendAnnounce ?? [])];
         const running = (await identity())?.addresses;
+        const hasBrowserAddress = [...(running ?? []), ...inConfig].some((address) => isBrowserAddress(address));
+        return { identity, kuboConfig, inConfig, hasBrowserAddress };
+    }
+
+    private async reportNotConfigured() {
+        const { identity, kuboConfig, inConfig, hasBrowserAddress } = await this.browserAddressSources();
         let attempts = BROWSER_ADDRESS_ATTEMPTS;
-        if (![...(running ?? []), ...inConfig].some((address) => isBrowserAddress(address))) {
+        if (!hasBrowserAddress) {
             // kubo shows no AutoTLS address until the certificate arrives, and never does behind NAT, so this has to end in a warning.
             const waitMinutes = autoTlsWaitMinutes(kuboConfig);
             if (waitMinutes === undefined) {
-                this.deps.warn(NOT_CONFIGURED_MESSAGE);
+                this.reportNoWorkingAddress(NOT_CONFIGURED_MESSAGE);
                 return;
             }
             this.deps.log(`kubo has no browser address yet. AutoTLS may still be getting a certificate, so this will check again for up to ${waitMinutes} minutes.`);
             attempts = autoTlsAttempts(waitMinutes);
         }
         // kubo may have only just started, and its certificates may be on their way, so one failed dial proves little.
-        this.browserAddressCheck = this.verifyBrowserAddresses(identity, inConfig, attempts).catch((error) => this.deps.warn(String(error)));
+        this.trackBrowserAddressCheck(this.verifyBrowserAddresses(identity, inConfig, attempts));
+    }
+
+    // Repeats the start's check every hour while nobody has decided, so the warning keeps showing up in a log
+    // nobody reads at boot. One attempt and no AutoTLS wait: an hour has passed since the last one.
+    async recheckUndecided(): Promise<void> {
+        // A check still running, such as the start's AutoTLS wait, reports for itself.
+        if (this.stopping || this.browserAddressCheck || (await this.isDecided())) return;
+        this.trackBrowserAddressCheck(
+            (async () => {
+                const { identity, inConfig, hasBrowserAddress } = await this.browserAddressSources();
+                if (this.stopping || (await this.isDecided())) return;
+                if (!hasBrowserAddress) this.reportNoWorkingAddress(NOT_CONFIGURED_MESSAGE);
+                else await this.verifyBrowserAddresses(identity, inConfig, 1);
+            })()
+        );
+        await this.browserAddressCheck;
+    }
+
+    private trackBrowserAddressCheck(check: Promise<void>) {
+        const tracked: Promise<void> = check
+            .catch((error) => this.deps.warn(String(error)))
+            .finally(() => {
+                if (this.browserAddressCheck === tracked) this.browserAddressCheck = undefined;
+            });
+        this.browserAddressCheck = tracked;
+    }
+
+    private reportNoWorkingAddress(message: string) {
+        this.browserAddressesWork = false;
+        this.deps.warn(message);
     }
 
     private async verifyBrowserAddresses(identity: NonNullable<RuntimeDependencies["kuboIdentity"]>, inConfig: string[], attempts: number) {
@@ -220,11 +268,12 @@ export class ReachabilityRuntime {
                 ...(this.deps.resolveDomain ? { resolve: this.deps.resolveDomain } : {}),
                 ...(this.deps.localIps ? { localIps: this.deps.localIps } : {})
             });
-            // setup may have taken over while this ran.
-            if (this.stopping || (await this.readConfig())) return;
+            // setup may have taken over while this ran, or the operator declined.
+            if (this.stopping || (await this.isDecided())) return;
             const succeeded = results.filter(({ status }) => status === "ok");
             if (succeeded.length > 0) {
-                for (const { address } of succeeded) this.deps.log(handshakeSucceededMessage(address));
+                if (this.browserAddressesWork !== true) for (const { address } of succeeded) this.deps.log(handshakeSucceededMessage(address));
+                this.browserAddressesWork = true;
                 return;
             }
             if (attempt >= attempts) {
@@ -236,7 +285,7 @@ export class ReachabilityRuntime {
                     ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : []),
                     ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])
                 ];
-                this.deps.warn([...(unconfirmed.length > 0 ? [] : [NOT_CONFIGURED_MESSAGE]), ...reasons].join(". "));
+                this.reportNoWorkingAddress([...(unconfirmed.length > 0 ? [] : [NOT_CONFIGURED_MESSAGE]), ...reasons].join(". "));
                 return;
             }
             await delay(this.deps.browserAddressRetryMs ?? BROWSER_ADDRESS_RETRY_MS, undefined, { signal, ref: false }).catch(() => {});

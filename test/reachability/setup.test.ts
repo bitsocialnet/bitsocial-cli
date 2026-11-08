@@ -6,7 +6,7 @@ import { directory as randomDirectory } from "tempy";
 import { describe, expect, it } from "vitest";
 import { caddyfilePath, generateCaddyfile, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
 import { ReachabilityRuntime } from "../../src/reachability/runtime.js";
-import { caddyDataDir, readReachabilityConfig, reachabilityDir, type ReachabilityConfig } from "../../src/reachability/state.js";
+import { caddyDataDir, isReachabilityDeclined, readReachabilityConfig, reachabilityDir, writeReachabilityDeclined, type ReachabilityConfig } from "../../src/reachability/state.js";
 import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, existingServerGuidance, noWssStatement, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
 import {
     assertAcmeDirectoryAllowed,
@@ -345,6 +345,14 @@ describe("a setup run that cannot issue any certificate", () => {
             expect(await snapshot()).toEqual(before);
             expect(result).toMatchObject({ publicIps: [HELD_IP], announce: [HELD_ADDRESS] });
             expect(warnings.some((warning) => warning.includes("No public address") && warning.includes(HELD_ADDRESS))).toBe(true);
+        });
+
+        it("clears a decline recorded before setup, so the node counts as decided by its config (#225)", async () => {
+            const { options, deps } = await prepare();
+            await writeReachabilityDeclined(options().dataPath);
+            await runReachabilitySetup(options(NOTHING_FOUND), deps);
+            expect(await readReachabilityConfig(options().dataPath)).toBeDefined();
+            expect(await isReachabilityDeclined(options().dataPath)).toBe(false);
         });
 
         it("does not read a domain-only node's name as stale, with nothing to compare it to", async () => {

@@ -26,6 +26,12 @@ All take `--pkcOptions.dataPath`. `setup` also takes:
 
 Exit codes: `0` done (read the output, since this can still mean no WSS, e.g. no public address was found), `1` refused (a domain that does not point here, a failed `--announce`), `2` you have to act first, and nobody could be asked.
 
+### Declining
+
+Reachability is off until you decide. While a node has never run `setup`, the daemon reminds you every hour (see [Addresses `setup` does not manage](#addresses-setup-does-not-manage)). To say no, run `disable` on that node. It changes nothing in kubo, records the decline in `<dataPath>/reachability-declined`, and the reminders stop, including on a daemon that is already running. On a declined node the daemon logs one line at start and nothing after it, and `status` says `declined` (`"declined": true` in `--json`).
+
+The marker sits outside `reachability/`, so `disable --purge` keeps it. Purging a node that was set up also records a decline, because without its config the node would otherwise look undecided again. Running `setup` deletes the marker. A node with a config never counts as declined, even a disabled one, because its config is already the decision. `enable` still needs `setup` first.
+
 ## How it works
 
 ```
@@ -68,7 +74,9 @@ A failed handshake is `failed` when every IP the address leads to is on one of t
 
 The daemon does the same check in the background when it starts. With an address to check, it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed or could not be confirmed.
 
-With no such address, the daemon warns straight away only if `AutoTLS.Enabled` is `false` or kubo's config cannot be read. Otherwise it logs that AutoTLS may still be getting a certificate and keeps checking, because kubo shows no AutoTLS address until then: for 20 minutes if `AutoTLS.Enabled` is `true`, as on repos this CLI creates, and 80 minutes if it is unset, since kubo then adds an hour's delay. If nothing appears, it warns once. Behind NAT without inbound access, the certificate never comes, so this warning is correct there, just later. `status` reports the moment it runs and does not wait, so it can say browsers cannot reach a node whose certificate is still on its way.
+With no such address, the daemon warns straight away only if `AutoTLS.Enabled` is `false` or kubo's config cannot be read. Otherwise it logs that AutoTLS may still be getting a certificate and keeps checking, because kubo shows no AutoTLS address until then: for 20 minutes if `AutoTLS.Enabled` is `true`, as on repos this CLI creates, and 80 minutes if it is unset, since kubo then adds an hour's delay. If nothing appears, it warns. Behind NAT without inbound access, the certificate never comes, so this warning is correct there, just later.
+
+While nobody has decided, by running `setup` or declining with `disable`, the daemon repeats this check every hour. It is a single attempt without the AutoTLS wait, and is skipped while the startup check is still running. It warns each hour no browser address works, but logs a working one only when that changes, so a node that works stays quiet. The check stops as soon as a config or the decline appears, including during the startup AutoTLS wait. `status` reports the moment it runs and does not wait, so it can say browsers cannot reach a node whose certificate is still on its way.
 
 Until something can terminate WSS, kubo only gets its UDP 443 listeners. AutoTLS and the loopback filter stay as they were, so a failed attempt costs nothing.
 
@@ -114,7 +122,8 @@ When `config.json` exists and is enabled, the daemon runs Caddy as a child proce
 
 | When | What |
 | --- | --- |
-| At start | Logs browser addresses and certificate expiry. With nothing configured, prints one line naming `setup` |
+| At start | Logs browser addresses and certificate expiry. With nothing configured, checks for addresses `setup` does not manage and warns, naming `setup`, if none work. On a declined node, logs one line |
+| Every hour, while undecided | Repeats that check once and warns again if nothing works (see [Declining](#declining)) |
 | Every 5 s | Starts, reloads or stops Caddy to match the stored state, so `setup`, `enable` and `disable` apply to a running daemon and a crashed Caddy comes back |
 | Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
 | At start and every 20 min | Renews router forwards when there is no public IPv4 on an interface. They are released on shutdown or once disabled |

@@ -12,6 +12,7 @@ import {
     reachabilityRuntimeStatusPath,
     writeJsonAtomic,
     writeReachabilityConfig,
+    writeReachabilityDeclined,
     writeReachabilityRuntimeStatus,
     type ReachabilityConfig
 } from "../../src/reachability/state.js";
@@ -176,8 +177,22 @@ describe("reachability status", () => {
             domain: null,
             staging: false,
             certificates: [],
-            lastChecks: null
+            lastChecks: null,
+            declined: false
         });
+    });
+
+    it("reports a decline recorded on a node that was never set up (#225)", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityDeclined(dataPath);
+        expect(await readReachabilityStatus(dataPath)).toMatchObject({ configured: false, declined: true });
+    });
+
+    it("does not report a decline once a config exists", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityDeclined(dataPath);
+        await writeReachabilityConfig(dataPath, { ...validConfig(), enabled: false });
+        expect((await readReachabilityStatus(dataPath)).declined).toBe(false);
     });
 
     it("announces nothing while disabled, but keeps the stored mode", async () => {

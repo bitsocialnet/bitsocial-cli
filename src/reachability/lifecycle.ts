@@ -3,7 +3,7 @@ import path from "path";
 import { isOurCaddyRunning, stopCaddy } from "./caddy.js";
 import { kuboIdentity, shutdownKubo } from "./discovery.js";
 import { applyKuboConfig } from "./setup.js";
-import { readReachabilityConfig, reachabilityDir, type ReachabilityConfig } from "./state.js";
+import { isReachabilityDeclined, readReachabilityConfig, reachabilityDir, writeReachabilityDeclined, type ReachabilityConfig } from "./state.js";
 
 export interface LifecycleOptions {
     dataPath: string;
@@ -28,10 +28,20 @@ async function ensureCaddyStopped(config: ReachabilityConfig, dataPath: string, 
 
 // Stops serving and puts the kubo fields back. The directory stays, so a later enable reuses the ACME
 // account and certificates and never spends rate limit.
+export const DECLINE_RECORDED_MESSAGE =
+    "Reachability was never set up. Recorded that you declined it, so the daemon stops reminding you. To turn it on later, run: bitsocial reachability setup";
+
+export const PURGE_DECLINE_MESSAGE = "Recorded that reachability is declined, so the daemon does not start reminding you. To turn it on again, run: bitsocial reachability setup";
+
 export async function disableReachability(options: LifecycleOptions): Promise<ReachabilityConfig | undefined> {
     const config = await readReachabilityConfig(options.dataPath);
     if (!config) {
-        options.log("Reachability is not configured. Nothing to disable.");
+        // A node nobody decided about gets a reminder from the daemon every hour. This is how to say no.
+        if (await isReachabilityDeclined(options.dataPath)) options.log("Reachability is already declined.");
+        else {
+            await writeReachabilityDeclined(options.dataPath);
+            options.log(DECLINE_RECORDED_MESSAGE);
+        }
         return undefined;
     }
     if (config.enabled) {
@@ -68,5 +78,10 @@ export async function purgeReachability(options: LifecycleOptions, now: Date = n
         }
     }
     options.log(`Moved reachability state to ${backup}`);
+    // Without its config the node would look undecided, and the daemon would start reminding someone who just removed it all.
+    if (!(await isReachabilityDeclined(options.dataPath))) {
+        await writeReachabilityDeclined(options.dataPath);
+        options.log(PURGE_DECLINE_MESSAGE);
+    }
     return backup;
 }
