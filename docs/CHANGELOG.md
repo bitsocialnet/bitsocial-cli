@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.125 (2026-11-08)</small>
+
+* feat(reachability): keep reminding while undecided, and let disable record a decline ([628f2b9](https://github.com/bitsocialnet/bitsocial-cli/commit/628f2b9))
+
 ## <small>0.19.124 (2026-11-05)</small>
 
 * fix(cli): keep flush's default wait on commands that return a value ([a791f37](https://github.com/bitsocialnet/bitsocial-cli/commit/a791f37))
