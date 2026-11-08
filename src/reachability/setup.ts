@@ -149,13 +149,15 @@ export function deriveMode(parts: { ip: boolean; domain: boolean; proxy: boolean
 
 // The mode for what a config announces now, for the daemon, which changes the addresses without rerunning setup.
 // A forced domain the proxy also answers for gives one address for both. Whether that name got its own
-// certificate cannot be seen from it, so the stored mode decides.
-export function modeForAnnounced(config: Pick<ReachabilityConfig, "mode" | "announce" | "externalAnnounce" | "domain">): ReachabilityMode {
+// certificate cannot be seen from it. Setup gives the name a site in the Caddyfile only when it did, and the
+// daemon keeps that site while the name is dropped, so `domainServedHere` (from the Caddyfile) decides. The stored
+// mode would not do: dropping the address takes `domain` out of it. Without a Caddyfile, the stored mode decides.
+export function modeForAnnounced(config: Pick<ReachabilityConfig, "mode" | "announce" | "externalAnnounce" | "domain">, domainServedHere?: boolean): ReachabilityMode {
     const external = config.externalAnnounce ?? [];
     const domainAddresses = config.announce.filter((address) => config.domain !== undefined && address.match(/^\/dns[46]?\/([^/]+)\//)?.[1] === config.domain);
     return deriveMode({
         ip: config.announce.some((address) => /^\/ip[46]\//.test(address) && !external.includes(address)),
-        domain: domainAddresses.some((address) => !external.includes(address)) || (domainAddresses.length > 0 && config.mode.split("+").includes("domain")),
+        domain: domainAddresses.some((address) => !external.includes(address)) || (domainAddresses.length > 0 && (domainServedHere ?? config.mode.split("+").includes("domain"))),
         proxy: config.announce.some((address) => external.includes(address))
     });
 }

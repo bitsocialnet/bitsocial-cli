@@ -841,14 +841,60 @@ describe("ReachabilityRuntime", () => {
         });
 
         // The announced addresses cannot say whether a forced name that is also a proxy address got its own
-        // certificate. Only setup knows, so its answer stands.
-        it.each(["ip+reverse-proxy", "ip+domain+reverse-proxy"] as const)("keeps setup's %s for a forced domain the proxy also answers for", async (mode) => {
-            const { runtime, dataPath, events } = await setup(
-                baseConfig({ domain: "proxy.example", domainForced: true, mode, announce: [IP_ADDRESS, PROXIED], externalAnnounce: [PROXIED] })
+        // certificate. Setup gives it a site in the Caddyfile only if it did, so that decides.
+        const forcedProxyDomain = (mode: "ip+reverse-proxy" | "ip+domain+reverse-proxy") =>
+            baseConfig({ domain: "proxy.example", domainForced: true, mode, announce: [IP_ADDRESS, PROXIED], externalAnnounce: [PROXIED] });
+        const serveSites = (config: ReachabilityConfig, dataPath: string, domains: string[]) =>
+            fs.writeFile(
+                caddyfilePath(dataPath),
+                generateCaddyfile({ ips: config.publicIps, domains, wsPort: config.wsPort, adminPort: config.caddyAdminPort, dataDirectory: path.join(dataPath, "caddy"), acmeDirectory: config.acmeDirectory })
             );
+
+        it.each([
+            ["ip+reverse-proxy", []],
+            ["ip+domain+reverse-proxy", ["proxy.example"]]
+        ] as const)("keeps setup's %s for a forced domain the proxy also answers for", async (mode, sites) => {
+            const config = forcedProxyDomain(mode);
+            const { runtime, dataPath, events } = await setup(config);
+            await serveSites(config, dataPath, [...sites]);
             await runtime.runChecks();
             expect((await readReachabilityConfig(dataPath))!.mode).toBe(mode);
             expect(events.some((event) => event.includes("Reachability mode"))).toBe(false);
+        });
+
+        it.each([
+            ["ip+reverse-proxy", []],
+            ["ip+domain+reverse-proxy", ["proxy.example"]]
+        ] as const)("gives a forced domain the proxy also answers for its %s back after a drop and restore", async (mode, sites) => {
+            const config = forcedProxyDomain(mode);
+            const { runtime, dataPath, setRecords, advance } = await setup(config);
+            await serveSites(config, dataPath, [...sites]);
+            setRecords({ v4: [], v6: [] });
+            await runtime.runChecks();
+            advance(STALE_NAME_DROP_AFTER_MS);
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe("ip");
+            setRecords({ v4: ["198.51.100.7"], v6: [] });
+            advance(5 * 60_000);
+            await runtime.runChecks();
+            const restored = (await readReachabilityConfig(dataPath))!;
+            expect(restored.announce).toEqual([IP_ADDRESS, PROXIED]);
+            expect(restored.mode).toBe(mode);
+        });
+
+        it("does not put back an old config that setup replaced while the mode was being corrected", async () => {
+            const replaced = baseConfig({ mode: "ip+domain", domain: "other.example", announce: [IP_ADDRESS, "/dns4/other.example/tcp/443/tls/ws"] });
+            const { runtime, dataPath } = await setup(baseConfig({ domain: "node.example", mode: "ip", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+            // Stands in for setup writing between the check's read and its repair write.
+            vi.spyOn(runtime as any, "readConfig").mockImplementationOnce(async () => {
+                const current = await readReachabilityConfig(dataPath);
+                await writeReachabilityConfig(dataPath, replaced);
+                return current;
+            });
+            await runtime.runChecks();
+            const config = (await readReachabilityConfig(dataPath))!;
+            expect(config.domain).toBe("other.example");
+            expect(config.announce).toEqual(replaced.announce);
         });
 
         it("does not rewrite a disabled config", async () => {
