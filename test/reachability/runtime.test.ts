@@ -901,6 +901,133 @@ describe("ReachabilityRuntime", () => {
         expect(await kuboAnnounce(kuboRepoPath)).toEqual([]);
     });
 
+    describe("mode follows the announced addresses (#221)", () => {
+        const IP_ADDRESS = `/ip4/${V4}/tcp/443/tls/ws`;
+        const DOMAIN_ADDRESS = "/dns4/node.example/tcp/443/tls/ws";
+        const PROXIED = "/dns4/proxy.example/tcp/443/tls/ws";
+        const modeLine = (from: string, to: string) => `log: Reachability mode is now "${to}" (was "${from}") to match the announced addresses.`;
+
+        it("adds the domain to the mode when a dropped domain is announced again", async () => {
+            const { runtime, dataPath, events } = await setup(baseConfig({ domain: "node.example", mode: "ip", droppedAnnounce: [DOMAIN_ADDRESS] }));
+            await runtime.runChecks();
+            const config = (await readReachabilityConfig(dataPath))!;
+            expect(config.announce).toEqual([IP_ADDRESS, DOMAIN_ADDRESS]);
+            expect(config.mode).toBe("ip+domain");
+            expect(events).toContain(modeLine("ip", "ip+domain"));
+        });
+
+        it("removes the domain from the mode when the daemon drops it", async () => {
+            const { runtime, dataPath, events, setRecords, advance } = await setup(baseConfig({ domain: "node.example", mode: "ip+domain", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+            setRecords({ v4: [], v6: [] });
+            await runtime.runChecks();
+            advance(STALE_NAME_DROP_AFTER_MS);
+            await runtime.runChecks();
+            const config = (await readReachabilityConfig(dataPath))!;
+            expect(config.announce).toEqual([IP_ADDRESS]);
+            expect(config.mode).toBe("ip");
+            expect(events).toContain(modeLine("ip+domain", "ip"));
+        });
+
+        it("is webtransport-only once a proxy-only node's address is dropped", async () => {
+            const { runtime, dataPath, setRecords, advance } = await setup(baseConfig({ mode: "reverse-proxy", publicIps: [], announce: [PROXIED], externalAnnounce: [PROXIED] }));
+            setRecords({ v4: [], v6: [] });
+            await runtime.runChecks();
+            advance(STALE_NAME_DROP_AFTER_MS);
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe("webtransport-only");
+        });
+
+        it("corrects a mode that is already wrong, without touching kubo", async () => {
+            const { runtime, dataPath, kuboRepoPath, events } = await setup(baseConfig({ domain: "node.example", mode: "ip", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+            const kuboBefore = await fs.readFile(path.join(kuboRepoPath, "config"), "utf-8");
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe("ip+domain");
+            expect(events).toContain(modeLine("ip", "ip+domain"));
+            expect(events).not.toContain("restart kubo");
+            expect(await fs.readFile(path.join(kuboRepoPath, "config"), "utf-8")).toBe(kuboBefore);
+        });
+
+        it("logs nothing about the mode while it matches", async () => {
+            const { runtime, dataPath, events } = await setup(baseConfig());
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe("ip");
+            expect(events.some((event) => event.includes("Reachability mode"))).toBe(false);
+        });
+
+        it("keeps the mode right through an IP change", async () => {
+            const { runtime, dataPath, setDerived } = await setup(baseConfig({ domain: "node.example", mode: "ip+domain", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+            setDerived([V4_NEW]);
+            await runtime.runChecks();
+            await runtime.runChecks();
+            const config = (await readReachabilityConfig(dataPath))!;
+            expect(config.announce).toEqual([`/ip4/${V4_NEW}/tcp/443/tls/ws`, DOMAIN_ADDRESS]);
+            expect(config.mode).toBe("ip+domain");
+        });
+
+        // The announced addresses cannot say whether a forced name that is also a proxy address got its own
+        // certificate. Setup gives it a site in the Caddyfile only if it did, so that decides.
+        const forcedProxyDomain = (mode: "ip+reverse-proxy" | "ip+domain+reverse-proxy") =>
+            baseConfig({ domain: "proxy.example", domainForced: true, mode, announce: [IP_ADDRESS, PROXIED], externalAnnounce: [PROXIED] });
+        const serveSites = (config: ReachabilityConfig, dataPath: string, domains: string[]) =>
+            fs.writeFile(
+                caddyfilePath(dataPath),
+                generateCaddyfile({ ips: config.publicIps, domains, wsPort: config.wsPort, adminPort: config.caddyAdminPort, dataDirectory: path.join(dataPath, "caddy"), acmeDirectory: config.acmeDirectory })
+            );
+
+        it.each([
+            ["ip+reverse-proxy", []],
+            ["ip+domain+reverse-proxy", ["proxy.example"]]
+        ] as const)("keeps setup's %s for a forced domain the proxy also answers for", async (mode, sites) => {
+            const config = forcedProxyDomain(mode);
+            const { runtime, dataPath, events } = await setup(config);
+            await serveSites(config, dataPath, [...sites]);
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe(mode);
+            expect(events.some((event) => event.includes("Reachability mode"))).toBe(false);
+        });
+
+        it.each([
+            ["ip+reverse-proxy", []],
+            ["ip+domain+reverse-proxy", ["proxy.example"]]
+        ] as const)("gives a forced domain the proxy also answers for its %s back after a drop and restore", async (mode, sites) => {
+            const config = forcedProxyDomain(mode);
+            const { runtime, dataPath, setRecords, advance } = await setup(config);
+            await serveSites(config, dataPath, [...sites]);
+            setRecords({ v4: [], v6: [] });
+            await runtime.runChecks();
+            advance(STALE_NAME_DROP_AFTER_MS);
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe("ip");
+            setRecords({ v4: ["198.51.100.7"], v6: [] });
+            advance(5 * 60_000);
+            await runtime.runChecks();
+            const restored = (await readReachabilityConfig(dataPath))!;
+            expect(restored.announce).toEqual([IP_ADDRESS, PROXIED]);
+            expect(restored.mode).toBe(mode);
+        });
+
+        it("does not put back an old config that setup replaced while the mode was being corrected", async () => {
+            const replaced = baseConfig({ mode: "ip+domain", domain: "other.example", announce: [IP_ADDRESS, "/dns4/other.example/tcp/443/tls/ws"] });
+            const { runtime, dataPath } = await setup(baseConfig({ domain: "node.example", mode: "ip", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+            // Stands in for setup writing between the check's read and its repair write.
+            vi.spyOn(runtime as any, "readConfig").mockImplementationOnce(async () => {
+                const current = await readReachabilityConfig(dataPath);
+                await writeReachabilityConfig(dataPath, replaced);
+                return current;
+            });
+            await runtime.runChecks();
+            const config = (await readReachabilityConfig(dataPath))!;
+            expect(config.domain).toBe("other.example");
+            expect(config.announce).toEqual(replaced.announce);
+        });
+
+        it("does not rewrite a disabled config", async () => {
+            const { runtime, dataPath } = await setup(baseConfig({ enabled: false, domain: "node.example", mode: "ip", announce: [IP_ADDRESS, DOMAIN_ADDRESS] }));
+            await runtime.runChecks();
+            expect((await readReachabilityConfig(dataPath))!.mode).toBe("ip");
+        });
+    });
+
     describe("router leases", () => {
         const fakeRouter = () => {
             const calls: string[] = [];

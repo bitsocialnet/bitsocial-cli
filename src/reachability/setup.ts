@@ -147,6 +147,23 @@ export function deriveMode(parts: { ip: boolean; domain: boolean; proxy: boolean
     return (enabled.join("+") || "webtransport-only") as ReachabilityMode;
 }
 
+// The mode for what a config announces now, for the daemon, which changes the addresses without rerunning setup.
+// A forced domain the proxy also answers for gives one address for both. Whether that name got its own
+// certificate cannot be seen from it. Setup gives the name a site in the Caddyfile only when it did, and the
+// daemon keeps that site while the name is dropped, so `domainServedHere` (from the Caddyfile) decides. The stored
+// mode would not do: dropping the address takes `domain` out of it. Without a Caddyfile, the stored mode decides.
+export function modeForAnnounced(config: Pick<ReachabilityConfig, "mode" | "announce" | "externalAnnounce" | "domain">, domainServedHere?: boolean): ReachabilityMode {
+    const external = config.externalAnnounce ?? [];
+    const domainAddresses = config.announce.filter((address) => config.domain !== undefined && address.match(/^\/dns[46]?\/([^/]+)\//)?.[1] === config.domain);
+    return deriveMode({
+        ip: config.announce.some((address) => /^\/ip[46]\//.test(address) && !external.includes(address)),
+        domain: domainAddresses.some((address) => !external.includes(address)) || (domainAddresses.length > 0 && (domainServedHere ?? config.mode.split("+").includes("domain"))),
+        proxy: config.announce.some((address) => external.includes(address))
+    });
+}
+
+export const modeChangedMessage = (from: ReachabilityMode, to: ReachabilityMode) => `Reachability mode is now "${to}" (was "${from}") to match the announced addresses.`;
+
 const freePort = (host = "127.0.0.1"): Promise<number> =>
     new Promise((resolve, reject) => {
         const server = net.createServer();

@@ -6,7 +6,7 @@ import { caddyBinaryPath, caddyfilePath, caddyfileServesDomain, ensureCaddyBinar
 import { detectContainer, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
 import { bindDeniedGuidance, isBindDenied } from "./guidance.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
-import { applyKuboConfig, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
+import { applyKuboConfig, modeChangedMessage, modeForAnnounced, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
 import {
     caddyDataDir,
     currentCertificates,
@@ -15,6 +15,7 @@ import {
     isReachabilityDeclined,
     readReachabilityConfig,
     readReachabilityRuntimeStatus,
+    writeReachabilityConfig,
     writeReachabilityRuntimeStatus,
     type ReachabilityConfig,
     type ReachabilityRuntimeStatus
@@ -428,12 +429,20 @@ export class ReachabilityRuntime {
         await shutdownKubo(this.deps.kuboRpcUrl);
     }
 
+    private async domainServedHere(config: ReachabilityConfig): Promise<boolean | undefined> {
+        if (!config.domain) return false;
+        const caddyfile = await fs.readFile(caddyfilePath(this.deps.dataPath), "utf-8").catch(() => undefined);
+        return caddyfile === undefined ? undefined : caddyfileServesDomain(caddyfile, config.domain);
+    }
+
     private async saveAndApply(config: ReachabilityConfig) {
         // This can follow a wait of up to 90 s. An operator may have run disable during it, which must stand.
         const latest = await this.readConfig();
         if (!latest?.enabled) return latest ?? config;
         const { kuboEdits: _stale, ...rest } = config;
-        const { config: applied, kuboConfigChanged } = await applyKuboConfig({ ...rest, ...(latest.kuboEdits ? { kuboEdits: latest.kuboEdits } : {}) }, this.deps, true);
+        const mode = modeForAnnounced(config, await this.domainServedHere(config));
+        const { config: applied, kuboConfigChanged } = await applyKuboConfig({ ...rest, mode, ...(latest.kuboEdits ? { kuboEdits: latest.kuboEdits } : {}) }, this.deps, true);
+        if (mode !== config.mode) this.deps.log(modeChangedMessage(config.mode, mode));
         if (kuboConfigChanged) await this.restartKubo();
         return applied;
     }
@@ -579,6 +588,22 @@ export class ReachabilityRuntime {
         if (this.stopping) return;
         let config = await this.readConfig();
         if (!config?.enabled) return;
+        // Configs written before the daemon kept mode up to date can disagree with their own addresses.
+        const mode = modeForAnnounced(config, await this.domainServedHere(config));
+        if (mode !== config.mode) {
+            // Setup or disable may have replaced the file since it was read, and what they wrote must stand.
+            // The next check looks at it again.
+            const latest = await this.readConfig();
+            if (JSON.stringify(latest) !== JSON.stringify(config)) {
+                config = latest;
+                if (!config?.enabled) return;
+            } else {
+                const previous = config.mode;
+                config = { ...config, mode };
+                await writeReachabilityConfig(this.deps.dataPath, config);
+                this.deps.log(modeChangedMessage(previous, mode));
+            }
+        }
         const status: ReachabilityRuntimeStatus = (await readReachabilityRuntimeStatus(this.deps.dataPath)) ?? { updatedAt: "" };
         const derived = await this.derivePublicIps(config);
         const nowIso = new Date(this.now()).toISOString();
