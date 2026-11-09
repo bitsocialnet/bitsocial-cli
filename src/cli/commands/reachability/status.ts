@@ -51,6 +51,8 @@ export default class Status extends Command {
         // A handshake with each WSS address kubo announces, setup's own included. A disabled node's Caddy is off on purpose,
         // so its addresses are skipped, but any other stays: disable restores AutoTLS, which may announce one of its own.
         const wssDisabled = status.configured && !status.enabled;
+        const servesWss = config !== undefined && config.serveWss !== false && config.announce.length > 0;
+        const setupWss = wssDisabled ? ("disabled" as const) : status.configured && servesWss ? ("enabled" as const) : undefined;
         const setupAddresses = wssDisabled ? (config?.announce ?? []) : [];
         const notSetups = (addresses: string[] | undefined) => addresses?.filter((address) => !setupAddresses.some((own) => address === own || address.startsWith(`${own}/p2p/`)));
         const wssAddresses = await verifyUnmanagedAddresses({
@@ -73,7 +75,7 @@ export default class Status extends Command {
             announced: facts.kuboRunningAnnounce ?? [],
             autonat: facts.kuboAutonat,
             wss: wssAddresses,
-            wssDisabled
+            ...(setupWss ? { setupWss } : {})
         });
         const checks = [
             announcedCheck,

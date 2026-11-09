@@ -191,9 +191,11 @@ Browsers, first match wins. `status` tries a handshake from this machine with ev
 | A WSS handshake succeeded | should be able to connect over WSS; the firewall was not tested from other networks | `ok` |
 | AutoNAT reached WebTransport | those that support WebTransport should be able to connect, unless their network blocks UDP; then why WSS is missing: `run setup to add WSS`, the failed handshake, an untestable WSS address, or reachability being disabled | `warn` |
 | A WSS handshake could not be tested from this machine (`unconfirmed`, usually no NAT hairpin) | may be able to connect over WSS | `unknown` |
-| Reachability is disabled and no other WSS address works | cannot connect directly: reachability is disabled. Run: bitsocial reachability enable | `warn`, or `fail` if desktop nodes cannot connect |
 | AutoNAT has not tested WebTransport, or desktop nodes are not known yet | not known yet | `unknown` |
+| Reachability is disabled and no other WSS address works | cannot connect directly: reachability is disabled. Run: bitsocial reachability enable | `warn`, or `fail` if desktop nodes cannot connect |
 | Nothing | cannot connect directly | `warn` if desktop nodes can connect, `fail` otherwise |
+
+The advice for getting WSS follows what `setup` did: `run setup to add WSS` on a node that never ran it or set up no WSS, `bitsocial reachability enable` on a disabled node, and on an enabled node whose WSS is not working, a pointer to the requirements below, such as `kubo-announce`, since running `setup` again would not fix that.
 
 A handshake from this machine never crosses its provider's firewall, so `ok` says browsers *should* be able to connect, not that they can.
 

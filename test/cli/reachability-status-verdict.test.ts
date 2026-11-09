@@ -123,6 +123,15 @@ describe("reachability status opens with who can connect", () => {
         });
     });
 
+    it("points an enabled managed node whose WSS is not announced at the requirements, not at setup", { timeout: 60_000 }, async () => {
+        const dataPath = await managedNode(true, [deadWss]);
+        await withKubo({ announced: [tcp], autonat: { reachable: [tcp], unreachable: [], unknown: [] } }, async (url) => {
+            const { stdout } = await run(["--pkcOptions.dataPath", dataPath], url);
+            expect(lines(stdout)[1]).toMatch(/^Browsers: cannot connect directly; .*see the requirements below/);
+            expect(lines(stdout)[1]).not.toMatch(/run:? (bitsocial reachability )?setup/);
+        });
+    });
+
     it("says WSS is off on a disabled managed node, without a handshake", { timeout: 60_000 }, async () => {
         const dataPath = await managedNode(false, [deadWss]);
         await withKubo({ announced: [tcp], autonat: { reachable: [tcp], unreachable: [], unknown: [] } }, async (url) => {

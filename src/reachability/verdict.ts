@@ -25,9 +25,11 @@ export interface ConnectivityInput {
     autonat: KuboAutonat | undefined;
     // Handshakes from this machine with each WSS address kubo announces.
     wss: UnmanagedAddress[];
-    // Setup was run, then `reachability disable`: Caddy is off, so setup's WSS is down on purpose. `wss` then holds only
-    // addresses setup does not manage, such as AutoTLS, which disable turns back on.
-    wssDisabled?: boolean;
+    // What setup did about WSS, which decides the advice. Absent when setup never ran or set up no WSS: then setup adds it.
+    // "enabled": setup serves WSS, so rerunning it is the wrong advice; the requirements below say what is wrong.
+    // "disabled": after `reachability disable` Caddy is off on purpose, and `wss` holds only addresses setup does not
+    // manage, such as AutoTLS, which disable turns back on.
+    setupWss?: "enabled" | "disabled";
 }
 
 export const NOBODY_CAN_CONNECT = "Nobody can connect: this node announces no public address, so it seeds nothing for anyone.";
@@ -70,25 +72,31 @@ function browsersLine(input: ConnectivityInput, desktop: ConnectivityLine): Conn
             detail: `should be able to connect over WSS (a handshake from this machine succeeded through ${list(ok.map(({ address }) => address))}; whether a firewall lets other networks in was not tested)${failures}`
         };
 
-    // How to get WSS: turn it back on, or add it.
-    const getWss = input.wssDisabled ? "WSS is off because reachability is disabled. Run: bitsocial reachability enable" : "run setup to add WSS";
+    const SEE_REQUIREMENTS = "the WSS that setup configured is not working, see the requirements below";
+    // How to get WSS: turn it back on, fix what setup configured, or add it.
+    const getWss =
+        input.setupWss === "disabled" ? "WSS is off because reachability is disabled. Run: bitsocial reachability enable" : input.setupWss === "enabled" ? SEE_REQUIREMENTS : "run setup to add WSS";
     if (evidence.webTransportReached.length > 0) {
         const webTransport = "those that support WebTransport should be able to connect, unless their network blocks UDP";
         const reachedOn = ` (AutoNAT reached kubo over UDP ${udpPorts(evidence.webTransportReached)})`;
         if (unconfirmed.length > 0)
             return { status: "warn", detail: `${webTransport}; whether WSS through ${list(unconfirmed.map(({ address }) => address))} works could not be tested from this machine${failures}${reachedOn}` };
-        return { status: "warn", detail: `${webTransport}; ${failed.length > 0 ? failedHandshakes(failed) : getWss}${reachedOn}` };
+        const why = failed.length > 0 ? `${failedHandshakes(failed)}${input.setupWss === "enabled" ? `; ${SEE_REQUIREMENTS}` : ""}` : getWss;
+        return { status: "warn", detail: `${webTransport}; ${why}${reachedOn}` };
     }
     if (unconfirmed.length > 0)
         return {
             status: "unknown",
             detail: `may be able to connect over WSS through ${list(unconfirmed.map(({ address }) => address))}; this machine could not test it from inside its own network${failures}`
         };
-    if (input.wssDisabled) return { status: desktop.status === "fail" ? "fail" : "warn", detail: `cannot connect directly: reachability is disabled. Run: bitsocial reachability enable` };
-    if (input.autonat === undefined) return { status: "unknown", detail: `not known: kubo gave no AutoNAT results, so WebTransport is untested${failures}` };
+    // Not knowing yet comes first, even on a disabled node, whose kubo may still serve WebTransport.
+    const disabledNote = input.setupWss === "disabled" ? "; setup's WSS is off because reachability is disabled" : "";
+    if (input.autonat === undefined) return { status: "unknown", detail: `not known: kubo gave no AutoNAT results, so WebTransport is untested${failures}${disabledNote}` };
     if (evidence.webTransportUntested.length > 0 || desktop.status === "unknown")
-        return { status: "unknown", detail: `not known yet: AutoNAT has not tested WebTransport yet${failures}` };
-    const fix = failed.length > 0 ? failures : "; run: bitsocial reachability setup";
+        return { status: "unknown", detail: `not known yet: AutoNAT has not tested WebTransport yet${failures}${disabledNote}` };
+    if (input.setupWss === "disabled")
+        return { status: desktop.status === "fail" ? "fail" : "warn", detail: `cannot connect directly: reachability is disabled${failures}. Run: bitsocial reachability enable` };
+    const fix = input.setupWss === "enabled" ? `${failures}; ${SEE_REQUIREMENTS}` : failed.length > 0 ? failures : "; run: bitsocial reachability setup";
     return { status: desktop.status === "ok" || desktop.status === "warn" ? "warn" : "fail", detail: `cannot connect directly${fix}` };
 }
 

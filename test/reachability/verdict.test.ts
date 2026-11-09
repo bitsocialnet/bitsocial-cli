@@ -103,7 +103,7 @@ describe("connectivityVerdict: browsers", () => {
     });
 
     it("says WSS is off on a disabled node, and how to turn it back on", () => {
-        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wssDisabled: true });
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), setupWss: "disabled" });
         expect(browsers.status).toBe("warn");
         expect(browsers.detail).toMatch(/reachability is disabled/);
         expect(browsers.detail).toContain("bitsocial reachability enable");
@@ -111,19 +111,42 @@ describe("connectivityVerdict: browsers", () => {
 
     // Review on #243: disable restores AutoTLS, so a disabled node can still serve WSS that setup does not manage.
     it("uses a WSS handshake that worked on a disabled node, rather than saying WSS is off", () => {
-        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("ok"), wssDisabled: true });
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("ok"), setupWss: "disabled" });
         expect(browsers.status).toBe("ok");
         expect(browsers.detail).not.toMatch(/reachability is disabled/);
     });
 
     it("says a WSS address on a disabled node may work when it could not be tested", () => {
-        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("unconfirmed"), wssDisabled: true });
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("unconfirmed"), setupWss: "disabled" });
         expect(browsers.status).toBe("unknown");
         expect(browsers.detail).toMatch(/may be able to connect over WSS/);
     });
 
+    // Review on #243: "disabled" must not outrank not knowing yet, nor hide a failed handshake.
+    it("is not known yet on a disabled node while AutoNAT has not tested WebTransport", () => {
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp], unknown: [webTransport] }), setupWss: "disabled" });
+        expect(browsers.status).toBe("unknown");
+        expect(browsers.detail).toMatch(/not known yet/);
+    });
+
+    it("names a failed WSS handshake on a disabled node", () => {
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("failed"), setupWss: "disabled" });
+        expect(browsers.detail).toMatch(/reachability is disabled/);
+        expect(browsers.detail).toContain(wss);
+    });
+
+    // Review on #243: setup already ran, so running it again is the wrong advice; the requirements below say what is wrong.
+    it("does not tell a node whose setup WSS is not working to run setup", () => {
+        const nothing = verdict({ autonat: autonat({ reachable: [tcp] }), setupWss: "enabled" }).browsers;
+        expect(nothing.detail).not.toMatch(/run:? (bitsocial reachability )?setup/);
+        expect(nothing.detail).toMatch(/see the requirements below/);
+        const webTransportOnly = verdict({ autonat: autonat({ reachable: [quic, webTransport] }), setupWss: "enabled" }).browsers;
+        expect(webTransportOnly.detail).not.toMatch(/run setup/);
+        expect(webTransportOnly.detail).toMatch(/see the requirements below/);
+    });
+
     it("still counts WebTransport on a disabled node", () => {
-        const { browsers } = verdict({ autonat: autonat({ reachable: [quic, webTransport] }), wssDisabled: true });
+        const { browsers } = verdict({ autonat: autonat({ reachable: [quic, webTransport] }), setupWss: "disabled" });
         expect(browsers.status).toBe("warn");
         expect(browsers.detail).toMatch(/support WebTransport should be able to connect/);
         expect(browsers.detail).toContain("bitsocial reachability enable");
