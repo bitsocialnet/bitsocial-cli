@@ -28,15 +28,15 @@ The [issue tracker](https://github.com/bitsocialnet/bitsocial-cli/issues) is the
 
 - Branch from `master` (fork the repository if you do not have write access) and keep each pull request to one topic.
 - Add a test with every feature or bug fix, and make sure `npm run build && npm run build:test` and `npm run test:cli` pass.
-- PRs are merged with merge commits, so every commit message on your branch appears in the release notes. Use [Conventional Commits](https://www.conventionalcommits.org/) whose type matches the user-visible effect (`feat`, `fix`, `perf`, ...), and give review-fix commits a meaningful message or squash them into the commit they fix.
-- Mark breaking changes with `!` and a `BREAKING CHANGE:` footer that tells operators what to do. That makes the next release a minor, as described in [docs/versioning.md](docs/versioning.md#breaking-changes). Do not start any other body line with "breaking change".
+- Use [Conventional Commits](https://www.conventionalcommits.org/) whose type matches the user-visible effect. PRs are merged with merge commits, so every commit on your branch enters the release, but the release notes only list `feat`, `fix`, `perf`, `revert` and `build` commits plus breaking-change notes. A user-visible change typed as `refactor`, `chore`, `test` or `docs` does not appear in them.
+- Mark breaking changes with `!` and a `BREAKING CHANGE:` footer that tells operators what to do. That makes the next release a minor. Avoid accidental markers in commit bodies and PR titles; [docs/versioning.md](docs/versioning.md#what-counts-as-a-breaking-change-marker) lists what counts.
 - When a change alters behavior a doc describes (commands, flags, paths, endpoints, output), update that doc in the same PR. When you add a topic doc, add a row to [docs/README.md](docs/README.md) and to the Docs Lookup table in AGENTS.md if it maps to source paths.
 - Put `Closes #N` in the PR body, not in commit messages.
 - Pin new dependencies to exact versions and commit `package-lock.json`.
-- Leave the `version` in `package.json`, `docs/CHANGELOG.md` and the README's Commands section alone. The release job regenerates them; command help comes from the command definitions in `src/cli/commands/`.
+- Leave the `version` in `package.json`, `docs/CHANGELOG.md` and the README's Commands section alone; the release job regenerates them (see [docs/versioning.md](docs/versioning.md#when-a-release-happens)).
 - Do not put private infrastructure details, secrets or operator data in issues, PRs or commit messages.
 
-CI runs on PRs that touch `src/`, `test/`, `config/`, `ci-bin/`, `.github/`, the package manifests or the `Dockerfile`. It builds and tests on Ubuntu, Windows and macOS, installs the packed tarball globally, and smoke-tests the Docker image's dependency stage. Review bots comment on PRs; the maintainer decides what is merged.
+CI builds and tests on Ubuntu, Windows and macOS for PRs that touch the paths listed in [docs/versioning.md](docs/versioning.md#when-a-release-happens); docs-only PRs skip it. Review bots comment on PRs; the maintainer decides what is merged.
 
 ## License
 

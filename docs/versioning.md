@@ -2,7 +2,7 @@
 
 How bitsocial-cli versions are chosen and published. Read this before changing the package version, marking a breaking change, preparing or debugging a release, or upgrading pkc-js.
 
-The release config is the source of truth: [`config/.release-it.json`](../config/.release-it.json), [`.github/workflows/CI-build.yml`](../.github/workflows/CI-build.yml) and [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml). If this document disagrees with them, they win and this document needs fixing.
+The release config is the source of truth: [`config/.release-it.json`](../config/.release-it.json), [`.github/workflows/CI.yml`](../.github/workflows/CI.yml), [`.github/workflows/CI-build.yml`](../.github/workflows/CI-build.yml) and [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml). If this document disagrees with them, they win and this document needs fixing.
 
 ## How the next version is chosen
 
@@ -17,8 +17,8 @@ release-it picks the bump from the conventional commits since the last tag. The 
 
 ### What counts as a breaking-change marker
 
-- The conventional-commits parser matches note keywords case-insensitively at the start of a body line and accepts a space instead of a colon. A body line such as "Breaking change in X: ..." in any commit in the range makes the next release a minor. pkc-js released an accidental `0.1.0` this way (pkc-js 990a2a0ad). Do not start a body line with "breaking change" unless you mean it.
-- PRs are merged with merge commits (for example #223), so every commit on a PR branch enters the release range, not just one squashed commit. A marker in any of them counts.
+- The conventional-commits parser matches `BREAKING CHANGE` or `BREAKING-CHANGE` case-insensitively at the start of a body line, after optional whitespace, `*` or `|`, and accepts a space instead of a colon. A body line such as "Breaking change in X: ..." or "* breaking-change: ..." in any commit in the range makes the next release a minor. pkc-js released an accidental `0.1.0` this way (pkc-js 990a2a0ad). Do not start a body line with "breaking change" unless you mean it.
+- PRs are merged with merge commits (for example #223), so every commit on a PR branch enters the release range, not just one squashed commit. A marker in any of them counts, and so does one in the merge commit, whose body is the PR title. A PR titled "Breaking change handling for X" bumps the minor.
 - When a release upgrades pkc-js, [`ci-bin/pkc-js-changelog.ts`](../ci-bin/pkc-js-changelog.ts) copies the pkc-js changelog entries into the release notes. It runs after the version is chosen, so pkc-js breaking notes do not bump the CLI. Pasting those notes into an upgrade commit's body would.
 
 ## When a release happens
@@ -26,11 +26,11 @@ release-it picks the bump from the conventional commits since the last tag. The 
 1. A push to `master` that touches `src/`, `test/`, `config/`, `ci-bin/`, `.github/`, `package.json`, `package-lock.json` or `Dockerfile` runs [CI](../.github/workflows/CI.yml) on Ubuntu, Windows and macOS.
 2. When CI succeeds on `master`, **CI build** runs `npm run release -- --ci`. If there are commits since the last tag, release-it:
     - prepends the notes to [`docs/CHANGELOG.md`](CHANGELOG.md) and adds pkc-js entries when the release upgrades pkc-js. That step only warns on failure; it never fails the release.
-    - regenerates the oclif manifest and the README's Commands section.
+    - regenerates the README's Commands section. It also builds the oclif manifest, but only for the npm package; the manifest is not committed.
     - commits `chore(release): <version> [skip ci]` as the release bot, tags `v<version>` and creates the GitHub release, using the new changelog section as its body.
 
     The job then publishes `@bitsocial/bitsocial-cli` to npm with provenance.
-3. The published GitHub release triggers **Docker Publish**, which builds and tests the image and pushes `ghcr.io/bitsocialnet/bitsocial-cli` with the tags `<version>`, `<major>.<minor>`, `<major>` and `latest` (for 0.19.124: `0.19.124`, `0.19`, `0`, `latest`). It can be re-run for an existing tag with `workflow_dispatch`.
+3. The published GitHub release triggers **Docker Publish**, which builds and tests the image and pushes `ghcr.io/bitsocialnet/bitsocial-cli` with the tags `<version>`, `<major>.<minor>`, `<major>` and `latest` (for 0.19.124: `0.19.124`, `0.19`, `0`, `latest`). It can be re-run for an existing tag with `workflow_dispatch`, but every run also pushes `latest`, `<major>` and `<major>.<minor>`. Re-running it for anything but the newest release moves those tags back and downgrades operators on `latest`.
 
 Consequences:
 
@@ -51,7 +51,7 @@ Most operators get every release as soon as it is published. They learn about br
 Mark a breaking change on the commit that makes it:
 
 - Add `!` after the type or scope, for example `feat(daemon)!: move the RPC endpoint`.
-- Add a `BREAKING CHANGE: <what changed and what operators must do>` footer. It appears under "BREAKING CHANGE" in the release notes, so write it as migration guidance.
+- Add a `BREAKING CHANGE: <what changed and what operators must do>` footer. It appears under "BREAKING CHANGES" in the release notes, so write it as migration guidance.
 
 The next release becomes a minor (`0.20.0`). Surfaces to check when deciding whether a change breaks operators:
 
