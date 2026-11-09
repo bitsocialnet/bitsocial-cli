@@ -1,6 +1,6 @@
 import type { ReachabilityCheck } from "./checks.js";
 import { isPublicIp, localIpsFromInterfaces } from "./discovery.js";
-import { dialWithLibp2p } from "./libp2p-dial.js";
+import { dialFailureReason, dialWithLibp2p } from "./libp2p-dial.js";
 import { resolveDomainRecords, type ResolvedDomain } from "./setup.js";
 
 // Browser addresses kubo announces that `setup` did not put there: AutoTLS, or a reverse proxy set up by hand.
@@ -58,7 +58,7 @@ export async function verifyUnmanagedAddresses(input: {
             } catch (error) {
                 // A machine reaches its own IP directly, so that failure is real. Any other IP goes through a router, which may not send it back (no NAT hairpin).
                 const status = targets.every((ip) => localIps.includes(ip)) ? "failed" : "unconfirmed";
-                return { address, status, error: (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ") };
+                return { address, status, error: dialFailureReason(error) };
             }
         })
     );

@@ -256,6 +256,9 @@ describe("a browser address set up by hand, without setup", { timeout: 300_000 }
         expect(json.unmanagedAddresses[0]).toMatchObject({ address: announce, status: "failed" });
         expect(text).toContain("Browsers cannot reach this node");
         expect(text).toContain(announce);
+        // Issue #241: the reason used to print as "[object ErrorEvent]".
+        expect(json.unmanagedAddresses[0].error).toMatch(/ECONNREFUSED: connection refused/);
+        expect(text).not.toContain("[object ");
     });
 });
 

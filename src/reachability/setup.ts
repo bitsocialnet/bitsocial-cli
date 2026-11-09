@@ -52,7 +52,7 @@ import {
 import { formatCheck, type ReachabilityCheck } from "./checks.js";
 import { localWsSwarmAddress, planKuboConfig } from "./kubo-config.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
-import { dialWithLibp2p } from "./libp2p-dial.js";
+import { dialFailureReason, dialWithLibp2p } from "./libp2p-dial.js";
 import { caddyDataDir, clearReachabilityDeclined, isSameCertificateName, readReachabilityConfig, reachabilityDir, writeJsonAtomic, writeReachabilityConfig, type ReachabilityConfig, type ReachabilityMode } from "./state.js";
 
 export class NeedsAnswerError extends Error {}
@@ -523,7 +523,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
                 true
             );
             await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
-            throw new SetupRefusedError(`Could not complete a libp2p handshake with this node through ${options.announce}, so it was not announced: ${(error as Error).message}`);
+            throw new SetupRefusedError(`Could not complete a libp2p handshake with this node through ${options.announce}, so it was not announced: ${dialFailureReason(error)}`);
         }
         deps.log(`Verified ${options.announce} with a libp2p handshake.`);
         externalAnnounce = [...new Set([...externalAnnounce, options.announce])];

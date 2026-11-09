@@ -53,6 +53,18 @@ describe("verifyUnmanagedAddresses", () => {
         expect(await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "failed", error: "connection refused" }]);
     });
 
+    // Issue #241: Node's WebSocket rejects with an ErrorEvent, which String() turns into "[object ErrorEvent]".
+    it("reports an error event by its message, not as [object ErrorEvent]", async () => {
+        const event = Object.assign(new Event("error"), { message: "Received network error", error: new Error("Received network error") });
+        const dial = () => Promise.reject(event);
+        expect(await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "failed", error: "Received network error" }]);
+    });
+
+    it("falls back to a readable reason when the rejection carries none", async () => {
+        const dial = () => Promise.reject(new Event("error"));
+        expect(await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "failed", error: "the WebSocket connection failed" }]);
+    });
+
     describe("a failed dial, by where the address leads", () => {
         const dial = async () => {
             throw new Error("timed out");
