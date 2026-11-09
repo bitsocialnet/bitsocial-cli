@@ -240,7 +240,10 @@ describe("a browser address set up by hand, without setup", { timeout: 300_000 }
         expect(last!.json.configured).toBe(false);
         expect(last!.text).not.toContain("Browsers cannot reach this node");
         expect(last!.text).toContain(announce);
-        expect(last!.text).toContain("does not manage");
+        expect(last!.text).toContain("A handshake from this machine succeeded");
+        // The handshake is the evidence the opening line goes by (#239), without claiming the firewall was tested.
+        expect(last!.text).toMatch(/^Browsers: should be able to connect over WSS/m);
+        expect(last!.json.connectivity.browsers.status).toBe("ok");
         expect(last!.json.checks.find((check: { id: string }) => check.id === "browser-address")).toMatchObject({ status: "ok" });
     });
 
@@ -259,10 +262,10 @@ describe("a browser address set up by hand, without setup", { timeout: 300_000 }
         // this soon after start, so status says that instead of claiming browsers cannot connect (#238).
         const browserCheck = json.checks.find((check: { id: string }) => check.id === "browser-address");
         if (/AutoNAT/.test(browserCheck.detail)) expect(browserCheck.status).toBe("warn");
-        else {
-            expect(browserCheck.status).toBe("fail");
-            expect(text).toContain("Browsers cannot reach this node");
-        }
+        else expect(browserCheck.status).toBe("fail");
+        // What the opening line says then depends on what AutoNAT knows on this host, but never that WSS works (#239).
+        expect(text).not.toContain("should be able to connect over WSS");
+        expect(json.connectivity.browsers.status).not.toBe("ok");
     });
 });
 

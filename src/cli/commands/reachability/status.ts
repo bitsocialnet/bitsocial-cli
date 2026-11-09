@@ -3,14 +3,16 @@ import defaults from "../../../common-utils/defaults.js";
 import { evaluateChecks, formatCheck, gatherCheckFacts, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
-import { autonatEvidence, browserAddressCheck, notConfiguredSummary, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
+import { autonatEvidence, browserAddressCheck, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
+import { connectivityVerdict, formatConnectivity, type Connectivity } from "../../../reachability/verdict.js";
 import { resolveKuboRpcUrl } from "../../../util.js";
 
 const DECLINED_STATUS_LINE = "Reachability: declined. To turn it on, run: bitsocial reachability setup";
+const NOT_CONFIGURED_STATUS_LINE = "Reachability: not configured. To add WSS, run: bitsocial reachability setup";
 
 export default class Status extends Command {
     static override description =
-        "Show whether browsers can reach this node: mode, announced addresses, certificate expiry, last checks, and whether each requirement is met, including permission to bind UDP 443";
+        "Show whether desktop nodes and browsers can connect to this node, then why: mode, announced addresses, certificate expiry, last checks, and whether each requirement is met, including permission to bind UDP 443";
 
     static override enableJsonFlag = true;
 
@@ -23,7 +25,7 @@ export default class Status extends Command {
 
     static override examples = ["bitsocial reachability status", "bitsocial reachability status --json"];
 
-    async run(): Promise<ReachabilityStatus & { unmanagedAddresses: UnmanagedAddress[]; checks: ReachabilityCheck[] }> {
+    async run(): Promise<ReachabilityStatus & { connectivity: Connectivity; unmanagedAddresses: UnmanagedAddress[]; checks: ReachabilityCheck[] }> {
         const { flags } = await this.parse(Status);
         const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
         const status = await readReachabilityStatus(dataPath);
@@ -46,18 +48,30 @@ export default class Status extends Command {
             // Without WSS, setup leaves kubo without this listener on purpose, so its absence is no problem.
             ...(config && config.serveWss !== false ? { wsPort: config.wsPort } : {})
         });
-        // Only a node setup does not manage: on one it does, kubo-announce and the daemon's own checks cover these addresses.
-        const unmanagedAddresses = status.configured
+        // A handshake with each WSS address kubo announces, setup's own included. A disabled node's Caddy is off on purpose, so it is not tried.
+        const wssDisabled = status.configured && !status.enabled;
+        const wssAddresses = wssDisabled
             ? []
             : await verifyUnmanagedAddresses({ running: facts.kuboRunningAnnounce, config: facts.kuboConfigAnnounce, ...(override ? { treatAsPublic: override.split(",") } : {}) });
+        // Only a node setup does not manage reports these: on one it does, kubo-announce and the daemon's own checks cover them.
+        const unmanagedAddresses = status.configured ? [] : wssAddresses;
         const evidence = autonatEvidence(facts.kuboAutonat);
         const browserCheck = status.configured ? undefined : browserAddressCheck(unmanagedAddresses, evidence);
+        const announcedCheck = publicAddressAnnouncedCheck({
+            running: facts.kuboRunningAnnounce,
+            inContainer: facts.inContainer,
+            ...(override ? { treatAsPublic: override.split(",") } : {})
+        });
+        const connectivity = connectivityVerdict({
+            kuboRunning: facts.kuboRunningAnnounce !== undefined,
+            publicAddressAnnounced: announcedCheck.status === "ok",
+            announced: facts.kuboRunningAnnounce ?? [],
+            autonat: facts.kuboAutonat,
+            wss: wssAddresses,
+            wssDisabled
+        });
         const checks = [
-            publicAddressAnnouncedCheck({
-                running: facts.kuboRunningAnnounce,
-                inContainer: facts.inContainer,
-                ...(override ? { treatAsPublic: override.split(",") } : {})
-            }),
+            announcedCheck,
             ...(browserCheck ? [browserCheck] : []),
             ...evaluateChecks({ ...facts, verifiedWss: unmanagedAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
         ];
@@ -66,11 +80,11 @@ export default class Status extends Command {
             for (const check of checks) this.log(formatCheck(check));
         };
 
+        for (const line of formatConnectivity(connectivity)) this.log(line);
         if (!status.configured) {
-            if (status.declined) this.log(DECLINED_STATUS_LINE);
-            else for (const line of notConfiguredSummary(unmanagedAddresses, evidence)) this.log(line);
+            this.log(status.declined ? DECLINED_STATUS_LINE : NOT_CONFIGURED_STATUS_LINE);
             printChecks();
-            return { ...status, unmanagedAddresses, checks };
+            return { ...status, connectivity, unmanagedAddresses, checks };
         }
         this.log(`Enabled: ${status.enabled ? "yes" : "no"}`);
         this.log(`Mode: ${status.mode}${status.staging ? " (Let's Encrypt staging)" : ""}`);
@@ -90,6 +104,6 @@ export default class Status extends Command {
         }
         if (status.lastChecks?.caddy) this.log(`Caddy: ${status.lastChecks.caddy.running ? "running" : "not running"}`);
         printChecks();
-        return { ...status, unmanagedAddresses, checks };
+        return { ...status, connectivity, unmanagedAddresses, checks };
     }
 }

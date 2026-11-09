@@ -13,6 +13,7 @@ const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
 const deadWss = "/ip4/127.0.0.1/tcp/9/tls/ws";
 // Counted as public too, but not on this machine's interfaces, like a public IP behind a router.
 const notOnThisMachineWss = "/ip4/127.0.0.2/tcp/9/tls/ws";
+// The opener `status` printed before #239, which the line saying who can connect replaced.
 const CANNOT_REACH = "Browsers cannot reach this node";
 
 const run = (args: string[], kuboRpcUrl: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> =>
@@ -60,8 +61,7 @@ describe("reachability status on a node that never ran setup", () => {
     it("names an announced WSS address that fails its handshake, and keeps the warning", { timeout: 60_000 }, async () => {
         await withKubo({ announced: [deadWss] }, async (url) => {
             const human = await run(["--pkcOptions.dataPath", randomDirectory()], url);
-            expect(human.stdout).toContain(CANNOT_REACH);
-            expect(human.stdout).toContain(deadWss);
+            expect(human.stdout).toMatch(/^Browsers: .*the WSS handshake with \/ip4\/127\.0\.0\.1\/tcp\/9\/tls\/ws/m);
 
             const parsed = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
             expect(parsed.configured).toBe(false);
@@ -73,8 +73,7 @@ describe("reachability status on a node that never ran setup", () => {
     it("does not say browsers cannot reach it when the failed address is not on this machine", { timeout: 60_000 }, async () => {
         await withKubo({ announced: [notOnThisMachineWss] }, async (url) => {
             const human = await run(["--pkcOptions.dataPath", randomDirectory()], url);
-            expect(human.stdout).not.toContain(CANNOT_REACH);
-            expect(human.stdout).toContain(notOnThisMachineWss);
+            expect(human.stdout).toMatch(/^Browsers: may be able to connect over WSS through \/ip4\/127\.0\.0\.2\/tcp\/9\/tls\/ws/m);
 
             const parsed = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
             expect(parsed.unmanagedAddresses).toMatchObject([{ address: notOnThisMachineWss, status: "unconfirmed" }]);
@@ -85,20 +84,21 @@ describe("reachability status on a node that never ran setup", () => {
     it("does not say browsers cannot reach it when kubo is down and its config announces WSS", { timeout: 60_000 }, async () => {
         const dataPath = await dataPathWithKuboConfig(["/dns4/node.example/tcp/443/tls/ws"]);
         const human = await run(["--pkcOptions.dataPath", dataPath], "http://127.0.0.1:9/api/v0");
-        expect(human.stdout).not.toContain(CANNOT_REACH);
+        expect(human.stdout).toMatch(/^Cannot tell who can connect: kubo is not running/);
         expect(human.stdout).toContain("/dns4/node.example/tcp/443/tls/ws");
 
         const parsed = JSON.parse((await run(["--json", "--pkcOptions.dataPath", dataPath], "http://127.0.0.1:9/api/v0")).stdout);
         expect(parsed.unmanagedAddresses).toEqual([{ address: "/dns4/node.example/tcp/443/tls/ws", status: "unverified" }]);
     });
 
-    it("keeps today's message when kubo announces nothing a browser can use", { timeout: 60_000 }, async () => {
+    it("says browsers cannot connect when kubo announces nothing a browser can use", { timeout: 60_000 }, async () => {
         const relayed = `/dns4/relay.example/tcp/443/wss/p2p/${peerId}/p2p-circuit`;
-        await withKubo({ announced: ["/ip4/203.0.113.7/tcp/4001", "/ip4/10.0.0.5/tcp/443/tls/ws", relayed] }, async (url) => {
+        const autonat = { reachable: ["/ip4/203.0.113.7/tcp/4001"], unreachable: [], unknown: [] };
+        await withKubo({ announced: ["/ip4/203.0.113.7/tcp/4001", "/ip4/10.0.0.5/tcp/443/tls/ws", relayed], autonat }, async (url) => {
             const parsed = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
             expect(parsed.unmanagedAddresses).toEqual([]);
             expect(parsed.checks.map((check: { id: string }) => check.id)).not.toContain("browser-address");
-            expect((await run(["--pkcOptions.dataPath", randomDirectory()], url)).stdout).toContain(CANNOT_REACH);
+            expect((await run(["--pkcOptions.dataPath", randomDirectory()], url)).stdout).toMatch(/^Browsers: cannot connect directly; run: bitsocial reachability setup$/m);
         });
     });
 
