@@ -1,9 +1,9 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
-import { evaluateChecks, formatCheck, gatherCheckFacts, type ReachabilityCheck } from "../../../reachability/checks.js";
+import { evaluateChecks, formatCheck, gatherCheckFacts, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
-import { browserAddressCheck, notConfiguredSummary, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
+import { autonatEvidence, browserAddressCheck, notConfiguredSummary, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
 import { resolveKuboRpcUrl } from "../../../util.js";
 
 const DECLINED_STATUS_LINE = "Reachability: declined. To turn it on, run: bitsocial reachability setup";
@@ -50,8 +50,14 @@ export default class Status extends Command {
         const unmanagedAddresses = status.configured
             ? []
             : await verifyUnmanagedAddresses({ running: facts.kuboRunningAnnounce, config: facts.kuboConfigAnnounce, ...(override ? { treatAsPublic: override.split(",") } : {}) });
-        const browserCheck = browserAddressCheck(unmanagedAddresses);
+        const evidence = autonatEvidence(facts.kuboAutonat);
+        const browserCheck = status.configured ? undefined : browserAddressCheck(unmanagedAddresses, evidence);
         const checks = [
+            publicAddressAnnouncedCheck({
+                running: facts.kuboRunningAnnounce,
+                inContainer: facts.inContainer,
+                ...(override ? { treatAsPublic: override.split(",") } : {})
+            }),
             ...(browserCheck ? [browserCheck] : []),
             ...evaluateChecks({ ...facts, verifiedWss: unmanagedAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
         ];
@@ -62,7 +68,7 @@ export default class Status extends Command {
 
         if (!status.configured) {
             if (status.declined) this.log(DECLINED_STATUS_LINE);
-            else for (const line of notConfiguredSummary(unmanagedAddresses)) this.log(line);
+            else for (const line of notConfiguredSummary(unmanagedAddresses, evidence)) this.log(line);
             printChecks();
             return { ...status, unmanagedAddresses, checks };
         }

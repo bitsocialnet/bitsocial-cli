@@ -70,7 +70,18 @@ On a node without `config.json`, `status` tries a real libp2p handshake with eve
 
 A failed handshake is `failed` when every IP the address leads to is on one of the node's own interfaces, or the name resolves to nothing, because the node reaches its own IP directly. Any other IP goes through a router, which may not connect a machine to its own public address (no NAT hairpin), so that failure is `unconfirmed`: the `browser-address` check warns instead of failing.
 
-`status` says browsers cannot reach the node only when no such address exists or every handshake is `failed`. A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
+A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
+
+When no WSS address works (none exists, or every handshake is `failed`), `status` weighs AutoNAT's results before saying anything about browsers:
+
+| AutoNAT | Opening line of `status` | `browser-address` |
+| --- | --- | --- |
+| Reached a `/quic-v1/webtransport` address | Browsers that support WebTransport should be able to connect unless their network blocks UDP; `setup` adds WSS | `warn` |
+| Has not tested the WebTransport address yet | Not known yet whether browsers can connect over WebTransport | `unknown`, or `warn` with failed WSS addresses |
+| Reached other addresses only | Desktop nodes can reach this node and it seeds for them, but browsers cannot connect directly | `warn` with failed WSS addresses, otherwise none |
+| Reached nothing, or no answer | Browsers cannot reach this node | `fail` with failed WSS addresses, otherwise none |
+
+Messages name no browsers, since WebTransport support changes over time.
 
 The daemon does the same check in the background when it starts. With an address to check, it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed or could not be confirmed.
 
@@ -79,6 +90,10 @@ With no such address, the daemon warns straight away only if `AutoTLS.Enabled` i
 While nobody has decided, by running `setup` or declining with `disable`, the daemon repeats this check every hour. It is a single attempt without the AutoTLS wait, and is skipped while the startup check is still running. It warns each hour no browser address works, but logs a working one only when that changes, so a node that works stays quiet. The check stops as soon as a config or the decline appears, including during the startup AutoTLS wait. `status` reports the moment it runs and does not wait, so it can say browsers cannot reach a node whose certificate is still on its way.
 
 Until something can terminate WSS, kubo only gets its UDP 443 listeners. AutoTLS and the loopback filter stay as they were, so a failed attempt costs nothing.
+
+#### WebTransport and AutoNAT
+
+kubo listens for WebTransport on `/udp/4001/quic-v1/webtransport` by default, so a node whose UDP 4001 is reachable can take browser connections without a certificate. Since go-libp2p 0.47 (kubo 0.40), AutoNAT usually does not dial a WebTransport address itself: once the plain `/quic-v1` address on the same IP and port is reachable, the WebTransport address inherits that result, because many AutoNAT servers cannot speak WebTransport. `swarm/addrs/autonat` lists it as reachable either way. So messages say what was proven, that AutoNAT reached kubo over QUIC on that UDP port, and that browsers _should_ be able to connect: a network that blocks UDP, a browser without WebTransport, or a stale certhash can still stop them.
 
 ### IP changes with your own proxy
 
@@ -122,7 +137,7 @@ When `config.json` exists and is enabled, the daemon runs Caddy as a child proce
 
 | When | What |
 | --- | --- |
-| At start | Logs browser addresses and certificate expiry. With nothing configured, checks for addresses `setup` does not manage and warns, naming `setup`, if none work. On a declined node, logs one line |
+| At start | On every node, checks for about 2 minutes that running kubo announces a public address (see `public-address-announced` under [Troubleshooting](#troubleshooting)) and warns once, with the fix, if it still announces none. Stays quiet if kubo never answers. Logs browser addresses and certificate expiry. With nothing configured, checks for addresses `setup` does not manage and warns, naming `setup`, if none work. On a declined node, logs one line |
 | Every hour, while undecided | Repeats that check once and warns again if nothing works (see [Declining](#declining)) |
 | Every 5 s | Starts, reloads or stops Caddy to match the stored state, so `setup`, `enable` and `disable` apply to a running daemon and a crashed Caddy comes back |
 | Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
@@ -148,10 +163,11 @@ The daemon sends stderr only to its log file, so these messages go to stdout whe
 
 | Check | Meaning |
 | --- | --- |
+| `public-address-announced` | Running kubo announces no public address: no public IPv4, no global IPv6 (`fec0::/10` and other private ranges don't count), no `/dns*` name and no relay address. No other node or browser can dial it, so it seeds nothing for anyone. Typical of a VM on NAT networking (`10.0.2.15` plus `fec0::`). Runs on every node, `setup` or not. `unknown` while kubo is down. The daemon warns once at start-up in the same case |
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
-| `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage) |
+| `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage) |
 | `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, as the program is then serving it |
-| `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn` |
+| `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn`. "Reached" proves inbound UDP, not a browser handshake (see [WebTransport and AutoNAT](#webtransport-and-autonat)) |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
 | `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |
 | `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to. `kubo-ws` is skipped when `setup` left the node without WSS |

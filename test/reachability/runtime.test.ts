@@ -3,6 +3,7 @@ import path from "path";
 import { describe, expect, it, vi } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import { caddyBinaryPath, caddyfilePath, generateCaddyfile } from "../../src/reachability/caddy.js";
+import { NO_PUBLIC_ADDRESS_MESSAGE } from "../../src/reachability/checks.js";
 import { setcapCommand } from "../../src/reachability/guidance.js";
 import { applyKuboConfig } from "../../src/reachability/setup.js";
 import {
@@ -13,6 +14,7 @@ import {
     judgeName,
     NOT_CONFIGURED_MESSAGE,
     planIpChange,
+    PUBLIC_ANNOUNCE_ATTEMPTS,
     ReachabilityRuntime,
     STALE_NAME_DROP_AFTER_MS,
     UNDECIDED_RECHECK_INTERVAL_MS,
@@ -145,6 +147,8 @@ describe("ReachabilityRuntime", () => {
             dataPath,
             kuboRepoPath,
             kuboRpcUrl: new URL("http://127.0.0.1:1/api/v0"),
+            // Silent kubo, so the start-up public-address check stays out of tests about everything else.
+            announcedAddresses: async () => undefined,
             log: (message) => events.push(`log: ${message}`),
             warn: (message) => events.push(`warn: ${message}`),
             now: () => clock,
@@ -354,6 +358,73 @@ describe("ReachabilityRuntime", () => {
             await runtime.start();
             await runtime.stop();
             expect(dialAddress).not.toHaveBeenCalled();
+        });
+    });
+
+    // Issue #231: tell the operator once, at start-up, when nothing kubo announces can be dialed by anyone.
+    describe("the start-up check for a public announced address", () => {
+        const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+        const qemuVm = ["/ip4/127.0.0.1/tcp/4001", "/ip4/10.0.2.15/udp/4001/quic-v1", "/ip6/fec0::5054:ff:fe12:3456/udp/4001/quic-v1"].map(
+            (address) => `${address}/p2p/${peerId}`
+        );
+        const noPublicWarnings = (events: string[]) =>
+            events.filter((event) => event.startsWith("warn:") && event.includes(NO_PUBLIC_ADDRESS_MESSAGE));
+        const start = async (overrides: Partial<RuntimeDependencies>) => {
+            const context = await setup(undefined, { browserAddressRetryMs: 1, ...overrides });
+            await context.runtime.start();
+            return context;
+        };
+
+        it("warns once, with the fix, when kubo keeps announcing only private addresses", async () => {
+            const announcedAddresses = vi.fn(async () => qemuVm);
+            const { runtime, events } = await start({ announcedAddresses, detectContainer: async () => false });
+            await vi.waitFor(() => expect(noPublicWarnings(events)).toHaveLength(1));
+            await runtime.stop();
+            expect(noPublicWarnings(events)).toHaveLength(1);
+            expect(noPublicWarnings(events)[0]).toContain("bridged networking");
+            expect(noPublicWarnings(events)[0]).not.toContain("Docker");
+            expect(announcedAddresses).toHaveBeenCalledTimes(PUBLIC_ANNOUNCE_ATTEMPTS);
+        });
+
+        it("adds the Docker fix inside a container", async () => {
+            const { runtime, events } = await start({ announcedAddresses: async () => qemuVm, detectContainer: async () => true });
+            await vi.waitFor(() => expect(noPublicWarnings(events)).toHaveLength(1));
+            await runtime.stop();
+            expect(noPublicWarnings(events)[0]).toContain("--network host");
+        });
+
+        it("stays quiet once a public address appears, as UPnP and peers fill them in", async () => {
+            let reads = 0;
+            const announcedAddresses = vi.fn(async () =>
+                ++reads > 3 ? [...qemuVm, `/ip4/93.184.216.34/udp/4001/quic-v1/p2p/${peerId}`] : qemuVm
+            );
+            const { runtime, events } = await start({ announcedAddresses });
+            await vi.waitFor(() => expect(announcedAddresses).toHaveBeenCalledTimes(4));
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            await runtime.stop();
+            expect(announcedAddresses).toHaveBeenCalledTimes(4);
+            expect(noPublicWarnings(events)).toEqual([]);
+        });
+
+        it("stays quiet when kubo never answers, which says nothing about its addresses", async () => {
+            const announcedAddresses = vi.fn(async () => undefined);
+            const { runtime, events } = await start({ announcedAddresses });
+            await vi.waitFor(() => expect(announcedAddresses).toHaveBeenCalledTimes(PUBLIC_ANNOUNCE_ATTEMPTS));
+            await runtime.stop();
+            expect(noPublicWarnings(events)).toEqual([]);
+        });
+
+        it("reports nothing if the daemon stops while waiting", async () => {
+            const { runtime, events } = await start({ announcedAddresses: async () => qemuVm, browserAddressRetryMs: 60_000 });
+            await runtime.stop();
+            expect(noPublicWarnings(events)).toEqual([]);
+        });
+
+        it("runs on a node setup manages too", async () => {
+            const context = await setup(baseConfig(), { browserAddressRetryMs: 1, announcedAddresses: async () => qemuVm });
+            await context.runtime.start();
+            await vi.waitFor(() => expect(noPublicWarnings(context.events)).toHaveLength(1));
+            await context.runtime.stop();
         });
     });
 

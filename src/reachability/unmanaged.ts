@@ -1,5 +1,5 @@
 import type { ReachabilityCheck } from "./checks.js";
-import { isPublicIp, localIpsFromInterfaces } from "./discovery.js";
+import { isPublicIp, localIpsFromInterfaces, type KuboAutonat } from "./discovery.js";
 import { dialWithLibp2p } from "./libp2p-dial.js";
 import { resolveDomainRecords, type ResolvedDomain } from "./setup.js";
 
@@ -76,34 +76,85 @@ export const unverifiedMessage = (unverified: UnmanagedAddress[]) =>
 
 const ofStatus = (addresses: UnmanagedAddress[], status: UnmanagedAddress["status"]) => addresses.filter((address) => address.status === status);
 
-export function browserAddressCheck(addresses: UnmanagedAddress[]): ReachabilityCheck | undefined {
-    if (addresses.length === 0) return undefined;
+// What AutoNAT says about the transports a WSS handshake does not cover. Since go-libp2p 0.47 a WebTransport address
+// inherits QUIC's result on the same port, so "reached" proves inbound UDP, not a browser handshake.
+export interface AutonatEvidence {
+    webTransportReached: string[];
+    webTransportUntested: string[];
+    // Any address at all, which desktop kubo and helia can dial.
+    reached: string[];
+}
+
+const isWebTransport = (address: string) => /\/udp\/\d+\/quic-v1\/webtransport/.test(address) && !address.includes("/p2p-circuit");
+
+export function autonatEvidence(autonat: KuboAutonat | undefined): AutonatEvidence {
+    const reached = autonat?.reachable ?? [];
+    const webTransportReached = reached.filter(isWebTransport);
+    return {
+        reached,
+        webTransportReached,
+        webTransportUntested: webTransportReached.length > 0 ? [] : (autonat?.unknown ?? []).filter(isWebTransport)
+    };
+}
+
+const NO_EVIDENCE: AutonatEvidence = { webTransportReached: [], webTransportUntested: [], reached: [] };
+const ADD_WSS = "Run `bitsocial reachability setup` to add WSS";
+
+const udpPorts = (addresses: string[]) =>
+    [...new Set(addresses.map((address) => address.match(/\/udp\/(\d+)\//)?.[1]).filter((port) => port !== undefined))].join(" and ");
+
+export const webTransportReachedMessage = (addresses: string[]) =>
+    `AutoNAT reached kubo over QUIC on UDP ${udpPorts(addresses)}, so browsers that support WebTransport should be able to connect unless their network blocks UDP`;
+export const webTransportUntestedMessage = (addresses: string[]) =>
+    `AutoNAT has not tested kubo's WebTransport addresses yet (${addresses.join(", ")}), so whether browsers can connect over WebTransport is not known yet`;
+export const desktopOnlyMessage = (reached: string[]) =>
+    `Desktop nodes can reach this node (AutoNAT reached ${reached.join(", ")}) and it seeds for them, but browsers cannot connect directly`;
+
+export function browserAddressCheck(addresses: UnmanagedAddress[], evidence: AutonatEvidence = NO_EVIDENCE): ReachabilityCheck | undefined {
+    const id = "browser-address";
     const ok = ofStatus(addresses, "ok");
     const failed = ofStatus(addresses, "failed");
     const unconfirmed = ofStatus(addresses, "unconfirmed");
     const unverified = ofStatus(addresses, "unverified");
     const fix = "Check the server in front of kubo, or run: bitsocial reachability setup";
-    if (unverified.length > 0) return { id: "browser-address", status: "unknown", detail: unverifiedMessage(unverified) };
-    if (ok.length === 0 && unconfirmed.length === 0) return { id: "browser-address", status: "fail", detail: handshakeFailedMessage(failed), fix };
+    const webTransport = evidence.webTransportReached.length > 0 ? webTransportReachedMessage(evidence.webTransportReached) : undefined;
+    if (unverified.length > 0) return { id, status: "unknown", detail: unverifiedMessage(unverified) };
+    if (ok.length === 0 && unconfirmed.length === 0) {
+        const failures = failed.length > 0 ? [handshakeFailedMessage(failed)] : [];
+        // Without WSS, WebTransport is all a browser has: a reached address makes this a warning, not a failure.
+        if (webTransport) return { id, status: "warn", detail: [webTransport, ...failures].join(". "), fix: failed.length > 0 ? fix : ADD_WSS };
+        if (evidence.webTransportUntested.length > 0)
+            return { id, status: failed.length > 0 ? "warn" : "unknown", detail: [webTransportUntestedMessage(evidence.webTransportUntested), ...failures].join(". "), ...(failed.length > 0 ? { fix } : {}) };
+        if (failed.length === 0) return undefined;
+        if (evidence.reached.length > 0) return { id, status: "warn", detail: [desktopOnlyMessage(evidence.reached), ...failures].join(". "), fix };
+        return { id, status: "fail", detail: handshakeFailedMessage(failed), fix };
+    }
     const succeeded = ok.length > 0 ? [`A handshake from this machine succeeded through ${ok.map(({ address }) => address).join(", ")}`] : [];
     const problems = [...(failed.length > 0 ? [handshakeFailedMessage(failed)] : []), ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : [])];
-    if (problems.length > 0) return { id: "browser-address", status: "warn", detail: [...succeeded, ...problems].join(". "), fix };
-    return { id: "browser-address", status: "ok", detail: succeeded.join("") };
+    if (problems.length > 0) return { id, status: "warn", detail: [...succeeded, ...problems, ...(webTransport ? [webTransport] : [])].join(". "), fix };
+    return { id, status: "ok", detail: succeeded.join("") };
 }
 
 // The lines `status` opens with on a node that never ran setup, where this replaces "Browsers cannot reach this node" only if something is worth saying.
-export function notConfiguredSummary(addresses: UnmanagedAddress[]): string[] {
+export function notConfiguredSummary(addresses: UnmanagedAddress[], evidence: AutonatEvidence = NO_EVIDENCE): string[] {
     const ok = ofStatus(addresses, "ok");
     const failed = ofStatus(addresses, "failed");
     const unconfirmed = ofStatus(addresses, "unconfirmed");
     const unverified = ofStatus(addresses, "unverified");
     const failures = failed.length > 0 ? [handshakeFailedMessage(failed)] : [];
-    if (ok.length === 0 && unconfirmed.length === 0 && unverified.length === 0) return ["Reachability is not configured. Browsers cannot reach this node. Run: bitsocial reachability setup", ...failures];
+    const webTransport = evidence.webTransportReached.length > 0 ? [`${webTransportReachedMessage(evidence.webTransportReached)}.`] : [];
+    if (ok.length === 0 && unconfirmed.length === 0 && unverified.length === 0) {
+        if (webTransport.length > 0) return ["Reachability is not configured.", ...webTransport, `${ADD_WSS}.`, ...failures];
+        if (evidence.webTransportUntested.length > 0) return ["Reachability is not configured.", `${webTransportUntestedMessage(evidence.webTransportUntested)}.`, "Run: bitsocial reachability setup", ...failures];
+        if (evidence.reached.length > 0) return [`Reachability is not configured. ${desktopOnlyMessage(evidence.reached)}. To add that, run: bitsocial reachability setup`, ...failures];
+        return ["Reachability is not configured. Browsers cannot reach this node. Run: bitsocial reachability setup", ...failures];
+    }
     return [
         "`bitsocial reachability setup` has not been run on this node.",
         ...ok.map(({ address }) => handshakeSucceededMessage(address)),
         ...failures,
         ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : []),
-        ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])
+        ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : []),
+        ...webTransport
     ];
 }

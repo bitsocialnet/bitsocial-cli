@@ -5,6 +5,7 @@ import {
     detectContainer,
     isCgnatIp,
     isPublicIp,
+    isPublicMultiaddr,
     lanIpv4FromInterfaces,
     parseLsofHolder,
     parseNetstatPid,
@@ -33,6 +34,36 @@ describe("isPublicIp", () => {
         "2001:db8::1",
         "not an ip"
     ])("%s is not public", (ip) => expect(isPublicIp(ip)).toBe(false));
+});
+
+// Issue #231: what VMs on QEMU user-mode networking announce, which no other node can dial.
+describe("isPublicMultiaddr", () => {
+    const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+    it.each([
+        "/ip4/93.184.216.34/tcp/4001",
+        `/ip6/2606:4700::1/udp/4001/quic-v1/p2p/${peerId}`,
+        "/dns4/node.example/tcp/443/tls/ws",
+        "/dns6/node.example/tcp/443/wss",
+        "/dns/node.example/tcp/4001",
+        "/dnsaddr/node.example",
+        "/dns4/93-184-216-34.k51.libp2p.direct/tcp/4001/tls/ws",
+        `/ip4/93.184.216.34/tcp/4001/p2p/${peerId}/p2p-circuit`,
+        `/ip4/10.0.0.5/tcp/4001/p2p/${peerId}/p2p-circuit`
+    ])("%s is public", (address) => expect(isPublicMultiaddr(address)).toBe(true));
+
+    it.each([
+        "/ip4/127.0.0.1/tcp/4001",
+        "/ip6/::1/udp/4001/quic-v1",
+        "/ip4/10.0.2.15/tcp/4001",
+        "/ip6/fec0::5054:ff:fe12:3456/udp/4001/quic-v1",
+        "/ip4/192.168.1.5/udp/4001/quic-v1/webtransport",
+        "/ip4/100.64.0.1/tcp/4001",
+        "/ip6/fd00::1/tcp/4001",
+        "/ip6/fe80::1/tcp/4001",
+        "not a multiaddr"
+    ])("%s is not public", (address) => expect(isPublicMultiaddr(address)).toBe(false));
+
+    it("counts an IP the test hook treats as public", () => expect(isPublicMultiaddr("/ip4/127.0.0.1/tcp/4001", ["127.0.0.1"])).toBe(true));
 });
 
 it("isCgnatIp recognises only 100.64.0.0/10", () => {

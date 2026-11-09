@@ -5,7 +5,7 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 import { caddyBinaryPath, isOurCaddyRunning } from "./caddy.js";
-import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
+import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, isPublicMultiaddr, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
 import { setcapCommand, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
 import type { CertificateInfo } from "./state.js";
 import { loadKuboConfigFile } from "../util.js";
@@ -140,6 +140,36 @@ function kuboAnnounceCheck(facts: CheckFacts): ReachabilityCheck | undefined {
     return { id: "kubo-announce", status: "ok", detail: `kubo announces ${facts.announce.length === 1 ? "the browser address" : `all ${facts.announce.length} browser addresses`}` };
 }
 
+export const NO_PUBLIC_ADDRESS_MESSAGE =
+    "This node announces no public address, so other nodes and browsers cannot reach it and it seeds nothing for them";
+const NO_PUBLIC_ADDRESS_FIX =
+    "Forward UDP and TCP 4001 (and 443) on the router or enable UPnP, run on a host with a public IPv4 or global IPv6, or, inside a VM, use bridged networking instead of NAT. Then run: bitsocial reachability setup";
+const NO_PUBLIC_ADDRESS_CONTAINER_FIX = "In Docker, use --network host or publish 4001/udp and 4001/tcp";
+
+export const noPublicAddressFix = (inContainer: boolean) =>
+    inContainer ? `${NO_PUBLIC_ADDRESS_FIX}. ${NO_PUBLIC_ADDRESS_CONTAINER_FIX}` : NO_PUBLIC_ADDRESS_FIX;
+
+// What the network sees, unlike public-address, which looks at this machine's interfaces. Without a public
+// address in kubo's own announcements, no other node or browser can dial it, whatever this machine has.
+export function publicAddressAnnouncedCheck(input: {
+    running: string[] | undefined;
+    inContainer: boolean;
+    treatAsPublic?: string[];
+}): ReachabilityCheck {
+    const id = "public-address-announced";
+    if (input.running === undefined)
+        return { id, status: "unknown", detail: "kubo is not running, so the addresses it announces cannot be read" };
+    const bare = [...new Set(input.running.map((address) => address.replace(/\/p2p\/[^/]+$/, "")))];
+    const publicAddresses = bare.filter((address) => isPublicMultiaddr(address, input.treatAsPublic));
+    if (publicAddresses.length > 0) {
+        const shown = publicAddresses.slice(0, 3).join(", ");
+        const more = publicAddresses.length > 3 ? ` and ${publicAddresses.length - 3} more` : "";
+        return { id, status: "ok", detail: `kubo announces public addresses: ${shown}${more}` };
+    }
+    const announced = bare.length > 0 ? `. It announces only ${bare.join(", ")}` : ". It announces no address at all";
+    return { id, status: "fail", detail: `${NO_PUBLIC_ADDRESS_MESSAGE}${announced}`, fix: noPublicAddressFix(input.inContainer) };
+}
+
 // AutoNAT tests UDP 4001 and the like, not the UDP 443 this check is about. Plain QUIC doesn't count: browsers need WebTransport.
 const isUdpFallback = (address: string) => {
     const port = address.match(/\/udp\/(\d+)\/quic-v1\/webtransport/)?.[1];
@@ -154,7 +184,8 @@ function udpUnavailableBesideWorkingWss(facts: CheckFacts): ReachabilityCheck {
     const reachable = facts.kuboAutonat?.reachable.filter(isUdpFallback) ?? [];
     if (reachable.length > 0) {
         const port = reachable[0]!.match(/\/udp\/(\d+)\//)![1];
-        return { id: "udp-443", status: "ok", detail: `${held}, but AutoNAT reached kubo on UDP ${port}, which WebTransport can use: ${reachable.join(", ")}` };
+        // go-libp2p marks a WebTransport address reachable once QUIC on its port is, without dialing WebTransport itself.
+        return { id: "udp-443", status: "ok", detail: `${held}, but AutoNAT reached kubo over QUIC on UDP ${port}, so browsers that support WebTransport should be able to use it unless their network blocks UDP: ${reachable.join(", ")}` };
     }
     const unreachable = facts.kuboAutonat?.unreachable.filter(isUdpFallback) ?? [];
     if (unreachable.length > 0) return { id: "udp-443", status: "warn", detail: `${held}, and AutoNAT could not reach kubo's other UDP addresses, so WebTransport may not work: ${unreachable.join(", ")}`, fix };

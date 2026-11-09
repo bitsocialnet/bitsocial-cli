@@ -3,7 +3,8 @@ import fs from "fs/promises";
 import net from "net";
 import path from "path";
 import { caddyBinaryPath, caddyfilePath, caddyfileServesDomain, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
-import { detectContainer, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
+import { NO_PUBLIC_ADDRESS_MESSAGE, noPublicAddressFix } from "./checks.js";
+import { detectContainer, isPublicMultiaddr, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
 import { bindDeniedGuidance, isBindDenied } from "./guidance.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
 import { applyKuboConfig, modeChangedMessage, modeForAnnounced, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
@@ -34,6 +35,8 @@ const ISSUANCE_RETRY_MAX_MS = 24 * HOUR_MS;
 
 const BROWSER_ADDRESS_ATTEMPTS = 8;
 const BROWSER_ADDRESS_RETRY_MS = 15_000;
+// kubo's announced addresses fill in over its first minutes, from UPnP and from what peers observe.
+export const PUBLIC_ANNOUNCE_ATTEMPTS = 8;
 // kubo documents 5-15 minutes for AutoTLS's certificate, plus an hour's registration delay unless AutoTLS.Enabled is explicitly true.
 const autoTlsAttempts = (minutes: number) => (minutes * 60_000) / BROWSER_ADDRESS_RETRY_MS;
 const autoTlsWaitMinutes = (kuboConfig: any): number | undefined => {
@@ -130,6 +133,10 @@ export interface RuntimeDependencies {
     dialAddress?: DialAddress;
     localIps?: string[];
     browserAddressRetryMs?: number;
+    // What running kubo announces, for the start-up check that something public is among it; undefined while kubo is down.
+    announcedAddresses?: () => Promise<string[] | undefined>;
+    // IPs counted as public, so tests can stand loopback in for a public address.
+    treatAsPublic?: string[];
 }
 
 export class ReachabilityRuntime {
@@ -153,6 +160,7 @@ export class ReachabilityRuntime {
     private timers: NodeJS.Timeout[] = [];
     private checkInFlight: Promise<void> | undefined;
     private browserAddressCheck: Promise<void> | undefined;
+    private publicAnnounceCheck: Promise<void> | undefined;
     // What the last check of an undecided node found, so an hourly check repeats warnings but not successes.
     private browserAddressesWork: boolean | undefined;
 
@@ -173,6 +181,7 @@ export class ReachabilityRuntime {
     }
 
     async start(): Promise<void> {
+        this.publicAnnounceCheck = this.warnIfNothingPublicAnnounced().catch((error) => this.deps.warn(String(error)));
         const config = await this.readConfig();
         if (!config) {
             if (await isReachabilityDeclined(this.deps.dataPath)) this.deps.log(DECLINED_MESSAGE);
@@ -191,6 +200,29 @@ export class ReachabilityRuntime {
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.recheckUndecided().catch((error) => this.deps.warn(String(error))), UNDECIDED_RECHECK_INTERVAL_MS));
         for (const timer of this.timers) timer.unref();
+    }
+
+    // Once, on every node whatever its reachability config: a node nobody can dial seeds nothing, and its operator
+    // probably thinks it does. A kubo that never answers says nothing about its addresses, so that stays quiet.
+    private async warnIfNothingPublicAnnounced(): Promise<void> {
+        const announced = this.deps.announcedAddresses ?? (async () => (await kuboIdentity(this.deps.kuboRpcUrl))?.addresses);
+        const override = process.env["BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS"];
+        const treatAsPublic = this.deps.treatAsPublic ?? (override ? override.split(",") : []);
+        const { signal } = this.stopController;
+        let answered = false;
+        for (let attempt = 1; attempt <= PUBLIC_ANNOUNCE_ATTEMPTS; attempt++) {
+            if (this.stopping) return;
+            const addresses = await announced();
+            if (addresses !== undefined) {
+                answered = true;
+                if (addresses.some((address) => isPublicMultiaddr(address, treatAsPublic))) return;
+            }
+            if (attempt < PUBLIC_ANNOUNCE_ATTEMPTS)
+                await delay(this.deps.browserAddressRetryMs ?? BROWSER_ADDRESS_RETRY_MS, undefined, { signal, ref: false }).catch(() => {});
+        }
+        if (!answered || this.stopping) return;
+        const inContainer = await (this.deps.detectContainer ?? detectContainer)();
+        this.deps.warn(`${NO_PUBLIC_ADDRESS_MESSAGE}. Fix: ${noPublicAddressFix(inContainer)}`);
     }
 
     // Setup writing a config or the operator declining both end the reminders, including a wait already under way.
@@ -655,6 +687,7 @@ export class ReachabilityRuntime {
         this.timers = [];
         await this.checkInFlight?.catch(() => {});
         await this.browserAddressCheck;
+        await this.publicAnnounceCheck;
         await this.watchQueue;
         await this.leases;
         await this.router?.release().catch(() => {});

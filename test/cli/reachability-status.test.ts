@@ -134,7 +134,8 @@ describe("bitsocial reachability status", () => {
             }
         };
 
-        const checksNaming = (stdout: string) => JSON.parse(stdout).checks.filter((check: { detail: string }) => check.detail.includes(address));
+        // public-address-announced lists the public addresses kubo announces, which says nothing about this one being wrong.
+        const checksNaming = (stdout: string) => JSON.parse(stdout).checks.filter((check: { id: string; detail: string }) => check.id !== "public-address-announced" && check.detail.includes(address));
 
         it("fails when the address was removed from kubo's config, with the daemon down", async () => {
             const dataPath = await configuredNode({ appendAnnounce: [] });
