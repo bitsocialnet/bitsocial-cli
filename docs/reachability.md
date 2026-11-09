@@ -184,14 +184,14 @@ Desktop nodes:
 | AutoNAT is still testing, or gave no results | not known yet | `unknown` |
 | AutoNAT could reach none | cannot connect | `fail` |
 
-Browsers, first match wins. `status` tries a handshake from this machine with every WSS address kubo announces, `setup`'s own included, except on a node where reachability is disabled:
+Browsers, first match wins. `status` tries a handshake from this machine with every WSS address kubo announces, `setup`'s own included. On a node where reachability is disabled it skips `setup`'s addresses, because Caddy is off on purpose, but still tries the others, such as an AutoTLS address, which `disable` turns back on:
 
 | Evidence | Line | Status |
 | --- | --- | --- |
 | A WSS handshake succeeded | should be able to connect over WSS; the firewall was not tested from other networks | `ok` |
 | AutoNAT reached WebTransport | those that support WebTransport should be able to connect, unless their network blocks UDP; then why WSS is missing: `run setup to add WSS`, the failed handshake, an untestable WSS address, or reachability being disabled | `warn` |
 | A WSS handshake could not be tested from this machine (`unconfirmed`, usually no NAT hairpin) | may be able to connect over WSS | `unknown` |
-| Reachability is disabled | cannot connect directly: reachability is disabled. Run: bitsocial reachability enable | `warn`, or `fail` if desktop nodes cannot connect |
+| Reachability is disabled and no other WSS address works | cannot connect directly: reachability is disabled. Run: bitsocial reachability enable | `warn`, or `fail` if desktop nodes cannot connect |
 | AutoNAT has not tested WebTransport, or desktop nodes are not known yet | not known yet | `unknown` |
 | Nothing | cannot connect directly | `warn` if desktop nodes can connect, `fail` otherwise |
 

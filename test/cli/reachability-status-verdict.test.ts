@@ -13,12 +13,14 @@ const quic = "/ip4/93.184.216.34/udp/4001/quic-v1";
 const webTransport = `${quic}/webtransport/certhash/uEiA`;
 // A closed port on an address the test hook counts as public, so the handshake really runs and really fails.
 const deadWss = "/ip4/127.0.0.1/tcp/9/tls/ws";
+// Counted as public too, but not on this machine's interfaces, so a failed handshake is only unconfirmed, like an AutoTLS address behind a router.
+const otherWss = "/ip4/127.0.0.2/tcp/9/tls/ws";
 
 const run = (args: string[], kuboRpcUrl: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> =>
     new Promise((resolve, reject) => {
         const child = spawn("node", ["./bin/run", "reachability", "status", ...args], {
             stdio: ["ignore", "pipe", "pipe"],
-            env: { ...process.env, KUBO_RPC_URL: kuboRpcUrl, IPFS_PATH: "", BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1" }
+            env: { ...process.env, KUBO_RPC_URL: kuboRpcUrl, IPFS_PATH: "", BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS: "127.0.0.1,127.0.0.2" }
         });
         let stdout = "";
         let stderr = "";
@@ -108,6 +110,16 @@ describe("reachability status opens with who can connect", () => {
             expect(parsed.connectivity.browsers.status).toBe("warn");
             // Still only for nodes setup does not manage.
             expect(parsed.unmanagedAddresses).toEqual([]);
+        });
+    });
+
+    // Review on #243: disable restores AutoTLS, whose WSS address setup does not manage and must still be tested.
+    it("still tests WSS addresses setup does not manage on a disabled node, and skips setup's own", { timeout: 60_000 }, async () => {
+        const dataPath = await managedNode(false, [deadWss]);
+        await withKubo({ announced: [tcp, deadWss, otherWss], autonat: { reachable: [tcp], unreachable: [], unknown: [] } }, async (url) => {
+            const { stdout } = await run(["--pkcOptions.dataPath", dataPath], url);
+            expect(lines(stdout)[1]).toMatch(/^Browsers: may be able to connect over WSS through \/ip4\/127\.0\.0\.2\/tcp\/9\/tls\/ws/);
+            expect(lines(stdout)[1]).not.toContain(deadWss);
         });
     });
 

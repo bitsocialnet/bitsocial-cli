@@ -109,6 +109,19 @@ describe("connectivityVerdict: browsers", () => {
         expect(browsers.detail).toContain("bitsocial reachability enable");
     });
 
+    // Review on #243: disable restores AutoTLS, so a disabled node can still serve WSS that setup does not manage.
+    it("uses a WSS handshake that worked on a disabled node, rather than saying WSS is off", () => {
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("ok"), wssDisabled: true });
+        expect(browsers.status).toBe("ok");
+        expect(browsers.detail).not.toMatch(/reachability is disabled/);
+    });
+
+    it("says a WSS address on a disabled node may work when it could not be tested", () => {
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: handshake("unconfirmed"), wssDisabled: true });
+        expect(browsers.status).toBe("unknown");
+        expect(browsers.detail).toMatch(/may be able to connect over WSS/);
+    });
+
     it("still counts WebTransport on a disabled node", () => {
         const { browsers } = verdict({ autonat: autonat({ reachable: [quic, webTransport] }), wssDisabled: true });
         expect(browsers.status).toBe("warn");

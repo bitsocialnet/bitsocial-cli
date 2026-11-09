@@ -25,7 +25,8 @@ export interface ConnectivityInput {
     autonat: KuboAutonat | undefined;
     // Handshakes from this machine with each WSS address kubo announces.
     wss: UnmanagedAddress[];
-    // Setup was run, then `reachability disable`: Caddy is off, so WSS is down on purpose.
+    // Setup was run, then `reachability disable`: Caddy is off, so setup's WSS is down on purpose. `wss` then holds only
+    // addresses setup does not manage, such as AutoTLS, which disable turns back on.
     wssDisabled?: boolean;
 }
 
@@ -57,7 +58,7 @@ const failedHandshakes = (failed: UnmanagedAddress[]) => `the WSS handshake with
 
 function browsersLine(input: ConnectivityInput, desktop: ConnectivityLine): ConnectivityLine {
     const evidence = autonatEvidence(input.autonat);
-    const wss = input.wssDisabled ? [] : input.wss;
+    const wss = input.wss;
     const ok = wss.filter(({ status }) => status === "ok");
     const unconfirmed = wss.filter(({ status }) => status === "unconfirmed");
     const failed = wss.filter(({ status }) => status === "failed");

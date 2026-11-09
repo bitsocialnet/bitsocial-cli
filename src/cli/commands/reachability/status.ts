@@ -48,11 +48,16 @@ export default class Status extends Command {
             // Without WSS, setup leaves kubo without this listener on purpose, so its absence is no problem.
             ...(config && config.serveWss !== false ? { wsPort: config.wsPort } : {})
         });
-        // A handshake with each WSS address kubo announces, setup's own included. A disabled node's Caddy is off on purpose, so it is not tried.
+        // A handshake with each WSS address kubo announces, setup's own included. A disabled node's Caddy is off on purpose,
+        // so its addresses are skipped, but any other stays: disable restores AutoTLS, which may announce one of its own.
         const wssDisabled = status.configured && !status.enabled;
-        const wssAddresses = wssDisabled
-            ? []
-            : await verifyUnmanagedAddresses({ running: facts.kuboRunningAnnounce, config: facts.kuboConfigAnnounce, ...(override ? { treatAsPublic: override.split(",") } : {}) });
+        const setupAddresses = wssDisabled ? (config?.announce ?? []) : [];
+        const notSetups = (addresses: string[] | undefined) => addresses?.filter((address) => !setupAddresses.some((own) => address === own || address.startsWith(`${own}/p2p/`)));
+        const wssAddresses = await verifyUnmanagedAddresses({
+            running: notSetups(facts.kuboRunningAnnounce),
+            config: notSetups(facts.kuboConfigAnnounce),
+            ...(override ? { treatAsPublic: override.split(",") } : {})
+        });
         // Only a node setup does not manage reports these: on one it does, kubo-announce and the daemon's own checks cover them.
         const unmanagedAddresses = status.configured ? [] : wssAddresses;
         const evidence = autonatEvidence(facts.kuboAutonat);
