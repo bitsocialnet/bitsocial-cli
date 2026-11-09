@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.129 (2026-11-09)</small>
+
+* fix(reachability): flag no public address announced, count WebTransport for browsers ([c4d5e78](https://github.com/bitsocialnet/bitsocial-cli/commit/c4d5e78))
+* fix(reachability): weigh AutoNAT in the daemon's no-browser-address warning ([bb23d33](https://github.com/bitsocialnet/bitsocial-cli/commit/bb23d33))
+
 ## <small>0.19.128 (2026-11-09)</small>
 
 * ci: cache the kubo binary download between runs ([83b37d9](https://github.com/bitsocialnet/bitsocial-cli/commit/83b37d9))
