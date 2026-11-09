@@ -80,6 +80,22 @@ export function publicIpsFromMultiaddrs(addresses: string[], ownAnnounce: string
     return [...ips];
 }
 
+// Whether others can dial this announced address at all: a public IP, a DNS name (not resolved, so AutoTLS
+// counts), or a relay. treatAsPublic is the test hook that lets loopback stand in for a public address.
+export function isPublicMultiaddr(address: string, treatAsPublic: string[] = []): boolean {
+    try {
+        const components = multiaddr(address).getComponents();
+        if (components.some((component) => component.name === "p2p-circuit")) return true;
+        const first = components[0];
+        if (!first) return false;
+        if (["dns", "dns4", "dns6", "dnsaddr"].includes(first.name)) return true;
+        if ((first.name === "ip4" || first.name === "ip6") && first.value !== undefined) return isPublicIp(first.value) || treatAsPublic.includes(first.value);
+        return false;
+    } catch {
+        return false;
+    }
+}
+
 export async function detectContainer(readFile: (path: string) => Promise<string> = (path) => fs.readFile(path, "utf-8")): Promise<boolean> {
     if (process.platform !== "linux") return false;
     try {

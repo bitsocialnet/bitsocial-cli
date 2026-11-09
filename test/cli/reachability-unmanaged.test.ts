@@ -113,6 +113,42 @@ describe("reachability status on a node that never ran setup", () => {
         });
     });
 
+    // Issue #238: kubo's WebTransport on UDP 4001 reaches browsers without any WSS address.
+    it("does not say browsers cannot reach a node AutoNAT reached on its WebTransport port", { timeout: 60_000 }, async () => {
+        const webTransport = "/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA";
+        const autonat = { reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1", webTransport], unreachable: [], unknown: [] };
+        await withKubo({ announced: ["/ip4/93.184.216.34/udp/4001/quic-v1", webTransport], autonat }, async (url) => {
+            const human = await run(["--pkcOptions.dataPath", randomDirectory()], url);
+            expect(human.stdout).not.toContain(CANNOT_REACH);
+            expect(human.stdout).toContain("browsers that support WebTransport should be able to connect");
+
+            const { checks } = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
+            expect(checks.find((check: { id: string }) => check.id === "browser-address")).toMatchObject({ status: "warn" });
+        });
+    });
+
+    // Issue #231: a VM on QEMU user-mode networking announces only addresses nobody else can dial.
+    it("fails public-address-announced when kubo announces only loopback and private addresses", { timeout: 60_000 }, async () => {
+        await withKubo(
+            { announced: ["/ip4/10.0.2.15/tcp/4001", "/ip6/fec0::5054:ff:fe12:3456/udp/4001/quic-v1", "/ip6/::1/tcp/4001"] },
+            async (url) => {
+                const human = await run(["--pkcOptions.dataPath", randomDirectory()], url);
+                expect(human.stdout).toMatch(/\[problem\] This node announces no public address/);
+                expect(human.stdout).toContain("bridged networking");
+
+                const { checks } = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
+                expect(checks.find((check: { id: string }) => check.id === "public-address-announced")).toMatchObject({ status: "fail" });
+            }
+        );
+    });
+
+    it("passes public-address-announced when kubo announces a public address", { timeout: 60_000 }, async () => {
+        await withKubo({ announced: ["/ip4/10.0.2.15/tcp/4001", "/ip4/93.184.216.34/tcp/4001"] }, async (url) => {
+            const { checks } = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
+            expect(checks.find((check: { id: string }) => check.id === "public-address-announced")).toMatchObject({ status: "ok" });
+        });
+    });
+
     it("leaves a node setup manages alone", { timeout: 60_000 }, async () => {
         const dataPath = randomDirectory();
         await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "ip", wsPort: 4002, announce: [], publicIps: ["203.0.113.7"], staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019 });

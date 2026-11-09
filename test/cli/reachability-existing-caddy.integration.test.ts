@@ -254,8 +254,15 @@ describe("a browser address set up by hand, without setup", { timeout: 300_000 }
         await killChildProcess(operator);
         const { text, json } = await status();
         expect(json.unmanagedAddresses[0]).toMatchObject({ address: announce, status: "failed" });
-        expect(text).toContain("Browsers cannot reach this node");
         expect(text).toContain(announce);
+        // On a host with a global IPv6, real kubo announces WebTransport there, and AutoNAT has not tested it yet
+        // this soon after start, so status says that instead of claiming browsers cannot connect (#238).
+        const browserCheck = json.checks.find((check: { id: string }) => check.id === "browser-address");
+        if (/AutoNAT/.test(browserCheck.detail)) expect(browserCheck.status).toBe("warn");
+        else {
+            expect(browserCheck.status).toBe("fail");
+            expect(text).toContain("Browsers cannot reach this node");
+        }
     });
 });
 

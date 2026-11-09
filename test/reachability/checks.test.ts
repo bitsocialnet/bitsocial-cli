@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindPermission, evaluateChecks, parseFirewalldState, parseUfwStatus, probeUdpPort, type BindPermissionInput, type CheckFacts } from "../../src/reachability/checks.js";
+import { bindPermission, evaluateChecks, parseFirewalldState, parseUfwStatus, probeUdpPort, publicAddressAnnouncedCheck, type BindPermissionInput, type CheckFacts } from "../../src/reachability/checks.js";
 import dgram from "dgram";
 
 const CAP_NET_BIND = 1n << 10n;
@@ -83,6 +83,9 @@ describe("evaluateChecks on a node with a verified address it does not manage", 
         const udp = check(evaluateChecks(facts({ ...heldByProxy, verifiedWss: [wss], kuboAutonat: autonat({ reachable: ["/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA"] }) })), "udp-443")!;
         expect(udp.status).toBe("ok");
         expect(udp.detail).toContain("UDP 4001");
+        // go-libp2p 0.47+ marks the WebTransport address reachable from QUIC on its port, without a WebTransport dial (#238).
+        expect(udp.detail).toContain("AutoNAT reached kubo over QUIC on UDP 4001");
+        expect(udp.detail).toContain("should be able to use it unless their network blocks UDP");
     });
 
     it("does not count plain QUIC as WebTransport on the fallback port", () => {
@@ -264,6 +267,64 @@ describe("evaluateChecks", () => {
     it("warns about a certificate near expiry", () => {
         const certificates = [{ issuer: "x", names: ["93.184.216.34"], notAfter: "x", hoursLeft: 5 }];
         expect(check(evaluateChecks(facts({ enabled: true, certificates })), "certificate")!.status).toBe("warn");
+    });
+});
+
+// Issue #231: a node announcing only loopback and private addresses seeds nothing for anyone.
+describe("publicAddressAnnouncedCheck", () => {
+    const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+    const qemuVm = [
+        "/ip4/127.0.0.1/tcp/4001",
+        "/ip6/::1/tcp/4001",
+        "/ip4/10.0.2.15/udp/4001/quic-v1",
+        "/ip6/fec0::5054:ff:fe12:3456/udp/4001/quic-v1"
+    ].map((address) => `${address}/p2p/${peerId}`);
+
+    it("fails when kubo announces only loopback and private addresses, naming them and the fix", () => {
+        const check = publicAddressAnnouncedCheck({ running: qemuVm, inContainer: false });
+        expect(check).toMatchObject({ id: "public-address-announced", status: "fail" });
+        expect(check.detail).toContain(
+            "announces no public address, so other nodes and browsers cannot reach it and it seeds nothing for them"
+        );
+        expect(check.detail).toContain("/ip6/fec0::5054:ff:fe12:3456/udp/4001/quic-v1");
+        expect(check.detail).not.toContain(peerId);
+        expect(check.fix).toMatch(/UPnP/);
+        expect(check.fix).toMatch(/bridged networking/);
+        expect(check.fix).toMatch(/bitsocial reachability setup/);
+        expect(check.fix).not.toMatch(/Docker/);
+    });
+
+    it("fails when kubo announces nothing at all", () => {
+        expect(publicAddressAnnouncedCheck({ running: [], inContainer: false })).toMatchObject({
+            status: "fail",
+            detail: expect.stringContaining("announces no address at all")
+        });
+    });
+
+    it("adds what to do in Docker inside a container", () => {
+        expect(publicAddressAnnouncedCheck({ running: qemuVm, inContainer: true }).fix).toMatch(
+            /--network host or publish 4001\/udp and 4001\/tcp/
+        );
+    });
+
+    it.each([
+        ["a public IPv4", "/ip4/93.184.216.34/udp/4001/quic-v1"],
+        ["a global IPv6", "/ip6/2606:4700::1/tcp/4001"],
+        ["an AutoTLS name", "/dns4/93-184-216-34.k51.libp2p.direct/tcp/4001/tls/ws"],
+        ["a relay", `/ip4/93.184.216.34/tcp/4001/p2p/${peerId}/p2p-circuit`]
+    ])("passes with %s among them", (_name, address) => {
+        const check = publicAddressAnnouncedCheck({ running: [...qemuVm, `${address}/p2p/${peerId}`], inContainer: false });
+        expect(check.status).toBe("ok");
+        expect(check.detail).toContain(address);
+    });
+
+    it("is unknown while kubo is down", () =>
+        expect(publicAddressAnnouncedCheck({ running: undefined, inContainer: false }).status).toBe("unknown"));
+
+    it("counts what the test hook treats as public", () => {
+        expect(
+            publicAddressAnnouncedCheck({ running: ["/ip4/127.0.0.1/tcp/4001"], inContainer: false, treatAsPublic: ["127.0.0.1"] }).status
+        ).toBe("ok");
     });
 });
 
