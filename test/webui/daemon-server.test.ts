@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import http from "http";
 import net from "net";
 import { directory as randomDirectory } from "tempy";
 import { startDaemonServer } from "../../dist/webui/daemon-server.js";
@@ -147,5 +148,51 @@ describe("startDaemonServer → PKCWsServer plumbing", () => {
         } finally {
             await daemonServer.destroy();
         }
+    });
+});
+
+// pkc-js 0.0.136 rejects RPC connections from a page whose Origin is not a loopback host unless the
+// URL carries the auth key. The local /<webui> route serves its page without the key whenever the
+// socket is local, so a browser on the daemon host that opened http://<LAN IP>:9138/seedit got a
+// page whose RPC connection pkc-js refuses. That route must send such a request to localhost instead.
+describe("local webui route Host handling", () => {
+    let boundPort: number;
+    let daemonServer: Awaited<ReturnType<typeof startDaemonServer>>;
+
+    beforeEach(async () => {
+        pkcWsServerFake.mockReset();
+        pkcWsServerFake.mockImplementation(async (options: { server: import("http").Server }) => {
+            boundPort = (options.server.address() as import("net").AddressInfo).port;
+            return { pkc: { communities: [] }, destroy: vi.fn(async () => {}) };
+        });
+        daemonServer = await startDaemonServer(new URL("ws://127.0.0.1:0"), new URL("http://127.0.0.1:6754"), {
+            dataPath: randomDirectory()
+        });
+    });
+
+    afterEach(async () => {
+        await daemonServer.destroy();
+    });
+
+    // "/seedit/" because express.static first 301s "/seedit" to it. fetch() does not let us set Host, so send a raw request over loopback with a chosen Host header
+    const getWithHost = (urlPath: string, host: string) =>
+        new Promise<{ status: number; location?: string }>((resolve, reject) => {
+            const req = http.request({ host: "127.0.0.1", port: boundPort, path: urlPath, headers: { host } }, (res) => {
+                res.resume();
+                resolve({ status: res.statusCode!, location: res.headers.location });
+            });
+            req.on("error", reject);
+            req.end();
+        });
+
+    it.each(["192.168.1.5", "my-host.lan", "[fe80::1]"])("redirects a local request with Host %s to localhost", async (hostname) => {
+        const { status, location } = await getWithHost("/seedit/", `${hostname}:${boundPort}`);
+        expect(status).toBe(302);
+        expect(location).toBe(`http://localhost:${boundPort}/seedit`);
+    });
+
+    it.each(["localhost", "127.0.0.1", "[::1]", "app.localhost"])("serves the page for a local request with Host %s", async (hostname) => {
+        const { status } = await getWithHost("/seedit/", `${hostname}:${boundPort}`);
+        expect(status).toBe(200);
     });
 });
