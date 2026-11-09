@@ -4,7 +4,7 @@ import net from "net";
 import path from "path";
 import { caddyBinaryPath, caddyfilePath, caddyfileServesDomain, ensureCaddyBinary, generateCaddyfile, isOurCaddyRunning, reloadCaddy, startCaddy, stopCaddy, waitForCertificates } from "./caddy.js";
 import { NO_PUBLIC_ADDRESS_MESSAGE, noPublicAddressFix } from "./checks.js";
-import { detectContainer, isPublicMultiaddr, kuboIdentity, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
+import { detectContainer, isPublicMultiaddr, kuboAutonat, kuboIdentity, type KuboAutonat, lanIpv4FromInterfaces, publicIpsFromInterfaces, publicIpsFromMultiaddrs, shutdownKubo } from "./discovery.js";
 import { bindDeniedGuidance, isBindDenied } from "./guidance.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
 import { applyKuboConfig, modeChangedMessage, modeForAnnounced, resolveDomainRecords, type ResolvedDomain } from "./setup.js";
@@ -22,7 +22,19 @@ import {
     type ReachabilityRuntimeStatus
 } from "./state.js";
 import { setTimeout as delay } from "timers/promises";
-import { handshakeFailedMessage, handshakeSucceededMessage, isBrowserAddress, unconfirmedMessage, unverifiedMessage, verifyUnmanagedAddresses, type DialAddress } from "./unmanaged.js";
+import {
+    autonatEvidence,
+    desktopOnlyMessage,
+    handshakeFailedMessage,
+    handshakeSucceededMessage,
+    isBrowserAddress,
+    unconfirmedMessage,
+    unverifiedMessage,
+    verifyUnmanagedAddresses,
+    webTransportReachedMessage,
+    webTransportUntestedMessage,
+    type DialAddress
+} from "./unmanaged.js";
 
 export const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 export const LEASE_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
@@ -133,6 +145,8 @@ export interface RuntimeDependencies {
     dialAddress?: DialAddress;
     localIps?: string[];
     browserAddressRetryMs?: number;
+    // AutoNAT's results, so the not-configured warning can tell WebTransport and desktop peers apart from nothing.
+    autonat?: () => Promise<KuboAutonat | undefined>;
     // What running kubo announces, for the start-up check that something public is among it; undefined while kubo is down.
     announcedAddresses?: () => Promise<string[] | undefined>;
     // IPs counted as public, so tests can stand loopback in for a public address.
@@ -250,7 +264,7 @@ export class ReachabilityRuntime {
             // kubo shows no AutoTLS address until the certificate arrives, and never does behind NAT, so this has to end in a warning.
             const waitMinutes = autoTlsWaitMinutes(kuboConfig);
             if (waitMinutes === undefined) {
-                this.reportNoWorkingAddress(NOT_CONFIGURED_MESSAGE);
+                this.reportNoWorkingAddress(await this.notConfiguredMessage());
                 return;
             }
             this.deps.log(`kubo has no browser address yet. AutoTLS may still be getting a certificate, so this will check again for up to ${waitMinutes} minutes.`);
@@ -269,7 +283,7 @@ export class ReachabilityRuntime {
             (async () => {
                 const { identity, inConfig, hasBrowserAddress } = await this.browserAddressSources();
                 if (this.stopping || (await this.isDecided())) return;
-                if (!hasBrowserAddress) this.reportNoWorkingAddress(NOT_CONFIGURED_MESSAGE);
+                if (!hasBrowserAddress) this.reportNoWorkingAddress(await this.notConfiguredMessage());
                 else await this.verifyBrowserAddresses(identity, inConfig, 1);
             })()
         );
@@ -283,6 +297,17 @@ export class ReachabilityRuntime {
                 if (this.browserAddressCheck === tracked) this.browserAddressCheck = undefined;
             });
         this.browserAddressCheck = tracked;
+    }
+
+    // No WSS address works, but that need not mean no browser can connect: AutoNAT may have reached kubo's WebTransport
+    // port, or not tested it yet so soon after start (the hourly recheck then has an answer), and desktop peers may reach it.
+    private async notConfiguredMessage(): Promise<string> {
+        const evidence = autonatEvidence(await (this.deps.autonat ?? (() => kuboAutonat(this.deps.kuboRpcUrl)))());
+        if (evidence.webTransportReached.length > 0)
+            return `${webTransportReachedMessage(evidence.webTransportReached)}. To add WSS for the rest, run: bitsocial reachability setup`;
+        if (evidence.webTransportUntested.length > 0) return `${webTransportUntestedMessage(evidence.webTransportUntested)}. To add WSS, run: bitsocial reachability setup`;
+        if (evidence.reached.length > 0) return `${desktopOnlyMessage(evidence.reached)}. To fix that, run: bitsocial reachability setup`;
+        return NOT_CONFIGURED_MESSAGE;
     }
 
     private reportNoWorkingAddress(message: string) {
@@ -318,7 +343,7 @@ export class ReachabilityRuntime {
                     ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : []),
                     ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : [])
                 ];
-                this.reportNoWorkingAddress([...(unconfirmed.length > 0 ? [] : [NOT_CONFIGURED_MESSAGE]), ...reasons].join(". "));
+                this.reportNoWorkingAddress([...(unconfirmed.length > 0 ? [] : [await this.notConfiguredMessage()]), ...reasons].join(". "));
                 return;
             }
             await delay(this.deps.browserAddressRetryMs ?? BROWSER_ADDRESS_RETRY_MS, undefined, { signal, ref: false }).catch(() => {});

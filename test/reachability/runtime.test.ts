@@ -149,6 +149,8 @@ describe("ReachabilityRuntime", () => {
             kuboRpcUrl: new URL("http://127.0.0.1:1/api/v0"),
             // Silent kubo, so the start-up public-address check stays out of tests about everything else.
             announcedAddresses: async () => undefined,
+            // No AutoNAT answer, so the not-configured warning stays the plain one unless a test says otherwise.
+            autonat: async () => undefined,
             log: (message) => events.push(`log: ${message}`),
             warn: (message) => events.push(`warn: ${message}`),
             now: () => clock,
@@ -358,6 +360,45 @@ describe("ReachabilityRuntime", () => {
             await runtime.start();
             await runtime.stop();
             expect(dialAddress).not.toHaveBeenCalled();
+        });
+    });
+
+    // Issue #238: the daemon's not-configured warning weighs AutoNAT like status does.
+    describe("the not-configured warning and AutoNAT", () => {
+        const webTransport = "/ip4/93.184.216.34/udp/4001/quic-v1/webtransport/certhash/uEiA";
+        const quic = "/ip4/93.184.216.34/udp/4001/quic-v1";
+        const autonat = (fields: Partial<{ reachable: string[]; unreachable: string[]; unknown: string[] }>) => async () => ({ reachable: [], unreachable: [], unknown: [], ...fields });
+        // AutoTLS off, so the warning comes straight away instead of after the certificate wait.
+        const warnOnStart = async (overrides: Partial<RuntimeDependencies>) => {
+            const context = await setup(undefined, { browserAddressRetryMs: 1, kuboIdentity: async () => ({ peerId: "p", addresses: [] }), ...overrides });
+            await fs.writeFile(path.join(context.kuboRepoPath, "config"), JSON.stringify({ Addresses: { Swarm: [], AppendAnnounce: [] }, AutoTLS: { Enabled: false } }));
+            await context.runtime.start();
+            await context.runtime.stop();
+            return context.events.filter((event) => event.startsWith("warn:"));
+        };
+
+        it("says browsers that support WebTransport should be able to connect when AutoNAT reached it", async () => {
+            const [warning, ...rest] = await warnOnStart({ autonat: autonat({ reachable: [quic, webTransport] }) });
+            expect(rest).toEqual([]);
+            expect(warning).not.toContain("Browsers cannot reach this node");
+            expect(warning).toContain("AutoNAT reached kubo over QUIC on UDP 4001, so browsers that support WebTransport should be able to connect");
+            expect(warning).toContain("bitsocial reachability setup");
+        });
+
+        it("says WebTransport is not tested yet instead of claiming browsers cannot connect", async () => {
+            const [warning] = await warnOnStart({ autonat: autonat({ unknown: [webTransport] }) });
+            expect(warning).not.toContain("Browsers cannot reach this node");
+            expect(warning).toContain("not tested");
+        });
+
+        it("tells a node desktop peers reach that it seeds for them", async () => {
+            const [warning] = await warnOnStart({ autonat: autonat({ reachable: [quic], unreachable: [webTransport] }) });
+            expect(warning).toContain("Desktop nodes can reach this node");
+            expect(warning).toContain("browsers cannot connect directly");
+        });
+
+        it("keeps the plain warning when AutoNAT reached nothing", async () => {
+            expect(await warnOnStart({ autonat: autonat({ unreachable: [quic, webTransport] }) })).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
         });
     });
 

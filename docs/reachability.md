@@ -81,11 +81,11 @@ When no WSS address works (none exists, or every handshake is `failed`), `status
 | Reached other addresses only | Desktop nodes can reach this node and it seeds for them, but browsers cannot connect directly | `warn` with failed WSS addresses, otherwise none |
 | Reached nothing, or no answer | Browsers cannot reach this node | `fail` with failed WSS addresses, otherwise none |
 
-Messages name no browsers, since WebTransport support changes over time.
+Messages name no browsers, since WebTransport support changes over time. The daemon's warning that no browser address works (below) weighs AutoNAT the same way.
 
 The daemon does the same check in the background when it starts. With an address to check, it tries for about 2 minutes, because kubo may still be starting, and then either logs the working address or warns once with the addresses that failed or could not be confirmed.
 
-With no such address, the daemon warns straight away only if `AutoTLS.Enabled` is `false` or kubo's config cannot be read. Otherwise it logs that AutoTLS may still be getting a certificate and keeps checking, because kubo shows no AutoTLS address until then: for 20 minutes if `AutoTLS.Enabled` is `true`, as on repos this CLI creates, and 80 minutes if it is unset, since kubo then adds an hour's delay. If nothing appears, it warns. Behind NAT without inbound access, the certificate never comes, so this warning is correct there, just later.
+With no such address, the daemon warns straight away only if `AutoTLS.Enabled` is `false` or kubo's config cannot be read. Otherwise it logs that AutoTLS may still be getting a certificate and keeps checking, because kubo shows no AutoTLS address until then: for 20 minutes if `AutoTLS.Enabled` is `true`, as on repos this CLI creates, and 80 minutes if it is unset, since kubo then adds an hour's delay. If nothing appears, it warns. Right after kubo starts, AutoNAT has usually not tested the WebTransport address yet, so the start-up warning may say just that; the hourly recheck below has AutoNAT's answer. Behind NAT without inbound access, the certificate never comes, so this warning is correct there, just later.
 
 While nobody has decided, by running `setup` or declining with `disable`, the daemon repeats this check every hour. It is a single attempt without the AutoTLS wait, and is skipped while the startup check is still running. It warns each hour no browser address works, but logs a working one only when that changes, so a node that works stays quiet. The check stops as soon as a config or the decline appears, including during the startup AutoTLS wait. `status` reports the moment it runs and does not wait, so it can say browsers cannot reach a node whose certificate is still on its way.
 
