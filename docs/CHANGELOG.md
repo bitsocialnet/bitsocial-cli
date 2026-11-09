@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.127 (2026-11-09)</small>
+
+* fix(webui): redirect local web UI requests on a non-loopback Host to localhost ([fb2e043](https://github.com/bitsocialnet/bitsocial-cli/commit/fb2e043))
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.136 ([e69a164](https://github.com/bitsocialnet/bitsocial-cli/commit/e69a164))
+  * pkc-js [0.0.136](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.136) (2026-11-08)
+    * fix(rpc): require the auth key for web pages connecting over loopback ([5f7600c](https://github.com/pkcprotocol/pkc-js/commit/5f7600cef1a1b5ecbdf29603b9217998f3047b65))
+  * pkc-js [0.0.135](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.135) (2026-11-03)
+    * fix(rpc): reconnect after a clean server shutdown and report connection loss ([#480](https://github.com/pkcprotocol/pkc-js/issues/480)) ([d1d97f6](https://github.com/pkcprotocol/pkc-js/commit/d1d97f6c56a3d1ae82db5fb0a00c2608e50758a5)), closes [#479](https://github.com/pkcprotocol/pkc-js/issues/479) [#479](https://github.com/pkcprotocol/pkc-js/issues/479) [#482](https://github.com/pkcprotocol/pkc-js/issues/482)
+
 ## <small>0.19.126 (2026-11-08)</small>
 
 * fix(reachability): address review findings on mode tracking ([fa377fd](https://github.com/bitsocialnet/bitsocial-cli/commit/fa377fd))
