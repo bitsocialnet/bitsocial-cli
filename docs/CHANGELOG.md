@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.128 (2026-11-09)</small>
+
+* ci: cache the kubo binary download between runs ([83b37d9](https://github.com/bitsocialnet/bitsocial-cli/commit/83b37d9))
+
 ## <small>0.19.127 (2026-11-09)</small>
 
 * fix(webui): redirect local web UI requests on a non-loopback Host to localhost ([fb2e043](https://github.com/bitsocialnet/bitsocial-cli/commit/fb2e043))
