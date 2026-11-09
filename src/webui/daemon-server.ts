@@ -28,6 +28,18 @@ async function _generateModifiedIndexHtmlWithRpcSettings(webuiPath: string, webu
     return modifiedIndexHtmlContent;
 }
 
+// Same loopback hostnames pkc-js's RPC server trusts as a page Origin without the auth key
+function _isLoopbackHostHeader(host: string | undefined): boolean {
+    if (!host) return false;
+    let hostname: string;
+    try {
+        hostname = new URL(`http://${host}`).hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+    return hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
+}
+
 async function _generateRpcAuthKeyIfNotExisting(pkcDataPath: string) {
     const pkcRpcAuthKeyPath = path.join(pkcDataPath, "auth-key");
     const envAuthKey = process.env["PKC_RPC_AUTH_KEY"];
@@ -129,7 +141,11 @@ export async function startDaemonServer(
                 req.socket.remoteAddress
             );
             if (!isLocal) res.status(403).send("This endpoint does not exist for remote connections");
-            else {
+            else if (!_isLoopbackHostHeader(req.headers.host)) {
+                // This page connects to RPC without the auth key, and pkc-js only allows that from a
+                // loopback Origin. Opened as http://<LAN IP or hostname>:port/<webui>, it could not connect.
+                res.redirect(`http://localhost:${req.socket.localPort}/${webuiName}`);
+            } else {
                 res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
                 res.set("Expires", "-1");
                 res.set("Pragma", "no-cache");
