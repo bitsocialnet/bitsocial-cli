@@ -51,7 +51,7 @@ Most operators get every release as soon as it is published. They learn about br
 Mark a breaking change on the commit that makes it:
 
 - Add `!` after the type or scope, for example `feat(daemon)!: move the RPC endpoint`.
-- Add a `BREAKING CHANGE: <what changed and what operators must do>` footer. It appears under "BREAKING CHANGES" in the release notes, so write it as migration guidance.
+- Add a `BREAKING CHANGE: <what changed and what operators must do>` footer. Operators read it in the release notes, so write it as migration guidance.
 
 The next release becomes a minor (`0.20.0`). Surfaces to check when deciding whether a change breaks operators:
 

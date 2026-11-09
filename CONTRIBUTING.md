@@ -28,7 +28,7 @@ The [issue tracker](https://github.com/bitsocialnet/bitsocial-cli/issues) is the
 
 - Branch from `master` (fork the repository if you do not have write access) and keep each pull request to one topic.
 - Add a test with every feature or bug fix, and make sure `npm run build && npm run build:test` and `npm run test:cli` pass.
-- Use [Conventional Commits](https://www.conventionalcommits.org/) whose type matches the user-visible effect. PRs are merged with merge commits, so every commit on your branch enters the release, but the release notes only list `feat`, `fix`, `perf`, `revert` and `build` commits plus breaking-change notes. A user-visible change typed as `refactor`, `chore`, `test` or `docs` does not appear in them.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) whose type matches the user-visible effect. PRs are merged with merge commits, so every commit message on your branch appears in the release notes, whatever its type. Give review-fix commits a meaningful message or squash them into the commit they fix.
 - Mark breaking changes with `!` and a `BREAKING CHANGE:` footer that tells operators what to do. That makes the next release a minor. Avoid accidental markers in commit bodies and PR titles; [docs/versioning.md](docs/versioning.md#what-counts-as-a-breaking-change-marker) lists what counts.
 - When a change alters behavior a doc describes (commands, flags, paths, endpoints, output), update that doc in the same PR. When you add a topic doc, add a row to [docs/README.md](docs/README.md) and to the Docs Lookup table in AGENTS.md if it maps to source paths.
 - Put `Closes #N` in the PR body, not in commit messages.
