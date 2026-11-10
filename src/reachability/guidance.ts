@@ -71,7 +71,7 @@ const funnelHostSteps = (wsPort: number) => [
     "  1. Install Tailscale (https://tailscale.com/download) and sign in.",
     "  2. Rename this machine in Tailscale's admin console unless its name may be public: the name is published for good.",
     `  3. Run: tailscale funnel --bg ${wsPort}     (the first run prints a link to approve Funnel)`,
-    "  4. A minute later, once the name resolves, run: bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws"
+    "  4. Once the name resolves in public DNS, which can take up to 10 minutes, run: bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws"
 ];
 
 // For a node the internet cannot reach on TCP 443. Tailscale's relays take the connection and tailscaled on this
@@ -85,7 +85,7 @@ export const tailscaleFunnelGuidance = (wsPort: number, inContainer = false) =>
             ? [
                   "  1. Pick a machine name that may be public: the name is published for good.",
                   `  2. Add the Tailscale sidecar from docker-compose.example.yml, forwarding to 127.0.0.1:${wsPort}, and start it.`,
-                  "  3. A minute later, once the name resolves, run in this container: bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws"
+                  "  3. Once the name resolves in public DNS, which can take up to 10 minutes, run in this container: bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws"
               ]
             : funnelHostSteps(wsPort)),
         `Walkthrough, Docker, and what Tailscale can see: ${TAILSCALE_FUNNEL_DOC}`

@@ -272,7 +272,7 @@ describe("evaluateChecks", () => {
 
 // Issue #231: a node announcing only loopback and private addresses seeds nothing for anyone.
 describe("noWssAddressCheck (#226)", () => {
-    const stuck = { announce: [], wsPort: 4002, tcp443: "free" as const, otherWssWorks: false, droppedName: false };
+    const stuck = { announce: [], wsPort: 4002, tcp443: "free" as const, hasPublicAddress: false, otherWssWorks: false, droppedName: false };
 
     it("points a node setup left without WSS at Tailscale Funnel, with its ws port", () => {
         expect(noWssAddressCheck(stuck)).toMatchObject({ id: "browser-address", status: "warn", fix: expect.stringMatching(/Tailscale Funnel.*127\.0\.0\.1:4002.*docs\/tailscale-funnel\.md/) });
@@ -280,10 +280,19 @@ describe("noWssAddressCheck (#226)", () => {
 
     it.each([
         ["announces a WSS address", { announce: ["/ip4/93.184.216.34/tcp/443/tls/ws"] }],
-        ["has another program on TCP 443, which setup's reverse proxy guidance covers", { tcp443: "busy" as const }],
+        ["has a public address and another program on TCP 443, which setup's reverse proxy guidance covers", { tcp443: "busy" as const, hasPublicAddress: true }],
         ["has a working WSS address setup does not manage", { otherWssWorks: true }],
         ["had a working name dropped, whose DNS is what needs fixing", { droppedName: true }]
     ])("says nothing on a node that %s", (_name, change) => expect(noWssAddressCheck({ ...stuck, ...change })).toBeUndefined());
+
+    // setup prints the Funnel steps here too: with no public address, the program on TCP 443 cannot be reached either.
+    it("still points at Funnel when another program holds TCP 443 but the node has no public address", () => {
+        expect(noWssAddressCheck({ ...stuck, tcp443: "busy" })).toMatchObject({ id: "browser-address", status: "warn", fix: expect.stringContaining("Tailscale Funnel") });
+    });
+
+    it("points at Funnel on a node with a public address and a free TCP 443, where Let's Encrypt could not reach it", () => {
+        expect(noWssAddressCheck({ ...stuck, hasPublicAddress: true })).toMatchObject({ id: "browser-address", status: "warn" });
+    });
 });
 
 describe("publicAddressAnnouncedCheck", () => {

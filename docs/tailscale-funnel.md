@@ -17,12 +17,12 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
 | A public address was found, but Let's Encrypt could not reach it on TCP 80 or 443 | Yes |
 | Another program holds TCP 443 on a reachable node | No, the reverse proxy guidance applies |
 
-`status` shows the same pointer in the `browser-address` check, in its `fix` field in `--json`, on a node where `setup` has run, no WSS address is announced, TCP 443 is not held by another program, no WSS address that `setup` does not manage works, and no name is waiting for its DNS to be fixed.
+`status` shows the same pointer in the `browser-address` check, in its `fix` field in `--json`, on a node where `setup` has run, no WSS address is announced, no WSS address that `setup` does not manage works, and no name is waiting for its DNS to be fixed. It leaves the pointer out when another program holds TCP 443 and the machine has a public address on one of its interfaces, because the reverse proxy guidance applies there. `status` does not ask the router as `setup` does, so on a node whose only public address is the router's, with another program on TCP 443, `status` shows the pointer while `setup` prints the reverse proxy guidance.
 
 ## Steps
 
 1. **Run `bitsocial reachability setup`** while the daemon runs. It prints the port to forward, e.g. `tailscale funnel --bg 4002`. The port is kubo's loopback WebSocket port, stored as `wsPort` in `<dataPath>/reachability/config.json`.
-2. **Install Tailscale** from <https://tailscale.com/download> and sign in. On Linux that is `sudo tailscale up`. On Windows and macOS, sign in through the app.
+2. **Install Tailscale** from <https://tailscale.com/download> and sign in. On Linux that is `sudo tailscale up`. On Windows and macOS, sign in through the app. Funnel needs MagicDNS enabled for the tailnet. It is on by default for new tailnets. Check it on the [DNS page](https://login.tailscale.com/admin/dns).
 3. **Rename the machine** in the [admin console](https://login.tailscale.com/admin/machines) unless its name may be public. The name defaults to the OS hostname, such as `johns-laptop`. It becomes part of the address every peer sees, and it is written to public Certificate Transparency logs when the certificate is issued. That cannot be undone. Renaming the tailnet is on the [DNS page](https://login.tailscale.com/admin/dns).
 4. **Turn Funnel on:**
 
@@ -37,14 +37,14 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
    |-- proxy http://127.0.0.1:<wsPort>
    ```
 
-5. **Wait about a minute.** In testing, the name took a few seconds to appear in public DNS and the first requests failed while the certificate was issued.
+5. **Wait until the name resolves in public DNS.** Tailscale says this can take up to 10 minutes. Check with `nslookup <machine>.<tailnet>.ts.net 1.1.1.1`. In testing, the name appeared within seconds and the first requests then failed for about a minute while the certificate was issued.
 6. **Announce the address:**
 
    ```bash
    bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws
    ```
 
-   This adds kubo's loopback listener, restarts kubo, and completes a real libp2p handshake through the address before announcing it. It tries the handshake three times, 15 seconds apart. If all three fail, it puts kubo back as it was and exits `1`. Nothing is listening on `<wsPort>` before this step, so until then the Funnel name answers `502`.
+   This adds kubo's loopback listener, restarts kubo, and completes a real libp2p handshake through the address before announcing it. It tries the handshake three times, 15 seconds apart. If all three fail, it puts kubo back as it was and exits `1`, and you can run it again later. Nothing is listening on `<wsPort>` before this step, so until then the Funnel name answers `502`.
 7. **Test from another network.** `setup` prints a `curl` command. Run it from a phone hotspot or another machine and expect `101`. `curl` then appears to hang because the WebSocket stays open. The handshake in step 6 comes from the node's own machine, so it does not prove other networks can connect.
 
 `bitsocial reachability status` then shows `Mode: reverse-proxy`, the address under `Announced addresses`, and `Browsers: should be able to connect over WSS`.
@@ -69,14 +69,14 @@ Funnel also serves ports 8443 and 10000. Use `tailscale funnel --bg --https=8443
 
 Tailscale runs in a sidecar container, and the bitsocial container shares its network so the sidecar can reach kubo's `127.0.0.1:<wsPort>` listener. `docker-compose.example.yml` carries the sidecar, commented out. It is optional.
 
-1. **Create an auth key** on the [keys page](https://login.tailscale.com/admin/settings/keys). Leave it untagged, so the default Funnel policy covers the machine. Check that HTTPS certificates are enabled on the [DNS page](https://login.tailscale.com/admin/dns). If Funnel was never approved for the tailnet, run `tailscale funnel` once on any machine and open the link it prints.
+1. **Create an auth key** on the [keys page](https://login.tailscale.com/admin/settings/keys). Leave it untagged, so the default Funnel policy covers the machine. Check that MagicDNS and HTTPS certificates are enabled on the [DNS page](https://login.tailscale.com/admin/dns). Funnel needs both. If Funnel was never approved for the tailnet, run `tailscale funnel` once on any machine and open the link it prints.
 2. **Edit the compose file:**
    - Uncomment `network_mode: service:tailscale` on the `bitsocial` service, the `tailscale` service, the `configs` block and the `tailscale-state` volume.
    - Move the `ports:` list from the `bitsocial` service to the `tailscale` service. A service that shares another's network cannot publish ports itself.
    - Set `hostname:` to the machine name you want. It becomes public for good.
 3. **Put the key in `.env`** next to the compose file: `TS_AUTHKEY=tskey-auth-...`. The key is only used the first time. After that the sidecar's state lives in the `tailscale-state` volume.
 4. **Start it:** `docker compose up -d`. The `configs` block turns Funnel on and forwards it to `127.0.0.1:4002`, the port `setup` chooses in a fresh container. `docker compose exec bitsocial bitsocial reachability setup` prints the port if you want to check.
-5. **A minute later, announce the address:**
+5. **Once the name resolves in public DNS, announce the address.** This can take up to 10 minutes. Check with `nslookup <machine>.<tailnet>.ts.net 1.1.1.1`.
 
    ```bash
    docker compose exec bitsocial bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws
@@ -91,7 +91,7 @@ This was tested with an image built from source, Docker Compose 5.5.1 and `tails
 
 ## What you are trusting Tailscale with
 
-**What Tailscale can see about you:** the account you signed in with, the machine's name, OS and Tailscale version, its real public IP, and how much Funnel traffic it gets and when. Tailscale's client also uploads logs by default (`--no-logs-no-support` turns that off).
+**What Tailscale can see about you:** the account you signed in with, the machine's name, OS and Tailscale version, its real public IP, and how much Funnel traffic it gets and when. Tailscale's client also uploads logs by default. Turning that off depends on the platform: on Linux, pass `--no-logs-no-support` to `tailscaled` or set `TS_NO_LOGS_NO_SUPPORT=true`. On Windows, only the environment variable works. On macOS, the flag works only with the open source command-line `tailscaled`, not the apps. See [Tailscale's logging page](https://tailscale.com/kb/1011/log-mesh-traffic).
 
 **What Tailscale can see about peers who connect:** their IP address and port, when they connected, for how long, and how many bytes. It cannot see content. TLS ends on your machine, and the libp2p Noise encryption runs inside it.
 

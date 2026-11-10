@@ -69,6 +69,7 @@ export default class Status extends Command {
                   announce: config.announce,
                   wsPort: config.wsPort,
                   tcp443: facts.tcp443,
+                  hasPublicAddress: facts.publicIps.length > 0,
                   otherWssWorks: wssAddresses.some(({ status }) => status === "ok"),
                   droppedName: (config.droppedAnnounce ?? []).length > 0
               })

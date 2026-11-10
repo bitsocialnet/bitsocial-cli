@@ -207,11 +207,13 @@ function inboundCheck(facts: CheckFacts): ReachabilityCheck {
 }
 
 // A node setup ran on and left without WSS, because the internet could not reach it on TCP 443. With another program
-// on that port the node is reachable, and setup's reverse proxy guidance applies instead.
+// on that port and a public address, setup's reverse proxy guidance applies instead. Without a public address that
+// program cannot be reached either, and Funnel does not use this machine's TCP 443, so the pointer still applies.
 // Nor does it apply while a WSS address setup does not manage works, such as one from AutoTLS, or after a name
 // that worked here was dropped, where its DNS is what needs fixing.
-export function noWssAddressCheck(input: { announce: string[]; wsPort: number; tcp443: PortState | undefined; otherWssWorks: boolean; droppedName: boolean }): ReachabilityCheck | undefined {
-    if (input.announce.length > 0 || input.tcp443 === "busy" || input.otherWssWorks || input.droppedName) return undefined;
+export function noWssAddressCheck(input: { announce: string[]; wsPort: number; tcp443: PortState | undefined; hasPublicAddress: boolean; otherWssWorks: boolean; droppedName: boolean }): ReachabilityCheck | undefined {
+    const proxyGuidanceApplies = input.tcp443 === "busy" && input.hasPublicAddress;
+    if (input.announce.length > 0 || proxyGuidanceApplies || input.otherWssWorks || input.droppedName) return undefined;
     return { id: "browser-address", status: "warn", detail: "Setup could not give this node a WSS address, so browsers depend on WebTransport", fix: tailscaleFunnelFix(input.wsPort) };
 }
 
