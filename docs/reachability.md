@@ -210,7 +210,7 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 | `public-address-announced` | Running kubo announces no public address: no public IPv4, no global IPv6 (`fec0::/10` and other private ranges don't count), no `/dns*` name and no relay address. No other node or browser can dial it, so it seeds nothing for anyone. Typical of a VM on NAT networking (`10.0.2.15` plus `fec0::`). Runs on every node, `setup` or not. `unknown` while kubo is down. The daemon warns once at start-up in the same case |
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
 | `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage) |
-| `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, as the program is then serving it |
+| `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, on any node, `setup`'s own addresses included, as the program is then serving it |
 | `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn`. "Reached" proves inbound UDP, not a browser handshake (see [WebTransport and AutoNAT](#webtransport-and-autonat)) |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
 | `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |

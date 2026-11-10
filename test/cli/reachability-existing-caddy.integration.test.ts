@@ -141,6 +141,46 @@ describe("another Caddy already holds the HTTPS port, no domain given", { timeou
         expect(after.Swarm.AddrFilters).not.toContain("/ip4/127.0.0.0/ipcidr/8");
         expect(await adminAlive(operatorAdmin)).toBe(true);
     });
+
+    // Review on #243: the handshake through the operator's Caddy shows their server on the HTTPS port is no problem.
+    it("does not call the operator's Caddy on the HTTPS port a problem once kubo announces through it", async () => {
+        const announce = `/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws`;
+        // setup wrote the address into kubo's config; the daemon brings kubo back with it after a shutdown. This test's
+        // "public" IP is loopback, which kubo's NoAnnounce drops, as on the hand-made node below; a real public IP is not.
+        const configPath = path.join(dataPath, ".bitsocial-cli.ipfs", "config");
+        const config = await repoConfig();
+        const noAnnounceBefore = config.Addresses.NoAnnounce;
+        config.Addresses.NoAnnounce = (config.Addresses.NoAnnounce ?? []).filter((entry: string) => entry !== "/ip4/127.0.0.0/ipcidr/8");
+        await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+        expect(noAnnounceBefore, "kubo's NoAnnounce was not what blocked the address").toContain("/ip4/127.0.0.0/ipcidr/8");
+        const runningAnnounces = async () => {
+            const response = await fetch(`${daemon.kuboApiUrl}/id`, { method: "POST" }).catch(() => undefined);
+            return response?.ok ? ((await response.json()) as { Addresses: string[] | null }).Addresses ?? [] : undefined;
+        };
+        let loaded = false;
+        for (let attempt = 1; attempt <= 3 && !loaded; attempt++) {
+            await fetch(`${daemon.kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
+            await waitForCondition(async () => !(await runningAnnounces()), 15_000, 200);
+            loaded = await waitForCondition(async () => (await runningAnnounces())?.some((address) => address.startsWith(announce)) === true, 60_000, 500);
+        }
+        expect(loaded, "running kubo never announced setup's address").toBe(true);
+
+        let tcp443: { status?: string; detail?: string } | undefined;
+        let browsers: unknown;
+        const ok = await waitForCondition(
+            async () => {
+                const status = JSON.parse((await runCli(["reachability", "status", "--json", "--pkcOptions.dataPath", dataPath], env)).stdout);
+                tcp443 = status.checks.find((check: { id: string }) => check.id === "tcp-443");
+                browsers = status.connectivity.browsers;
+                return tcp443?.status === "ok";
+            },
+            60_000,
+            1000
+        );
+        expect(ok, JSON.stringify({ tcp443, browsers })).toBe(true);
+        // The same handshake is the browsers line's evidence.
+        expect(browsers).toMatchObject({ status: "ok" });
+    }, 240_000);
 });
 
 // Issue #222: everything setup would do, done by hand, and setup never run. The operator's Caddy holds the HTTPS port.

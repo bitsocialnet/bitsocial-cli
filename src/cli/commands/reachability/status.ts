@@ -52,7 +52,8 @@ export default class Status extends Command {
         // so its addresses are skipped, but any other stays: disable restores AutoTLS, which may announce one of its own.
         const wssDisabled = status.configured && !status.enabled;
         const servesWss = config !== undefined && config.serveWss !== false && config.announce.length > 0;
-        const setupWss = wssDisabled ? ("disabled" as const) : status.configured && servesWss ? ("enabled" as const) : undefined;
+        // A setup without WSS gets "run setup to add WSS" even while disabled, since enable would restore it without WSS.
+        const setupWss = status.configured && servesWss ? (wssDisabled ? ("disabled" as const) : ("enabled" as const)) : undefined;
         const setupAddresses = wssDisabled ? (config?.announce ?? []) : [];
         const notSetups = (addresses: string[] | undefined) => addresses?.filter((address) => !setupAddresses.some((own) => address === own || address.startsWith(`${own}/p2p/`)));
         const wssAddresses = await verifyUnmanagedAddresses({
@@ -80,7 +81,8 @@ export default class Status extends Command {
         const checks = [
             announcedCheck,
             ...(browserCheck ? [browserCheck] : []),
-            ...evaluateChecks({ ...facts, verifiedWss: unmanagedAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
+            // Every handshake that worked, setup's own included: one through an operator's server shows that server on the port is no problem.
+            ...evaluateChecks({ ...facts, verifiedWss: wssAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
         ];
         const printChecks = () => {
             this.log("Requirements:");

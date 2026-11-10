@@ -111,7 +111,7 @@ export interface CheckFacts {
     kuboRunningAnnounce: string[] | undefined;
     firewall: FirewallState | undefined;
     certificates: CertificateInfo[];
-    // Addresses setup does not manage that passed a handshake from this machine. Only `status` fills these two in.
+    // WSS addresses kubo announces that passed a handshake from this machine. Only `status` fills these two in.
     verifiedWss?: string[];
     kuboAutonat?: KuboAutonat;
 }

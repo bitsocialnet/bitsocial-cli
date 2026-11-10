@@ -49,9 +49,20 @@ const withKubo = async <T>(answers: { announced: string[]; autonat?: object }, t
     }
 };
 
-const managedNode = async (enabled: boolean, announce: string[]) => {
+const managedNode = async (enabled: boolean, announce: string[], serveWss?: false) => {
     const dataPath = randomDirectory();
-    await writeReachabilityConfig(dataPath, { version: 1, enabled, mode: "ip", wsPort: 4002, announce, publicIps: ["127.0.0.1"], staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019 });
+    await writeReachabilityConfig(dataPath, {
+        version: 1,
+        enabled,
+        mode: "ip",
+        wsPort: 4002,
+        announce,
+        publicIps: ["127.0.0.1"],
+        staging: false,
+        acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory",
+        caddyAdminPort: 2019,
+        ...(serveWss === false ? { serveWss } : {})
+    });
     return dataPath;
 };
 
@@ -129,6 +140,15 @@ describe("reachability status opens with who can connect", () => {
             const { stdout } = await run(["--pkcOptions.dataPath", dataPath], url);
             expect(lines(stdout)[1]).toMatch(/^Browsers: cannot connect directly; .*see the requirements below/);
             expect(lines(stdout)[1]).not.toMatch(/run:? (bitsocial reachability )?setup/);
+        });
+    });
+
+    // Review on #243: enable restores a setup that has no WSS, so "enable" would not add any.
+    it("tells a disabled node whose setup has no WSS to run setup, not enable", { timeout: 60_000 }, async () => {
+        const dataPath = await managedNode(false, [], false);
+        await withKubo({ announced: [tcp], autonat: { reachable: [tcp], unreachable: [], unknown: [] } }, async (url) => {
+            const { stdout } = await run(["--pkcOptions.dataPath", dataPath], url);
+            expect(lines(stdout)[1]).toBe("Browsers: cannot connect directly; run: bitsocial reachability setup");
         });
     });
 
