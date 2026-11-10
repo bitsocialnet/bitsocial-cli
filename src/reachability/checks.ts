@@ -5,7 +5,7 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 import { caddyBinaryPath, isOurCaddyRunning } from "./caddy.js";
-import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, isPublicMultiaddr, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
+import { addressesNotAnnounced, publicIpsFromMultiaddrs, detectContainer, findPortHolder, worstPortState, isPublicMultiaddr, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
 import { setcapCommand, tailscaleFunnelFix, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
 import type { CertificateInfo } from "./state.js";
 import { loadKuboConfigFile } from "../util.js";
@@ -211,6 +211,12 @@ function inboundCheck(facts: CheckFacts): ReachabilityCheck {
 // program cannot be reached either, and Funnel does not use this machine's TCP 443, so the pointer still applies.
 // Nor does it apply while a WSS address setup does not manage works, such as one from AutoTLS, or after a name
 // that worked here was dropped, where its DNS is what needs fixing.
+// The public-address evidence setup uses, as far as status can have it: interfaces, and the addresses running kubo
+// reports apart from the ones we told it to announce. kubo maps ports on a UPnP router itself and then reports the
+// router's external address. Status does not ask the router as setup does, so with the daemon stopped only interfaces count.
+export const hasPublicAddressEvidence = (facts: Pick<CheckFacts, "publicIps" | "kuboRunningAnnounce">, ownAnnounce: string[]): boolean =>
+    facts.publicIps.length > 0 || publicIpsFromMultiaddrs(facts.kuboRunningAnnounce ?? [], ownAnnounce).length > 0;
+
 export function noWssAddressCheck(input: { announce: string[]; wsPort: number; tcp443: PortState | undefined; hasPublicAddress: boolean; otherWssWorks: boolean; droppedName: boolean }): ReachabilityCheck | undefined {
     const proxyGuidanceApplies = input.tcp443 === "busy" && input.hasPublicAddress;
     if (input.announce.length > 0 || proxyGuidanceApplies || input.otherWssWorks || input.droppedName) return undefined;

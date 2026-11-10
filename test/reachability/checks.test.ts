@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindPermission, evaluateChecks, noWssAddressCheck, parseFirewalldState, parseUfwStatus, probeUdpPort, publicAddressAnnouncedCheck, type BindPermissionInput, type CheckFacts } from "../../src/reachability/checks.js";
+import { bindPermission, evaluateChecks, hasPublicAddressEvidence, noWssAddressCheck, parseFirewalldState, parseUfwStatus, probeUdpPort, publicAddressAnnouncedCheck, type BindPermissionInput, type CheckFacts } from "../../src/reachability/checks.js";
 import dgram from "dgram";
 
 const CAP_NET_BIND = 1n << 10n;
@@ -292,6 +292,27 @@ describe("noWssAddressCheck (#226)", () => {
 
     it("points at Funnel on a node with a public address and a free TCP 443, where Let's Encrypt could not reach it", () => {
         expect(noWssAddressCheck({ ...stuck, hasPublicAddress: true })).toMatchObject({ id: "browser-address", status: "warn" });
+    });
+});
+
+describe("hasPublicAddressEvidence (#226)", () => {
+    const peer = "/p2p/12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+
+    it("counts a public address on an interface", () => {
+        expect(hasPublicAddressEvidence({ publicIps: ["93.184.216.34"], kuboRunningAnnounce: undefined }, [])).toBe(true);
+    });
+
+    // A home node behind a UPnP router: setup finds the router's address, so status must not disagree with it.
+    it("counts a public address running kubo reports, as setup does, when the interfaces have none", () => {
+        expect(hasPublicAddressEvidence({ publicIps: [], kuboRunningAnnounce: [`/ip4/192.168.1.5/tcp/4001${peer}`, `/ip4/93.184.216.34/tcp/4001${peer}`] }, [])).toBe(true);
+    });
+
+    it.each([
+        ["kubo reports only private addresses", [`/ip4/192.168.1.5/tcp/4001${peer}`, `/ip4/100.64.0.7/udp/4001/quic-v1${peer}`], []],
+        ["the only public address is one we told kubo to announce", [`/ip4/93.184.216.34/tcp/443/tls/ws${peer}`], ["/ip4/93.184.216.34/tcp/443/tls/ws"]],
+        ["kubo is not running", undefined, []]
+    ])("finds none when %s", (_name, kuboRunningAnnounce, ownAnnounce) => {
+        expect(hasPublicAddressEvidence({ publicIps: [], kuboRunningAnnounce }, ownAnnounce)).toBe(false);
     });
 });
 

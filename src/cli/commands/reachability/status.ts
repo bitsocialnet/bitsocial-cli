@@ -1,6 +1,6 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
-import { evaluateChecks, formatCheck, gatherCheckFacts, noWssAddressCheck, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
+import { evaluateChecks, formatCheck, gatherCheckFacts, hasPublicAddressEvidence, noWssAddressCheck, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
 import { autonatEvidence, browserAddressCheck, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
@@ -69,7 +69,7 @@ export default class Status extends Command {
                   announce: config.announce,
                   wsPort: config.wsPort,
                   tcp443: facts.tcp443,
-                  hasPublicAddress: facts.publicIps.length > 0,
+                  hasPublicAddress: hasPublicAddressEvidence(facts, config.announce),
                   otherWssWorks: wssAddresses.some(({ status }) => status === "ok"),
                   droppedName: (config.droppedAnnounce ?? []).length > 0
               })
