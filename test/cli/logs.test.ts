@@ -65,12 +65,14 @@ const runFollowUntil = (
         doneWhen: (stdout: string, stderr: string) => boolean;
         graceMs?: number;
         maxMs?: number;
+        env?: NodeJS.ProcessEnv;
     }
 ): Promise<{ stdout: string; stderr: string; timedOut: boolean }> => {
-    const { onChunk, doneWhen, graceMs = 0, maxMs = 25000 } = opts;
+    const { onChunk, doneWhen, graceMs = 0, maxMs = 25000, env } = opts;
     return new Promise((resolve, reject) => {
         const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, ...args], {
-            stdio: ["pipe", "pipe", "pipe"]
+            stdio: ["pipe", "pipe", "pipe"],
+            env: env ? { ...process.env, ...env } : undefined
         });
 
         let stdout = "";
@@ -483,6 +485,49 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
 
         expect(result.stdout).toContain("initial line");
         expect(result.stdout).toContain("APPENDED_LINE");
+    });
+
+    // Switching to a new file used to set the file, read it, print it and only then take the offset from a stat(), while
+    // the 300ms poll kept reading the new file at the old file's offset. Lines appended between the read and the stat
+    // were skipped, and a poll inside that window printed part of the new file twice. Delaying stat() of the log files
+    // widens that window the way a loaded machine does.
+    it("prints every line of the new log file exactly once, including those written during the switch", async () => {
+        const { logDir } = await createLogDir();
+        const file1 = path.join(logDir, "bitsocial_cli_daemon_2026-05-02T00-00-00.000Z.log");
+        const file2 = path.join(logDir, "bitsocial_cli_daemon_2026-05-02T01-00-00.000Z.log");
+        await fsPromise.writeFile(file1, buildLogLine(new Date("2026-05-02T00:00:00.000Z"), "OLD_FILE_MARKER") + "\n");
+        const slowLogStat = `import fs from "node:fs/promises"; const real = fs.stat; fs.stat = async (target, ...rest) => { if (String(target).includes("bitsocial_cli_daemon_")) await new Promise((resolve) => setTimeout(resolve, 1500)); return real(target, ...rest); };`;
+
+        const firstLines = Array.from({ length: 50 }, (_, i) => buildLogLine(new Date(Date.UTC(2026, 4, 2, 1, 0, i)), `FIRST_LINE_${i}_`));
+        const APPENDED = 250;
+        let started = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            env: { NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(slowLogStat)}` },
+            onChunk: (stdout) => {
+                if (started || !stdout.includes("OLD_FILE_MARKER")) return;
+                started = true;
+                void (async () => {
+                    await fsPromise.writeFile(file2, firstLines.join("\n") + "\n");
+                    // Keep writing for longer than the 3s new-file check plus the delayed stat, so lines land mid-switch
+                    for (let i = 0; i < APPENDED; i++) {
+                        await fsPromise.appendFile(file2, buildLogLine(new Date(Date.UTC(2026, 4, 2, 2, 0, 0, i)), `SWITCH_LINE_${i}_`) + "\n");
+                        await new Promise((resolve) => setTimeout(resolve, 20));
+                    }
+                    await fsPromise.appendFile(file2, buildLogLine(new Date("2026-05-02T03:00:00.000Z"), "LAST_LINE") + "\n");
+                })();
+            },
+            doneWhen: (stdout) => stdout.includes("LAST_LINE"),
+            graceMs: 1000,
+            maxMs: 30000
+        });
+
+        const count = (needle: string) => result.stdout.split(needle).length - 1;
+        expect(result.stderr).toContain("switched to new log file");
+        expect(result.stdout).toContain("LAST_LINE");
+        const wrongCounts: string[] = [];
+        for (let i = 0; i < firstLines.length; i++) if (count(`FIRST_LINE_${i}_`) !== 1) wrongCounts.push(`FIRST_LINE_${i}_ x${count(`FIRST_LINE_${i}_`)}`);
+        for (let i = 0; i < APPENDED; i++) if (count(`SWITCH_LINE_${i}_`) !== 1) wrongCounts.push(`SWITCH_LINE_${i}_ x${count(`SWITCH_LINE_${i}_`)}`);
+        expect(wrongCounts).toEqual([]);
     });
 });
 

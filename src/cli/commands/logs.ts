@@ -293,6 +293,10 @@ export default class Logs extends Command {
                 const newestFile = await this._findLatestLogFile(logPath);
                 if (newestFile === currentLogFile) return;
 
+                // Read the new file before switching to it, and anchor the offset to the bytes read, as for the initial
+                // dump: an offset from a later stat() skips whatever was appended in between (issue #77)
+                const newBytes = await fsPromise.readFile(newestFile);
+
                 // Flush any remaining partial line from old file
                 if (pendingBuffer) {
                     if (!since && !until && !streamFilter) {
@@ -306,14 +310,17 @@ export default class Logs extends Command {
                     }
                 }
 
+                // Switch in one synchronous step, so the file, the offset and the anchor always agree
                 currentLogFile = newestFile;
+                position = newBytes.length;
                 pendingBuffer = "";
+                anchor = Buffer.from(newBytes.subarray(-ANCHOR_BYTES));
                 shrunkWithoutAnchor = false;
 
                 process.stderr.write(`\n--- switched to new log file: ${path.basename(newestFile)} ---\n\n`);
 
-                // Read and output entire new file content (with filters, no tail limit)
-                const newContent = await fsPromise.readFile(currentLogFile, "utf-8");
+                // Output entire new file content (with filters, no tail limit)
+                const newContent = newBytes.toString("utf-8");
                 if (newContent) {
                     if (!since && !until && !streamFilter) {
                         process.stdout.write(newContent);
@@ -327,10 +334,6 @@ export default class Logs extends Command {
                         if (output) process.stdout.write(output + "\n");
                     }
                 }
-
-                const newStat = await fsPromise.stat(currentLogFile);
-                position = newStat.size;
-                anchor = Buffer.from(Buffer.from(newContent, "utf-8").subarray(-ANCHOR_BYTES));
             } catch {
                 // Directory listing failed or file disappeared — retry next cycle
             }
@@ -340,21 +343,23 @@ export default class Logs extends Command {
         // reliably notify on cross-process appends on Windows (see nodejs/node#36888).
         let polling = true;
         let pollTimer: NodeJS.Timeout | null = null;
+        let pollCount = 0;
         const pollLoop = async () => {
             if (!polling) return;
             try {
                 await readNewData();
+                // Every 10th poll (~3s) look for a newer log file. In this loop rather than on its own timer, so a read
+                // never runs halfway through a switch, with the new file and the old file's offset
+                if (++pollCount % 10 === 0) await checkForNewLogFile();
             } finally {
                 if (polling) pollTimer = setTimeout(pollLoop, 300);
             }
         };
         pollTimer = setTimeout(pollLoop, 300);
-        const newFileCheckInterval = setInterval(checkForNewLogFile, 3000);
 
         const shutdown = () => {
             polling = false;
             if (pollTimer) clearTimeout(pollTimer);
-            clearInterval(newFileCheckInterval);
             process.exit(0);
         };
         process.on("SIGINT", shutdown);
