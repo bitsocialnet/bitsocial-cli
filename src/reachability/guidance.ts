@@ -148,4 +148,4 @@ export function existingServerGuidance(holder: PortHolder | undefined, ip: strin
 }
 
 export const noWssStatement = (reason: string) =>
-    `Browsers cannot reach this node over WSS yet: ${reason}. WebTransport on UDP 443 is configured, for browsers that support it, if inbound UDP reaches this machine.`;
+    `Browsers cannot reach this node over WSS yet: ${reason}. WebTransport on UDP 443 is configured, for browser clients on pkc-js 0.0.139 or later, if inbound UDP reaches this machine.`;
