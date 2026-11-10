@@ -152,9 +152,14 @@ function stateFilePath(pid: number): string {
  * OS-reported start time of a process, used as an identity token: if a state file's PID
  * was reused by an unrelated process, its start time won't match the recorded one.
  * Linux: starttime (field 22) of /proc/<pid>/stat, in clock ticks since boot.
- * Other unix: `ps -o lstart=` output. Returns undefined when it can't be determined.
+ * Other unix: `ps -o lstart=` output. ps prints it in the caller's locale and timezone, so both are
+ * pinned by default: the token a daemon records must match the one any later CLI computes, whatever
+ * shell or TZ it runs from. Returns undefined when it can't be determined.
  */
-async function getProcessStartTime(pid: number): Promise<string | undefined> {
+async function getProcessStartTime(
+    pid: number,
+    psEnv: NodeJS.ProcessEnv = { ...process.env, LC_ALL: "C", TZ: "UTC" }
+): Promise<string | undefined> {
     try {
         const stat = await fs.readFile(`/proc/${pid}/stat`, "utf-8");
         // comm (field 2) may contain spaces/parens — real fields resume after the last ')'
@@ -162,7 +167,7 @@ async function getProcessStartTime(pid: number): Promise<string | undefined> {
         return fields[19]; // field 22 (starttime), offset by the 3 fields before the split
     } catch {
         try {
-            const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="]);
+            const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="], { env: psEnv });
             return stdout.trim() || undefined;
         } catch {
             return undefined;
@@ -260,8 +265,12 @@ async function isDaemonStateAlive(state: DaemonState): Promise<boolean> {
     if (!isPidAlive(state.pid)) return false;
     if (state.procStartTime !== undefined) {
         const current = await getProcessStartTime(state.pid);
-        if (current !== undefined) return current === state.procStartTime; // mismatch — PID was reused
-        return true; // identity undeterminable — fall back to liveness only
+        if (current === undefined) return true; // identity undeterminable — fall back to liveness only
+        if (current === state.procStartTime) return true;
+        // Older CLIs recorded `ps` output in the daemon's own locale and timezone: accept a match in the
+        // caller's environment too, so a daemon still running from before the upgrade is kept when the
+        // caller shares that locale and timezone.
+        return (await getProcessStartTime(state.pid, process.env)) === state.procStartTime; // otherwise the PID was reused
     }
     // Legacy state file without procStartTime — heuristic: the command line must reference bitsocial
     const cmdline = await getProcessCommandLine(state.pid);

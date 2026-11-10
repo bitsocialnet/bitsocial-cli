@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs/promises";
 import path from "path";
-import { spawn, type ChildProcess } from "child_process";
+import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { once } from "events";
 import { pathToFileURL } from "url";
 import { directory as randomDirectory } from "tempy";
@@ -278,6 +278,80 @@ describe("daemon-state", () => {
 
             const alive = await getAliveDaemonStates();
             expect(alive.find((s) => s.pid === daemonPid)).toBeDefined();
+        });
+    });
+
+    // Outside Linux the identity token comes from `ps -o lstart=`, whose output follows the caller's
+    // locale and timezone. A daemon started under one TZ/locale and checked by a CLI run under another
+    // (another shell, a TZ change, LC_ALL in a script) looked like a reused PID, so the prune deleted the
+    // live daemon's state file and `update install` no longer saw it. On Linux the token is the /proc
+    // starttime for writer and reader alike, so the first test passes trivially there and the legacy
+    // `ps` token test is skipped.
+    describe.skipIf(process.platform === "win32")("getAliveDaemonStates — locale and timezone of the caller", () => {
+        const DAEMON_STATES_DIR = path.join(defaults.PKC_DATA_PATH, ".daemon_states");
+        const WRITER_ENV = { TZ: "Pacific/Kiritimati", LC_ALL: "it_IT.UTF-8" };
+        const READER_ENV = { TZ: "UTC", LC_ALL: "C" };
+        let child: ChildProcess | undefined;
+
+        afterEach(() => {
+            child?.kill("SIGKILL");
+            child = undefined;
+        });
+
+        /** Run a snippet against the dist daemon-state module in a child process with the given TZ/locale. */
+        const runWithEnv = async (env: Record<string, string>, code: string): Promise<string> => {
+            const proc = spawn(process.execPath, ["--input-type=module", "-e", `const m = await import('${DAEMON_STATE_MODULE}');\n${code}`], {
+                stdio: ["ignore", "pipe", "inherit"],
+                env: { ...process.env, ...env }
+            });
+            let stdout = "";
+            proc.stdout!.on("data", (d) => (stdout += d.toString()));
+            const [exitCode] = (await once(proc, "close")) as [number | null];
+            expect(exitCode).toBe(0);
+            return stdout.trim();
+        };
+
+        const startDaemonStandIn = async (): Promise<number> => {
+            child = spawn("sleep", ["120"]);
+            await once(child, "spawn");
+            createdPids.push(child.pid!);
+            return child.pid!;
+        };
+
+        const aliveSeenBy = async (env: Record<string, string>): Promise<number[]> =>
+            JSON.parse(await runWithEnv(env, `console.log(JSON.stringify((await m.getAliveDaemonStates()).map((s) => s.pid)));`));
+
+        it("keeps a live daemon's state file when it is read under another timezone and locale than it was written", async () => {
+            const daemonPid = await startDaemonStandIn();
+            await runWithEnv(
+                WRITER_ENV,
+                `await m.writeDaemonState({ pid: ${daemonPid}, startedAt: new Date().toISOString(), argv: [], pkcRpcUrl: "ws://localhost:9138/" });`
+            );
+
+            expect(await aliveSeenBy(READER_ENV)).toContain(daemonPid);
+            const all = await readAllDaemonStates();
+            expect(all.map((s) => s.pid)).toContain(daemonPid);
+        });
+
+        // Linux CLIs, old and new, record /proc starttime and never a `ps` token
+        const itWithPsToken = it.skipIf(process.platform === "linux");
+
+        itWithPsToken("keeps a state file whose token an older CLI wrote in the caller's own timezone and locale", async () => {
+            // Older CLIs recorded `ps -o lstart=` exactly as the daemon's environment printed it. A daemon
+            // still running from before the upgrade must not be pruned by a new CLI run in that same
+            // timezone and locale.
+            const daemonPid = await startDaemonStandIn();
+            const legacyToken = execFileSync("ps", ["-p", String(daemonPid), "-o", "lstart="], {
+                env: { ...process.env, ...WRITER_ENV },
+                encoding: "utf-8"
+            }).trim();
+            await fs.mkdir(DAEMON_STATES_DIR, { recursive: true });
+            await fs.writeFile(
+                path.join(DAEMON_STATES_DIR, `${daemonPid}-daemon.state`),
+                JSON.stringify({ pid: daemonPid, startedAt: new Date().toISOString(), argv: [], pkcRpcUrl: "ws://localhost:9138/", procStartTime: legacyToken })
+            );
+
+            expect(await aliveSeenBy(WRITER_ENV)).toContain(daemonPid);
         });
     });
 
