@@ -1,5 +1,13 @@
 # Changelog
 
+## <small>0.19.130 (2026-11-10)</small>
+
+* test(reachability): keep the kubo restart retries inside the test's timeout ([4cad443](https://github.com/bitsocialnet/bitsocial-cli/commit/4cad443))
+* fix(reachability): count setup's working WSS in port checks; no enable advice without WSS ([7e1cde5](https://github.com/bitsocialnet/bitsocial-cli/commit/7e1cde5))
+* fix(reachability): keep testing WSS that setup does not manage on a disabled node ([92fd7fd](https://github.com/bitsocialnet/bitsocial-cli/commit/92fd7fd))
+* fix(reachability): match WSS advice to what setup did; not knowing yet outranks disabled ([6cf6fa8](https://github.com/bitsocialnet/bitsocial-cli/commit/6cf6fa8))
+* feat(reachability): open status with whether desktop nodes and browsers can connect ([ed6e6ee](https://github.com/bitsocialnet/bitsocial-cli/commit/ed6e6ee))
+
 ## <small>0.19.129 (2026-11-09)</small>
 
 * fix(reachability): flag no public address announced, count WebTransport for browsers ([c4d5e78](https://github.com/bitsocialnet/bitsocial-cli/commit/c4d5e78))
