@@ -6,19 +6,26 @@ import { runCliCommand } from "../helpers/run-cli.js";
 describe("bitsocial community stop", () => {
     const sandbox = Sinon.createSandbox();
 
-    // Which addresses the fake daemon reports as running (`community.started`).
+    // The communities the fake daemon hosts (`pkc.communities`), and whether each is running (`community.started`).
     const startedByAddress: Record<string, boolean> = {};
     const startFake = sandbox.fake();
     const stopFake = sandbox.fake();
-    const createCommunityFake = sandbox.fake((options: { address: string }) => ({
-        address: options.address,
-        started: startedByAddress[options.address] ?? false,
-        start: startFake,
-        stop: stopFake
-    }));
+    const createCommunityFake = sandbox.fake((options: { address: string }) => {
+        // pkc-js returns a remote instance, which has no `started`, for an address the daemon does not list
+        if (!(options.address in startedByAddress)) return { address: options.address, stop: stopFake };
+        return {
+            address: options.address,
+            started: startedByAddress[options.address],
+            start: startFake,
+            stop: stopFake
+        };
+    });
 
     beforeAll(() => {
         const pkcInstanceFake = sandbox.fake.resolves({
+            get communities() {
+                return Object.entries(startedByAddress).map(([address, started]) => ({ address, started }));
+            },
             createCommunity: createCommunityFake,
             destroy: () => {}
         });
@@ -67,5 +74,17 @@ describe("bitsocial community stop", () => {
         expect(stopFake.callCount).toBe(0);
         expect(stdout.trim()).toBe(address);
         expect(result.error).toBeUndefined();
+    });
+
+    it(`Fails for an address the daemon does not host instead of printing it as stopped`, async () => {
+        startedByAddress["plebbit.bso"] = true;
+        const typo = "plebit.bso";
+
+        const { result, stdout, stderr } = await runCliCommand(["community", "stop", typo]);
+
+        expect(stopFake.callCount).toBe(0);
+        expect(stdout.trim()).toBe("");
+        expect(stderr).toContain(typo);
+        expect(result.error?.oclif?.exit).toBe(1);
     });
 });
