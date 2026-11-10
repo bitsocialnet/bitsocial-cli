@@ -53,6 +53,37 @@ export async function fastInstallGlobal(
             return false;
         }
 
+        // Phase: download web UIs, before anything in the current install is moved or deleted. A web UI is
+        // reused only when its pin is unchanged AND its directory is on disk; every other entry is downloaded
+        // into staging now. A failed download throws, so the caller falls back to a full install instead of
+        // the update succeeding without that web UI.
+        const oldWebuis: WebuiEntry[] = oldPkg.webuis ?? [];
+        const newWebuis: WebuiEntry[] = newPkg.webuis ?? [];
+        const oldWebuisByUrl = new Map(oldWebuis.map((w: WebuiEntry) => [w.url, w.sha256OfHtmlZip]));
+        const oldWebuisDir = path.join(installRoot, "dist", "webuis");
+        const newWebuisDir = path.join(stagingDir, "dist", "webuis");
+        const oldWebuiDirNames = (await fs.readdir(oldWebuisDir, { withFileTypes: true }).catch(() => [] as never[]))
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name);
+        // We don't know exact dir names, but we can match by repo name from the URL.
+        const dirsOf = (webui: WebuiEntry): string[] => {
+            const repoName = extractRepoName(webui.url)?.toLowerCase();
+            return repoName ? oldWebuiDirNames.filter((name) => name.toLowerCase().includes(repoName)) : [];
+        };
+        const reusedDirs = new Set<string>();
+        const toDownload: WebuiEntry[] = [];
+        for (const webui of newWebuis) {
+            const dirs = dirsOf(webui);
+            if (oldWebuisByUrl.get(webui.url) === webui.sha256OfHtmlZip && dirs.length > 0) dirs.forEach((dir) => reusedDirs.add(dir));
+            else toDownload.push(webui);
+        }
+        const downloadDir = path.join(stagingDir, ".webuis-download");
+        if (toDownload.length > 0) {
+            await fs.mkdir(downloadDir, { recursive: true });
+            log(`Downloading ${toDownload.length} changed web UI(s)...`);
+            for (const webui of toDownload) await downloadWebui(webui, downloadDir, log);
+        }
+
         // Phase: reuse node_modules from old install (O(1) rename, same filesystem)
         try {
             await fs.rename(
@@ -69,65 +100,30 @@ export async function fastInstallGlobal(
             throw err;
         }
 
-        // Phase: reuse unchanged webuis, download only changed ones
-        const oldWebuis: WebuiEntry[] = oldPkg.webuis ?? [];
-        const newWebuis: WebuiEntry[] = newPkg.webuis ?? [];
-        const oldWebuisByUrl = new Map(oldWebuis.map((w: WebuiEntry) => [w.url, w.sha256OfHtmlZip]));
-
-        // Move the entire dist/webuis/ directory from old install to staging
-        const oldWebuisDir = path.join(installRoot, "dist", "webuis");
-        const newWebuisDir = path.join(stagingDir, "dist", "webuis");
-        let webuisDirMoved = false;
+        // Phase: move the entire dist/webuis/ directory from old install to staging, drop the directories
+        // of changed or removed entries, and put the downloaded ones in their place
         try {
-            await fs.access(oldWebuisDir);
             await fs.rename(oldWebuisDir, newWebuisDir);
-            webuisDirMoved = true;
-        } catch {
-            // webuis dir missing in old install — will create fresh
+        } catch (err) {
+            // webuis dir missing in old install — will create fresh. Any other failure must not ship an
+            // install without the web UIs it reuses.
+            if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
-
-        // Identify which webui entries changed
-        const changedWebuis = newWebuis.filter(
-            (w: WebuiEntry) => oldWebuisByUrl.get(w.url) !== w.sha256OfHtmlZip
-        );
-
-        if (changedWebuis.length > 0 && webuisDirMoved) {
-            // Delete subdirectories for changed webuis so they get re-downloaded.
-            // We don't know exact dir names, but we can match by repo name from the URL.
-            const existingDirs = await fs.readdir(newWebuisDir, { withFileTypes: true })
-                .catch(() => [] as never[]);
-            for (const changed of changedWebuis) {
-                const repoName = extractRepoName(changed.url);
-                if (!repoName) continue;
-                for (const entry of existingDirs) {
-                    if (entry.isDirectory() && entry.name.toLowerCase().includes(repoName.toLowerCase())) {
-                        await fs.rm(path.join(newWebuisDir, entry.name), { recursive: true, force: true });
-                    }
-                }
+        await fs.mkdir(newWebuisDir, { recursive: true });
+        for (const name of oldWebuiDirNames) {
+            if (!reusedDirs.has(name)) await fs.rm(path.join(newWebuisDir, name), { recursive: true, force: true });
+        }
+        if (toDownload.length > 0) {
+            for (const name of await fs.readdir(downloadDir)) {
+                await fs.rename(path.join(downloadDir, name), path.join(newWebuisDir, name));
             }
+            await fs.rm(downloadDir, { recursive: true, force: true });
         }
 
         // Phase: atomic swap
         await fs.rename(installRoot, backupDir);
         await fs.rename(stagingDir, installRoot);
         nodeModulesMoved = false; // now part of installRoot, no rollback needed
-
-        // Phase: download changed/missing webuis
-        if (changedWebuis.length > 0 || !webuisDirMoved) {
-            const webuisDir = path.join(installRoot, "dist", "webuis");
-            await fs.mkdir(webuisDir, { recursive: true });
-            const toDownload = !webuisDirMoved ? newWebuis : changedWebuis;
-            if (toDownload.length > 0) {
-                log(`Downloading ${toDownload.length} changed web UI(s)...`);
-                for (const entry of toDownload) {
-                    try {
-                        await downloadWebui(entry, webuisDir, log);
-                    } catch (err) {
-                        log(`Warning: failed to download ${entry.url}: ${(err as Error).message}`);
-                    }
-                }
-            }
-        }
 
         // Phase: cleanup backup
         await fs.rm(backupDir, { recursive: true, force: true });
