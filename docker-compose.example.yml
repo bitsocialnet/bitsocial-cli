@@ -49,6 +49,43 @@ services:
     #   args:
     #     GITHUB_TOKEN: ${GITHUB_TOKEN:-}
 
+    # # Optional: a browser address through Tailscale Funnel, for a node behind NAT
+    # # with no port forwarding. Read docs/tailscale-funnel.md first. To use it:
+    # #   1. Uncomment the line below, and the `tailscale` service and `configs` further down.
+    # #   2. Move the `ports:` list above from this service to the `tailscale` service.
+    # #   3. Put TS_AUTHKEY=tskey-auth-... in a `.env` file next to this one.
+    # #   4. After `docker compose up -d`, run:
+    # #      docker compose exec bitsocial bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws
+    # network_mode: service:tailscale
+
+  # # Optional Tailscale sidecar (see above). The bitsocial service shares its network,
+  # # so Tailscale can forward to kubo's 127.0.0.1:4002 listener.
+  # tailscale:
+  #   image: tailscale/tailscale:latest
+  #   # The machine name. It becomes public for good, so pick one you do not mind publishing.
+  #   hostname: bitsocial-node
+  #   restart: unless-stopped
+  #   environment:
+  #     - TS_AUTHKEY=${TS_AUTHKEY:-}
+  #     - TS_STATE_DIR=/var/lib/tailscale
+  #     - TS_SERVE_CONFIG=/tailscale-serve.json
+  #   configs:
+  #     - tailscale-serve.json
+  #   volumes:
+  #     - tailscale-state:/var/lib/tailscale
+
+# # Optional, for the Tailscale sidecar: turns Funnel on and forwards it to kubo.
+# # 4002 is the port `bitsocial reachability setup` prints. Change it if yours differs.
+# configs:
+#   tailscale-serve.json:
+#     content: |
+#       {
+#         "TCP": { "443": { "HTTPS": true } },
+#         "Web": { "$${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:4002" } } } },
+#         "AllowFunnel": { "$${TS_CERT_DOMAIN}:443": true }
+#       }
+
 volumes:
   bitsocial-data:
   bitsocial-logs:
+  # tailscale-state:   # optional, for the Tailscale sidecar

@@ -19,7 +19,7 @@ All take `--pkcOptions.dataPath`. `setup` also takes:
 | Flag | Meaning |
 | --- | --- |
 | `--domain <name>` | A domain pointing at this machine, to get a certificate for or to forward through your own server |
-| `--announce <multiaddr>` | An address your own server serves. Announced only after a real libp2p handshake through it succeeds |
+| `--announce <multiaddr>` | An address your own server serves. Announced only after a real libp2p handshake through it succeeds, tried three times, 15 seconds apart. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine |
 | `--force` | Continue when the domain does not resolve to this machine, for a proxy in front of it. Remembered for later runs |
 | `--staging` | Use the Let's Encrypt staging CA, whose certificates browsers do not trust |
 | `--non-interactive` | Never ask. Prompts already only appear when stdin is a TTY |
@@ -58,7 +58,7 @@ Reruns keep the stored choices and only add or repair. A rerun that cannot get a
 | TCP 443 is free, you have a domain | `setup --domain node.example` | IP certificate where possible, plus a 90-day certificate for the name. Browsers get two independent paths |
 | Another Caddy holds TCP 443 | `setup`, then add the printed site to that Caddy, then `setup --announce /ip4/<ip>/tcp/443/tls/ws` | That Caddy gets the IP certificate and forwards to kubo |
 | nginx, Apache or IIS holds TCP 443 | `setup --domain node.example`, then add the printed snippet, then `setup --domain node.example --announce /dns4/node.example/tcp/443/tls/ws` | Your server terminates TLS. These cannot get an IP certificate by themselves |
-| No public address, no UPnP | Nothing here will help | `setup` states what would change that |
+| No public address and no UPnP, or TCP 443 cannot be reached from the internet | `setup`, then follow the Tailscale Funnel steps it prints, see [tailscale-funnel.md](tailscale-funnel.md) | A `<machine>.<tailnet>.ts.net` address through Tailscale's relays, with nothing opened on the router. `setup` does not run Tailscale for you |
 
 `setup` never stops or edits a server it does not own. To replace one with bitsocial-cli's own Caddy, remove your hand-added address from `Addresses.AppendAnnounce` in the kubo config, stop the other server, then run `setup`. An existing `/ip4/127.0.0.1/tcp/<port>/ws` listener is reused.
 
@@ -209,7 +209,7 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 | --- | --- |
 | `public-address-announced` | Running kubo announces no public address: no public IPv4, no global IPv6 (`fec0::/10` and other private ranges don't count), no `/dns*` name and no relay address. No other node or browser can dial it, so it seeds nothing for anyone. Typical of a VM on NAT networking (`10.0.2.15` plus `fec0::`). Runs on every node, `setup` or not. `unknown` while kubo is down. The daemon warns once at start-up in the same case |
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
-| `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage) |
+| `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage). After `setup`: a `warn` pointing at [Tailscale Funnel](tailscale-funnel.md) when `setup` could not give the node a WSS address. It is absent when an address is announced, when another program holds TCP 443, when a WSS address `setup` does not manage works, or when a dropped name is waiting for its DNS |
 | `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, on any node, `setup`'s own addresses included, as the program is then serving it |
 | `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn`. "Reached" proves inbound UDP, not a browser handshake (see [WebTransport and AutoNAT](#webtransport-and-autonat)) |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
