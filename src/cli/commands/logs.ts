@@ -209,6 +209,37 @@ export default class Logs extends Command {
         // to miss new bytes. read() sees the true file end at syscall time.
         const READ_BUF_SIZE = 64 * 1024;
         const readBuf = Buffer.alloc(READ_BUF_SIZE);
+
+        // The daemon trims its log in place: once it has written 20MB it rewrites the same file to its last 15MB
+        // (daemon-file-logger.ts), so the file can end before `position`. `anchor` holds the last bytes we read. The
+        // trimmed file still has them, so we continue right after them and neither skip nor repeat a line.
+        const ANCHOR_BYTES = 4096;
+        let anchor = Buffer.from(Buffer.from(existingContent, "utf-8").subarray(-ANCHOR_BYTES));
+        const keepAnchor = (bytes: Buffer) => {
+            anchor = Buffer.from(Buffer.concat([anchor, bytes]).subarray(-ANCHOR_BYTES));
+        };
+        let shrunkWithoutAnchor = false;
+        const followShrunkFile = async () => {
+            const content = await fsPromise.readFile(currentLogFile);
+            const anchorAt = anchor.length > 0 ? content.lastIndexOf(anchor) : -1;
+            if (anchorAt >= 0) {
+                position = anchorAt + anchor.length;
+                shrunkWithoutAnchor = false;
+                return;
+            }
+            // The file was emptied or replaced, or a trim is still rewriting it. Only the second poll in a row that
+            // finds no anchor follows the file from its start, so a trim caught halfway does not reprint the file.
+            if (!shrunkWithoutAnchor) {
+                shrunkWithoutAnchor = true;
+                return;
+            }
+            shrunkWithoutAnchor = false;
+            position = 0;
+            pendingBuffer = "";
+            anchor = Buffer.alloc(0);
+            process.stderr.write(`\n--- log file was truncated, following it from its start ---\n\n`);
+        };
+
         const readNewData = async () => {
             let fd: fsPromise.FileHandle | undefined;
             try {
@@ -219,9 +250,16 @@ export default class Logs extends Command {
                     if (bytesRead === 0) break;
                     position += bytesRead;
                     chunk += readBuf.subarray(0, bytesRead).toString("utf-8");
+                    keepAnchor(readBuf.subarray(0, bytesRead));
                     if (bytesRead < readBuf.length) break;
                 }
-                if (!chunk) return;
+                if (!chunk) {
+                    // Nothing new. Nothing at `position - 1` either means the file is now shorter than what we read.
+                    // read(), unlike stat(), sees the file's real end on Windows too (see above).
+                    if (position > 0 && (await fd.read(readBuf, 0, 1, position - 1)).bytesRead === 0) await followShrunkFile();
+                    return;
+                }
+                shrunkWithoutAnchor = false;
 
                 const combined = pendingBuffer + chunk;
                 const lastNewline = combined.lastIndexOf("\n");
@@ -270,6 +308,7 @@ export default class Logs extends Command {
 
                 currentLogFile = newestFile;
                 pendingBuffer = "";
+                shrunkWithoutAnchor = false;
 
                 process.stderr.write(`\n--- switched to new log file: ${path.basename(newestFile)} ---\n\n`);
 
@@ -291,6 +330,7 @@ export default class Logs extends Command {
 
                 const newStat = await fsPromise.stat(currentLogFile);
                 position = newStat.size;
+                anchor = Buffer.from(Buffer.from(newContent, "utf-8").subarray(-ANCHOR_BYTES));
             } catch {
                 // Directory listing failed or file disappeared — retry next cycle
             }

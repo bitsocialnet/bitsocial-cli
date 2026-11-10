@@ -486,6 +486,69 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
     });
 });
 
+// The daemon trims its log in place (daemon-file-logger.ts: once it has written 20MB it rewrites the same file to the
+// last 15MB), so the file the follower reads can end before the offset it reached. `logs -f` used to read nothing from
+// then on and went silent while the daemon kept logging.
+describe("bitsocial logs -f after the log file shrinks in place (synthetic)", () => {
+    const countOf = (haystack: string, needle: string) => haystack.split(needle).length - 1;
+
+    it("keeps following the daemon's trimmed log without skipping or repeating lines", async () => {
+        const { logDir } = await createLogDir();
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-01T00-00-00.000Z.log");
+        const lines: string[] = [];
+        for (let i = 0; i < 2000; i++) lines.push(buildLogLine(new Date(Date.UTC(2026, 5, 1, 0, 0, i)), `old line ${i} ${"x".repeat(40)}`));
+        lines.push(buildLogLine(new Date("2026-06-01T01:00:00.000Z"), "BEFORE_TRIM_MARKER"));
+        const content = lines.join("\n") + "\n";
+        await fsPromise.writeFile(file, content);
+
+        let trimmed = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            onChunk: (stdout) => {
+                if (trimmed || !stdout.includes("BEFORE_TRIM_MARKER")) return;
+                trimmed = true;
+                // Like the daemon: keep the last part of the file from a line boundary, rewrite the same path, then
+                // write the lines that were logged meanwhile
+                const keepFrom = content.indexOf("\n", Math.floor(content.length / 2)) + 1;
+                void (async () => {
+                    await fsPromise.writeFile(file, content.slice(keepFrom));
+                    await fsPromise.appendFile(file, buildLogLine(new Date("2026-06-01T01:00:01.000Z"), "AFTER_TRIM_MARKER") + "\n");
+                })();
+            },
+            doneWhen: (stdout) => stdout.includes("AFTER_TRIM_MARKER"),
+            // Lets a wrongly re-read part of the trimmed file surface before the process is stopped
+            graceMs: 1000,
+            maxMs: 20000
+        });
+
+        expect(result.stdout).toContain("AFTER_TRIM_MARKER");
+        expect(countOf(result.stdout, "AFTER_TRIM_MARKER")).toBe(1);
+        expect(countOf(result.stdout, "BEFORE_TRIM_MARKER")).toBe(1);
+        expect(countOf(result.stdout, "old line 1999 ")).toBe(1);
+        expect(result.stderr).not.toContain("truncated");
+    });
+
+    it("follows a log file that was emptied from its start", async () => {
+        const { logDir } = await createLogDir();
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-02T00-00-00.000Z.log");
+        await fsPromise.writeFile(file, buildLogLine(new Date("2026-06-02T00:00:00.000Z"), `BEFORE_EMPTY_MARKER ${"x".repeat(200)}`) + "\n");
+
+        let emptied = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            onChunk: (stdout) => {
+                if (emptied || !stdout.includes("BEFORE_EMPTY_MARKER")) return;
+                emptied = true;
+                void fsPromise.writeFile(file, buildLogLine(new Date("2026-06-02T00:00:01.000Z"), "AFTER_EMPTY_MARKER") + "\n");
+            },
+            doneWhen: (stdout) => stdout.includes("AFTER_EMPTY_MARKER"),
+            maxMs: 20000
+        });
+
+        expect(result.stdout).toContain("AFTER_EMPTY_MARKER");
+        expect(countOf(result.stdout, "BEFORE_EMPTY_MARKER")).toBe(1);
+        expect(result.stderr).toContain("truncated");
+    });
+});
+
 describe("bitsocial logs (live daemon tests)", async () => {
     let daemonProcess: ManagedChildProcess;
     let logDir: string;
