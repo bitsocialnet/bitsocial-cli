@@ -157,11 +157,12 @@ describe("another Caddy already holds the HTTPS port, no domain given", { timeou
             const response = await fetch(`${daemon.kuboApiUrl}/id`, { method: "POST" }).catch(() => undefined);
             return response?.ok ? ((await response.json()) as { Addresses: string[] | null }).Addresses ?? [] : undefined;
         };
+        // At most 2 × (15 s + 45 s) here plus 60 s of polling below, inside the 240 s timeout.
         let loaded = false;
-        for (let attempt = 1; attempt <= 3 && !loaded; attempt++) {
+        for (let attempt = 1; attempt <= 2 && !loaded; attempt++) {
             await fetch(`${daemon.kuboApiUrl}/shutdown`, { method: "POST" }).catch(() => {});
             await waitForCondition(async () => !(await runningAnnounces()), 15_000, 200);
-            loaded = await waitForCondition(async () => (await runningAnnounces())?.some((address) => address.startsWith(announce)) === true, 60_000, 500);
+            loaded = await waitForCondition(async () => (await runningAnnounces())?.some((address) => address.startsWith(announce)) === true, 45_000, 500);
         }
         expect(loaded, "running kubo never announced setup's address").toBe(true);
 
