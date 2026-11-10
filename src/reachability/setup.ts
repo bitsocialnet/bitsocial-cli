@@ -42,6 +42,8 @@ import {
     isBindDenied,
     NO_IPV6_HINT,
     noWssStatement,
+    proxiedAddressTestHint,
+    tailscaleFunnelGuidance,
     reverseProxySnippet,
     setcapCommand,
     testCommandHint,
@@ -98,6 +100,8 @@ export interface SetupDependencies {
     // Requirements to report before changing anything. Absent in tests that drive setup directly.
     checkRequirements?: (input: { publicIps: string[]; httpsPort: number; httpPort?: number; caddyAdminPort: number; wsPort: number }) => Promise<ReachabilityCheck[]>;
     certificateTimeoutMs?: number;
+    // How long to wait between attempts to dial an --announce address. Tests shorten it.
+    announceRetryMs?: number;
 }
 
 export const realSetupDependencies = (): Pick<SetupDependencies, "discoverRouter" | "probePort" | "findHolder" | "publicIpsFromInterfaces" | "lanIpv4" | "ensureCaddy" | "resolveDomain" | "dial"> => ({
@@ -309,6 +313,23 @@ export async function applyKuboConfig(
     return { config: next, kuboConfigChanged };
 }
 
+const ANNOUNCE_DIAL_ATTEMPTS = 3;
+
+// A proxy that was just switched on can need a moment: a Tailscale Funnel name took about a minute to resolve and
+// to get its certificate, and a request through it failed now and then afterwards. One failed dial would cost the
+// operator a whole rerun, with two kubo restarts.
+async function dialWithRetries(address: string, deps: SetupDependencies) {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await deps.dial(address);
+        } catch (error) {
+            if (attempt === ANNOUNCE_DIAL_ATTEMPTS) throw error;
+            deps.log(`The handshake through ${address} failed (${(error as Error).message}). Trying again, attempt ${attempt + 1} of ${ANNOUNCE_DIAL_ATTEMPTS}.`);
+            await new Promise((resolve) => setTimeout(resolve, deps.announceRetryMs ?? 15_000));
+        }
+    }
+}
+
 // The daemon restarts kubo within seconds. Without a daemon there is nothing to restart or to check yet.
 async function restartAndVerifyKubo(config: ReachabilityConfig, restart: boolean, options: SetupOptions, deps: SetupDependencies) {
     const identity = await kuboIdentity(options.kuboRpcUrl);
@@ -514,7 +535,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         const identity = await kuboIdentity(options.kuboRpcUrl);
         if (!identity) throw new SetupRefusedError("--announce is verified by dialling this node through it, so the daemon must be running.");
         try {
-            await deps.dial(`${options.announce}/p2p/${identity.peerId}`);
+            await dialWithRetries(`${options.announce}/p2p/${identity.peerId}`, deps);
         } catch (error) {
             // Back to how it was before this attempt, so a failed try does not cost AutoTLS or the filter.
             applied = await applyKuboConfig(
@@ -537,6 +558,8 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         for (const address of config.announce) deps.log(`  ${address}`);
         const testHost = issuedIps[0] ?? (domainIssued ? domain : undefined);
         if (testHost) deps.log(testCommandHint(testHost, httpsPort));
+        const proxiedHint = options.announce ? proxiedAddressTestHint(options.announce) : undefined;
+        if (proxiedHint) deps.log(proxiedHint);
         return config;
     }
 
@@ -549,6 +572,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     if (publicIps.length === 0) {
         const reason = sawCgnat ? "this network is behind carrier-grade NAT and has no global IPv6" : "no public IPv4 or global IPv6 address was found";
         deps.warn(unreachableStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
+        deps.log(tailscaleFunnelGuidance(wsPort, deps.inContainer));
         return config;
     }
     if (portBusy) {
@@ -559,5 +583,6 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     }
     const reason = failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443";
     deps.warn(noWssStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
+    deps.log(tailscaleFunnelGuidance(wsPort, deps.inContainer));
     return config;
 }
