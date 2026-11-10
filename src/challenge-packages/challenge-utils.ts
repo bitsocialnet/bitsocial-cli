@@ -11,6 +11,7 @@ import {
     reloadUrlFromPkcRpcUrl,
     PACKAGE_RELOAD_TIMEOUT_MS,
     type InstalledPackage,
+    type PackageReloadResult,
     type PackageKind
 } from "../common-utils/package-registry.js";
 
@@ -54,7 +55,7 @@ export const challengeReloadUrlFromPkcRpcUrl = (pkcRpcUrl: string): string | und
 /** How long install/remove wait for a daemon to finish reloading before giving up. */
 export const CHALLENGE_RELOAD_TIMEOUT_MS = PACKAGE_RELOAD_TIMEOUT_MS;
 
-export const reloadChallengesInDaemon = (pkcRpcUrl: string | URL, timeoutMs = CHALLENGE_RELOAD_TIMEOUT_MS): Promise<boolean> =>
+export const reloadChallengesInDaemon = (pkcRpcUrl: string | URL, timeoutMs = CHALLENGE_RELOAD_TIMEOUT_MS): Promise<PackageReloadResult> =>
     reloadPackagesInDaemon(CHALLENGE_PACKAGE_KIND, pkcRpcUrl, timeoutMs);
 
 export const hashChallengePackageContents = hashPackageContents;

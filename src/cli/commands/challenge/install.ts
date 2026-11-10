@@ -2,7 +2,14 @@ import { Args, Flags } from "@oclif/core";
 import { BaseCommand } from "../../base-command.js";
 import defaults from "../../../common-utils/defaults.js";
 import { validateChallengeFileFactory } from "@pkcprotocol/pkc-js/challenges";
-import { importPackageFactory, installPackage, InvalidPackageArchiveError, InvalidPackageNameError, type InstallPackageResult } from "../../../common-utils/package-registry.js";
+import {
+    importPackageFactory,
+    installPackage,
+    installReloadWarning,
+    InvalidPackageArchiveError,
+    InvalidPackageNameError,
+    type InstallPackageResult
+} from "../../../common-utils/package-registry.js";
 import { CHALLENGE_PACKAGE_KIND, reloadChallengesInDaemon } from "../../../challenge-packages/challenge-utils.js";
 
 export default class Install extends BaseCommand {
@@ -57,9 +64,10 @@ export default class Install extends BaseCommand {
         this.log(`${installed.replaced ? "changed" : "added"} ${installed.name}${version} in ${elapsedSeconds}s`);
 
         // Best-effort reload in the daemon at --pkcRpcUrl, so the install takes effect
-        // without a restart
-        if (await reloadChallengesInDaemon(flags.pkcRpcUrl)) {
-            this.log(`reloaded ${installed.name}${version} in the daemon at ${flags.pkcRpcUrl}`);
-        }
+        // without a restart. Only claim it when the daemon reports this version loaded.
+        const reload = await reloadChallengesInDaemon(flags.pkcRpcUrl);
+        const reloadWarning = installReloadWarning(CHALLENGE_PACKAGE_KIND, reload, installed, flags.pkcRpcUrl);
+        if (reloadWarning) this.warn(reloadWarning);
+        else if (reload.status === "reloaded") this.log(`reloaded ${installed.name}${version} in the daemon at ${flags.pkcRpcUrl}`);
     }
 }

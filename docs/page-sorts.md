@@ -63,7 +63,7 @@ The new package is imported and checked with pkc-js `validatePageSortFileFactory
 Same mechanism as challenges ([details](challenges.md#how-the-daemon-loads-them)):
 
 - At start, `bitsocial daemon` logs `Loaded page sort packages: name@version, ...`.
-- After `install`/`remove`, the CLI POSTs `/api/page-sorts/reload` (local) or `/<authKey>/api/page-sorts/reload` (remote). It is best-effort: with no daemon running the change applies at the next start.
+- After `install`/`remove`, the CLI POSTs `/api/page-sorts/reload` (local) or `/<authKey>/api/page-sorts/reload` (remote). It is best-effort: with no daemon running the change applies at the next start. `install` prints `reloaded <name>@<version>` only when the daemon reports that version loaded, and warns otherwise; `remove` warns when the daemon still lists the package or failed to reload.
 - Running communities pick up the new registry on their next cycle; nothing is restarted.
 
 ### Shadowing a built-in

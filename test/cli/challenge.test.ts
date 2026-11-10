@@ -7,6 +7,8 @@ import fsPromise from "fs/promises";
 import fs from "fs";
 import path from "path";
 import dns from "node:dns";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { ensureNpmAvailable, findChallengeUsages } from "../../src/challenge-packages/challenge-utils.js";
 import { clearPkcRpcConnectOverride, setPkcRpcConnectOverride } from "../helpers/pkc-test-overrides.js";
 import { runCliCommand } from "../helpers/run-cli.js";
@@ -553,5 +555,94 @@ describe("bitsocial challenge remove: in-use check against the daemon", () => {
         const result = await runBitsocialChallenge(["remove", "question", "--force", "--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", NO_DAEMON_RPC_URL]);
         expect(result.exitCode).toBe(0);
         expect(unwrap(result.stderr)).toContain('still names "question" now uses the pkc-js built-in challenge of the same name');
+    });
+});
+
+// The daemon reloads from its own data path, and keeps the previous build of a package whose new build fails to
+// import, so a reload that answered does not mean it serves what was just installed. `install` used to print
+// "reloaded <name>@<version>" on any answer, and `remove` said nothing when the reload failed.
+describe("bitsocial challenge install/remove: what the daemon reload reports", () => {
+    let reloadResponse: { status: number; body: unknown };
+    let server: Server;
+    let rpcUrl: string;
+    let printedRpcUrl: string; // --pkcRpcUrl is parsed as a URL, so messages print it normalized (trailing slash)
+
+    beforeAll(async () => {
+        server = createServer((req, res) => {
+            if (req.method === "POST" && req.url === "/api/challenges/reload") {
+                res.writeHead(reloadResponse.status, { "content-type": "application/json" });
+                res.end(JSON.stringify(reloadResponse.body));
+                return;
+            }
+            res.writeHead(404).end();
+        });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        rpcUrl = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        printedRpcUrl = new URL(rpcUrl).href;
+    });
+
+    afterAll(async () => {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+
+    const install = async () => {
+        const srcDir = path.join(randomDirectory(), "reload-report-challenge");
+        await createMinimalChallengeDir(srcDir, "reload-report-challenge", { version: "2.0.0" });
+        return runBitsocialChallenge(["install", srcDir, "--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", rpcUrl]);
+    };
+
+    const removeWithForce = async () => {
+        const dataPath = randomDirectory();
+        await createMinimalChallengeDir(path.join(dataPath, "challenges", "test-challenge"), "test-challenge", { version: "1.0.0" });
+        return runBitsocialChallenge(["remove", "test-challenge", "--force", "--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", rpcUrl]);
+    };
+
+    it("install says it reloaded the package when the daemon reports it loaded", async () => {
+        reloadResponse = { status: 200, body: { ok: true, challenges: ["other-challenge@1.0.0", "reload-report-challenge@2.0.0"] } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).toContain(`reloaded reload-report-challenge@2.0.0 in the daemon at ${printedRpcUrl}`);
+        expect(unwrap(result.stderr)).not.toContain("reload-report-challenge");
+    });
+
+    // e.g. the new build failed to import in the daemon, or the daemon serves another --pkcOptions.dataPath
+    it("install warns instead of claiming a reload when the daemon reloaded without the installed version", async () => {
+        reloadResponse = { status: 200, body: { ok: true, challenges: ["reload-report-challenge@1.0.0"] } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).toContain("added reload-report-challenge@2.0.0");
+        expect(result.stdout).not.toContain("reloaded");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} reloaded its challenges without reload-report-challenge@2.0.0`);
+    });
+
+    it("install warns when the daemon failed to reload", async () => {
+        reloadResponse = { status: 500, body: { ok: false, error: "Error: disk on fire" } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).not.toContain("reloaded");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} failed to reload its challenges (Error: disk on fire)`);
+    });
+
+    it("remove warns when the daemon still reports the package loaded", async () => {
+        reloadResponse = { status: 200, body: { ok: true, challenges: ["test-challenge@1.0.0"] } };
+        const result = await removeWithForce();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).toContain("removed test-challenge@1.0.0");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} still has test-challenge loaded`);
+    });
+
+    it("remove warns when the daemon failed to reload", async () => {
+        reloadResponse = { status: 500, body: { ok: false, error: "Error: disk on fire" } };
+        const result = await removeWithForce();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} failed to reload its challenges (Error: disk on fire)`);
+    });
+
+    it("remove says nothing more when the daemon reloaded without the package", async () => {
+        reloadResponse = { status: 200, body: { ok: true, challenges: [] } };
+        const result = await removeWithForce();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(unwrap(result.stderr)).not.toContain("The daemon at");
     });
 });

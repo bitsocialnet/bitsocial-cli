@@ -277,6 +277,6 @@ describe("page sort packages in the daemon", () => {
 
     it("targets /api/page-sorts/reload and reports no daemon as not reloaded", async () => {
         expect(reloadUrlFromPkcRpcUrl(PAGE_SORT_PACKAGE_KIND, "ws://0.0.0.0:9138/")).toBe("http://127.0.0.1:9138/api/page-sorts/reload");
-        expect(await reloadPageSortsInDaemon(NO_DAEMON_RPC_URL, 2000)).toBe(false);
+        expect(await reloadPageSortsInDaemon(NO_DAEMON_RPC_URL, 2000)).toEqual({ status: "unreachable" });
     });
 });

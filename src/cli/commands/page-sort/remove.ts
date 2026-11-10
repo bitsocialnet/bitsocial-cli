@@ -7,7 +7,8 @@ import {
     collectPackageUsages,
     PackageNotInstalledError,
     InvalidPackageNameError,
-    assertValidPackageName
+    assertValidPackageName,
+    removeReloadWarning
 } from "../../../common-utils/package-registry.js";
 import { PAGE_SORT_PACKAGE_KIND, findPageSortUsages, reloadPageSortsInDaemon } from "../../../page-sort-packages/page-sort-utils.js";
 
@@ -64,7 +65,9 @@ export default class Remove extends BaseCommand {
 
         // Best-effort reload in the daemon at --pkcRpcUrl, so the removal takes effect
         // without a restart
-        await reloadPageSortsInDaemon(flags.pkcRpcUrl);
+        const reload = await reloadPageSortsInDaemon(flags.pkcRpcUrl);
+        const reloadWarning = removeReloadWarning(PAGE_SORT_PACKAGE_KIND, reload, args.name, flags.pkcRpcUrl);
+        if (reloadWarning) this.warn(reloadWarning);
     }
 
     // A community whose settings.pages names a removed sort keeps publishing without it (pkc-js skips the entry and

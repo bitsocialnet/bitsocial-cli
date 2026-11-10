@@ -55,7 +55,7 @@ Each directory is a fully installed package (its own `node_modules`). `list` rea
 ## How the daemon loads them
 
 - **At start:** `bitsocial daemon` loads every package under `<dataPath>/challenges/` into `PKC.challenges` before starting the RPC server, and logs `Loaded challenge packages: name@version, ...`. A package that fails to import is logged and skipped. It does not stop the daemon.
-- **Hot reload:** after `install` or `remove`, the CLI POSTs to the daemon's reload endpoint, which re-reads the directory and notifies settings subscribers. If it worked, `install` prints `reloaded <name>@<version> in the daemon at <url>`. Running communities pick up the change on their next cycle, and nothing is restarted.
+- **Hot reload:** after `install` or `remove`, the CLI POSTs to the daemon's reload endpoint, which re-reads the directory and notifies settings subscribers. The daemon answers with the packages it loaded. `install` prints `reloaded <name>@<version> in the daemon at <url>` only when that list has the version it installed, and warns otherwise (the package failed to import in the daemon, or the daemon uses another data path). `remove` warns when the daemon still lists the package or failed to reload. Running communities pick up the change on their next cycle, and nothing is restarted.
   - `POST http://<host>:<port>/api/challenges/reload` is local only (403 for remote connections).
   - `POST http://<host>:<port>/<authKey>/api/challenges/reload` works remotely. The CLI uses this one when `--pkcRpcUrl` includes the auth key path (`ws://host:9138/<authKey>`).
   - The reload URL is derived from `--pkcRpcUrl`, and a wildcard host (`0.0.0.0`, `::`) is dialed as `127.0.0.1`.
@@ -121,7 +121,8 @@ The reason: pkc-js can't load a challenge whose name is no longer registered. A 
 - **Install fails validation:** the default export is not a challenge factory. A page sort package belongs under `bitsocial page-sort install`.
 - **Daemon log `Failed to load challenge "<name>"`:** the package is installed but its entry point throws on import. It is left out of the registry until fixed. A previously loaded version keeps serving.
 - **A community fails to start with `ERR_COMMUNITY_CHALLENGES_FAILED_TO_LOAD`** (publishers see `challenge "<name>" is not registered on this node`): an entry in its `settings.challenges` names a challenge this daemon doesn't have, usually a package that was removed with `--force` or never installed on this node. The error's `details.failures` lists each entry and `details.availableChallengeNames` lists what is registered. Reinstall the package with `bitsocial challenge install`, or change the entry with `bitsocial community edit`, then start the community again (`bitsocial community start <address>`).
-- **`install` printed no `reloaded ...` line:** no daemon answered at `--pkcRpcUrl`. Pass the URL the daemon actually listens on, including the auth key path for a remote daemon, or restart the daemon.
+- **`install` printed no `reloaded ...` line and no warning:** no daemon answered at `--pkcRpcUrl`. Pass the URL the daemon actually listens on, including the auth key path for a remote daemon, or restart the daemon.
+- **`install` warns that the daemon reloaded its challenges without `<name>@<version>`:** the daemon answered but does not serve the version just installed. Either it failed to import it (look for `Failed to load challenge` in `bitsocial logs`), or it reads another data path than `--pkcOptions.dataPath`.
 
 ## Writing a challenge package
 
