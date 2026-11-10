@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { spawn } from "child_process";
 import { PKCLogger, setupDebugLogger, type PKCLoggerType } from "../../dist/util.js";
+import { allocateFreePort } from "../helpers/daemon-helpers.js";
 
 describe("setupDebugLogger", () => {
     let savedDebug: string | undefined;
@@ -132,5 +134,34 @@ describe("setupDebugLogger", () => {
 
         expect(result.debugNamespace).toBeUndefined();
         expect(Logger.enabled("bitsocial-cli")).toBe(false);
+    });
+});
+
+// bin/run moves DEBUG aside before the debug module loads, and setupDebugLogger reads it back from
+// _PKC_DEBUG. The launcher kept writing the old _PLEBBIT_DEBUG name, so DEBUG did nothing on an
+// installed CLI: commands logged nothing and the daemon fell back to its default namespaces.
+describe("DEBUG through bin/run", () => {
+    it("enables the namespaces DEBUG names", { timeout: 60_000 }, async () => {
+        const namespace = "bitsocial-cli:commands:community:list";
+        const nothingListening = `ws://127.0.0.1:${await allocateFreePort()}`;
+        const env: NodeJS.ProcessEnv = { ...process.env, DEBUG: namespace };
+        delete env["_PKC_DEBUG"];
+        const child = spawn("node", ["./bin/run", "community", "list", "--pkcRpcUrl", nothingListening], {
+            stdio: ["ignore", "ignore", "pipe"],
+            env
+        });
+        let stderr = "";
+        // The command logs its flags under this namespace before it tries to reach the daemon, so stop as soon as that
+        // line shows up instead of waiting out the connect timeout.
+        await new Promise<void>((resolve, reject) => {
+            child.stderr.on("data", (data: Buffer) => {
+                stderr += data.toString();
+                if (stderr.includes(namespace)) resolve();
+            });
+            child.on("error", reject);
+            child.on("close", () => resolve());
+        });
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        expect(stderr).toContain(`${namespace} flags:`);
     });
 });
