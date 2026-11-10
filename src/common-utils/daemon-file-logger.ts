@@ -14,8 +14,9 @@ export interface DaemonFileLoggerOptions {
 export interface DaemonFileLogger {
     /**
      * Append a timestamped line to the log file. Returns false when the write was
-     * dropped (e.g. the logger is closed or the in-flight pending buffer is full),
-     * letting the caller decide whether to fall back to terminal output.
+     * dropped (e.g. the logger is closed, the in-flight pending buffer is full, or a
+     * file system error killed the stream), letting the caller decide whether to fall
+     * back to terminal output.
      */
     writeTimestampedLine(text: string, stream: "stdout" | "stderr"): boolean;
     close(): Promise<void>;
@@ -86,10 +87,10 @@ export function createDaemonFileLogger(options: DaemonFileLoggerOptions): Daemon
         if (trimming) return;
         trimming = trim()
             .catch(() => {
-                // If trim fails (FS error, etc.) we drop the pending buffer rather than
-                // hold memory forever. The next write will hit the same condition and retry.
-                pending = [];
-                pendingBytes = 0;
+                // The trim ended the stream before it failed (FS error, etc.). Append to the untrimmed
+                // file again, and drain the lines buffered meanwhile into it: callers were told they
+                // were written. The next trim runs once the new stream passes maxBytes.
+                if (!stream.writable) reopenStream();
             })
             .finally(() => {
                 trimming = undefined;
@@ -112,6 +113,10 @@ export function createDaemonFileLogger(options: DaemonFileLoggerOptions): Daemon
             pendingBytes += timestamped.length;
             return true;
         }
+
+        // A failed write (ENOSPC, EIO) destroys the stream, and the no-op 'error' listener keeps that
+        // quiet. Report the line as dropped so the caller writes it to the terminal instead.
+        if (!stream.writable) return false;
 
         stream.write(timestamped);
 
