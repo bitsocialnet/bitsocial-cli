@@ -220,6 +220,8 @@ it("noWssStatement says WebTransport is configured, not that nothing can reach t
     const text = noWssStatement("TCP 443 is in use");
     expect(text).toContain("TCP 443 is in use");
     expect(text).toContain("WebTransport");
+    // older browser clients dial WSS only, so the message names the pkc-js version that dials WebTransport
+    expect(text).toContain("pkc-js 0.0.139 or later");
     expect(text).not.toContain("Neither");
 });
 
