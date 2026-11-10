@@ -32,6 +32,7 @@
         "/bin",
         "/dist",
         "!/dist/webuis",
+        "!/dist/.webuis-*",
         "!/dist/*.tar.gz",
         "!/dist/*.tsbuildinfo",
         "/npm-shrinkwrap.json",
