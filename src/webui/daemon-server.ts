@@ -228,6 +228,16 @@ export async function startDaemonServer(
         daemonServerDestroyed = true;
     };
 
+    // Test hooks: keep this promise pending once the server is up, and optionally fail it afterwards, so a test can
+    // deliver a signal while daemon startup still waits on it (see test/cli/daemon-signal-during-startup.test.ts)
+    const readyDelayRaw = process.env["PKC_CLI_TEST_DAEMON_SERVER_READY_DELAY_MS"];
+    const readyDelay = readyDelayRaw ? Number(readyDelayRaw) : 0;
+    if (Number.isFinite(readyDelay) && readyDelay > 0) await new Promise((resolve) => setTimeout(resolve, readyDelay));
+    if (process.env["PKC_CLI_TEST_DAEMON_SERVER_FAIL_AFTER_DELAY"]) {
+        await cleanupDaemonServer();
+        throw new Error("Simulated daemon server start failure (PKC_CLI_TEST_DAEMON_SERVER_FAIL_AFTER_DELAY)");
+    }
+
     const listedSub = rpcServer.pkc.communities.map((community) => community.address);
     return { rpcAuthKey, listedSub, webuis, destroy: cleanupDaemonServer };
 }

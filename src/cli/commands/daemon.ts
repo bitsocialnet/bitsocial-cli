@@ -278,6 +278,9 @@ export default class Daemon extends Command {
         // hook (exit-hook's "SYNCHRONOUS TERMINATION NOTICE") and orphan kubo. (issue #98)
         let runDaemonShutdown: (() => Promise<void>) | undefined;
         let removeAsyncExitHook: (() => void) | undefined;
+        // Set once shutdown begins. Declared out here so the startup-failure catch can tell a failure caused by a
+        // shutdown that a signal started mid-startup from a real one.
+        let mainProcessExited = false;
 
         try {
             // Log debug info after pipe is set up so it goes to the log file, not terminal
@@ -363,8 +366,6 @@ export default class Daemon extends Command {
             const bsoResolvers = createBsoResolvers(flags.chainProviderUrls);
             mergedPkcOptions.nameResolvers = [...(mergedPkcOptions.nameResolvers || []), ...bsoResolvers];
 
-
-            let mainProcessExited = false;
             let pendingKuboStart: Promise<ChildProcessWithoutNullStreams> | undefined;
             // Kubo Node may fail randomly, we need to set a listener so when it exits because of an error we restart it
             let kuboProcess: ChildProcessWithoutNullStreams | undefined;
@@ -533,6 +534,8 @@ export default class Daemon extends Command {
 
             let startedOwnRpc = false;
             let daemonServer: Awaited<ReturnType<typeof startDaemonServer>> | undefined;
+            // Tracked so a shutdown that lands while the server is starting can still destroy the server it creates
+            let pendingDaemonServerStart: Promise<Awaited<ReturnType<typeof startDaemonServer>>> | undefined;
             const createOrConnectRpc = async () => {
                 if (mainProcessExited) return;
                 if (startedOwnRpc) return;
@@ -562,9 +565,19 @@ export default class Daemon extends Command {
                 if (loadedPageSorts.length > 0)
                     console.log(`Loaded page sort packages: ${loadedPageSorts.map(formatChallengeNameVersion).join(", ")}`);
 
-                daemonServer = await startDaemonServer(pkcRpcUrl, ipfsGatewayEndpoint, mergedPkcOptions, {
+                // Checked right before the start: from here on, shutdownDaemon finds the server or its pending start
+                if (mainProcessExited) return;
+                const serverStart = startDaemonServer(pkcRpcUrl, ipfsGatewayEndpoint, mergedPkcOptions, {
                     allowPrivateKeyExport: flags.allowPrivateKeyExport
                 });
+                pendingDaemonServerStart = serverStart;
+                try {
+                    daemonServer = await serverStart;
+                } finally {
+                    if (pendingDaemonServerStart === serverStart) pendingDaemonServerStart = undefined;
+                }
+                // Shutdown began while the server was starting; it destroys the server, so don't announce it
+                if (mainProcessExited) return;
 
                 startedOwnRpc = true;
                 console.log(`pkc rpc: listening on ${pkcRpcUrl} (local connections only)`);
@@ -685,9 +698,18 @@ export default class Daemon extends Command {
                 const kuboKillPromise = killKuboProcess();
                 const reachabilityStopPromise = reachabilityRuntime?.stop().catch((error) => log.error("Error stopping reachability", error));
 
-                if (daemonServer)
+                // A server still starting is waited for (bounded, like kubo starts above), so it is destroyed too
+                const serverToDestroy =
+                    daemonServer ??
+                    (pendingDaemonServerStart
+                        ? await Promise.race([
+                              pendingDaemonServerStart.catch(() => undefined),
+                              new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 15_000).unref())
+                          ])
+                        : undefined);
+                if (serverToDestroy)
                     try {
-                        await daemonServer.destroy();
+                        await serverToDestroy.destroy();
                         log("Daemon server shut down");
                     } catch (e) {
                         log.error("Error shutting down daemon server", e);
@@ -773,6 +795,9 @@ export default class Daemon extends Command {
             // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
             await createOrConnectRpc();
+            // A signal during the startup above began the shutdown, which tears down what startup made. Starting the
+            // GC scheduler, the watchdog or reachability now would only run them past it.
+            if (mainProcessExited) return;
 
             // Runs against whichever kubo the daemon ends up talking to, including one started by
             // another program (--pkcOptions.kuboRpcClientsOptions). pkc-js also GCs, but only from
@@ -827,6 +852,13 @@ export default class Daemon extends Command {
                 }
             }
         } catch (err) {
+            // A signal began the shutdown while startup was still running, and startup then failed, typically because
+            // that shutdown took kubo or the server away. The exit hook is finishing the shutdown and exits with the
+            // signal's code; reporting a startup failure and exiting 1 here would cut it short and SIGKILL kubo.
+            if (mainProcessExited) {
+                log("Startup stopped by shutdown:", err);
+                return;
+            }
             const errorMsg = err instanceof Error ? err.message : String(err);
             stdoutWrite(`\nDaemon failed to start: ${errorMsg}\n\n`);
 
