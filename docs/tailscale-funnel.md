@@ -87,7 +87,7 @@ Tailscale runs in a sidecar container, and the bitsocial container shares its ne
 
 Inside a container, `setup` prints these steps in place of the host ones.
 
-This was tested with an image built from source, Docker Compose 5.5.1 and `tailscale/tailscale:latest` on 2026-11-10. The inline `configs` `content` needs Docker Compose 2.23.1 or newer. With an older one, put the JSON in a file and mount it.
+This was tested with an image built from source, Docker Compose 5.5.1 and `tailscale/tailscale:latest` on 2026-11-10, with the compose example edited as above. In one run the first two handshake attempts failed while the certificate was issued and the third succeeded. The inline `configs` `content` needs Docker Compose 2.23.1 or newer. With an older one, put the JSON in a file and mount it.
 
 ## What you are trusting Tailscale with
 
@@ -105,7 +105,7 @@ This was tested with an image built from source, Docker Compose 5.5.1 and `tails
 
 - **Every browser connection passes through one company's relays.** If Tailscale has an outage, changes Funnel's terms or limits your traffic, the address stops working. WebTransport and other nodes are not affected.
 - **Funnel's bandwidth limits are not published.** Tailscale says Funnel traffic is subject to limits without stating them.
-- **Some requests through Funnel fail.** In testing, 57 of 60 WebSocket upgrades opened at once from another network succeeded, and one `setup --announce` failed to connect for a reason that was not found. A browser retries, and `setup` tries its handshake three times.
+- **Some connections through Funnel fail in bursts.** In testing, when 60 WebSocket upgrades were opened at once from one address on another network, 3 to 6 failed each time. Their TCP connection to Tailscale's relay needed retransmits and TLS then timed out, so they never reached the node. Upgrades made one at a time over IPv4 all succeeded. One `setup --announce` on a host also failed to connect for a reason that was not found. A browser retries, and `setup` tries its handshake three times.
 - **kubo sees every Funnel peer as `127.0.0.1`.** `tailscaled` proxies locally. kubo's per-IP connection limits exempt loopback, so they do not cap Funnel connections, and they also cannot tell one Funnel peer from another. One abusive client can open many connections, held back only by kubo's global resource manager limits and connection manager. An IP ban cannot single it out. kubo's gossipsub runs without peer scoring, so sharing an IP costs Funnel peers nothing there.
 - **A handshake from the node itself is weak proof.** `setup` and `status` dial the address from the node's own machine. With Tailscale's MagicDNS on, a machine may resolve its own `ts.net` name to its tailnet address, and the dial would then never leave the machine. This was not tested: the test machine had MagicDNS off, and its dial went out through Tailscale's relays. Only the test from another network proves the address.
 - **`curl` needs `--http1.1`.** Over HTTP/2 the WebSocket upgrade through Funnel returns `404`. The command `setup` prints already passes it. Browsers are not affected.
