@@ -32,6 +32,17 @@ type ExportableCommunity = {
     removeListener: (event: string, listener: (records: ExportRecord[]) => void) => void;
 };
 
+// The part of pkc-js's PKCRpcClient that says whether the connection to the RPC server is up
+type RpcConnection = {
+    state: string;
+    on: (event: "statechange", listener: (state: string) => void) => void;
+    removeListener: (event: "statechange", listener: (state: string) => void) => void;
+};
+
+// How long an export waits for the daemon's exports after the RPC connection drops. pkc-js retries about 1, 3, 7, 15
+// and 31s after a drop (its backoff doubles up to 30s), so this covers five attempts
+const RECONNECT_GRACE_MS = 60_000;
+
 export default class Export extends BaseCommand {
     static override description =
         "Export a local community to a SQLite snapshot file. The export runs on the RPC server (daemon); once finished the snapshot is downloaded and its sha256 checksum is verified. Pass --includePrivateKey to produce a restorable backup that keeps the community's address.";
@@ -130,7 +141,14 @@ export default class Export extends BaseCommand {
                 this.error(`Destination file already exists: ${destPath}. Use --force to overwrite it`);
             }
 
-            const finishedRecord = await this._runExport(exportableCommunity, flags.includePrivateKey, abortController.signal, flags.quiet);
+            const rpcConnection = Object.values(pkc.clients?.pkcRpcClients ?? {})[0] as RpcConnection | undefined;
+            const finishedRecord = await this._runExport(
+                exportableCommunity,
+                flags.includePrivateKey,
+                abortController.signal,
+                flags.quiet,
+                rpcConnection
+            );
             log("Export finished on the RPC server", finishedRecord);
 
             if (!finishedRecord.url) {
@@ -159,15 +177,22 @@ export default class Export extends BaseCommand {
         community: ExportableCommunity,
         includePrivateKey: boolean,
         signal: AbortSignal,
-        quiet: boolean
+        quiet: boolean,
+        rpcConnection?: RpcConnection
     ): Promise<ExportRecord> {
         const { exportId } = await community.export({ includePrivateKey, signal });
 
         return new Promise<ExportRecord>((resolve, reject) => {
             let lastPrintedPercent = -1;
+            let settled = false;
+            // Set while the connection is down, or back up but without the daemon's exports yet
+            let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
             const cleanup = () => {
+                settled = true;
+                clearTimeout(reconnectTimer);
                 community.removeListener("exportschange", checkRecords);
                 signal.removeEventListener("abort", onAbort);
+                rpcConnection?.removeListener("statechange", onConnectionStateChange);
             };
             // Don't wait for the server's terminal ERR_EXPORT_CANCELLED record — it never arrives if the
             // daemon died or the connection dropped. pkc-js's own abort listener (registered inside
@@ -176,8 +201,51 @@ export default class Export extends BaseCommand {
                 cleanup();
                 reject(new Error("Export cancelled"));
             };
+            // The export's progress and result only arrive over the RPC connection. After a drop pkc-js reconnects and
+            // re-subscribes to the exports, and the daemon answers with the exports it has, which outlive connections.
+            // A daemon that died never answers and a restarted one no longer has the export, so wait a bounded time
+            const onConnectionStateChange = (state: string) => {
+                if (settled) return;
+                if (state === "failed") {
+                    // pkc-js gave up, e.g. after the server refused the auth key
+                    cleanup();
+                    reject(
+                        new Error(
+                            `Lost the connection to the RPC server during the export, and pkc-js stopped reconnecting (state: failed). ` +
+                                `Check the daemon and its auth key, then export again`
+                        )
+                    );
+                    return;
+                }
+                if (state === "connected" || reconnectTimer) return;
+                reconnectTimer = setTimeout(() => {
+                    cleanup();
+                    reject(
+                        new Error(
+                            `Lost the connection to the RPC server during the export, and did not get the export back within ` +
+                                `${RECONNECT_GRACE_MS / 1000}s. Check that the daemon is running, then export again`
+                        )
+                    );
+                }, RECONNECT_GRACE_MS);
+            };
             const checkRecords = (records: ExportRecord[]) => {
                 const record = records.find((rec) => rec.exportId === exportId);
+                if (reconnectTimer) {
+                    // Nothing arrives while the connection is down, so these are the exports the daemon sent when
+                    // pkc-js re-subscribed after the reconnect
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = undefined;
+                    if (!record) {
+                        cleanup();
+                        reject(
+                            new Error(
+                                `The RPC server no longer has export ${exportId} after the connection came back, so the daemon ` +
+                                    `probably restarted. Export again`
+                            )
+                        );
+                        return;
+                    }
+                }
                 if (!record) return;
                 if (record.error) {
                     cleanup();
@@ -196,9 +264,12 @@ export default class Export extends BaseCommand {
             };
             community.on("exportschange", checkRecords);
             signal.addEventListener("abort", onAbort, { once: true });
+            rpcConnection?.on("statechange", onConnectionStateChange);
             if (signal.aborted) return onAbort();
             // The terminal notification may have arrived before the listener was attached
             checkRecords(community.exports);
+            // ...and the connection may already be down
+            if (rpcConnection && rpcConnection.state !== "connected") onConnectionStateChange(rpcConnection.state);
         });
     }
 
