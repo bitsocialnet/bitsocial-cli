@@ -9,7 +9,7 @@
 
 ```bash
 bitsocial reachability setup     # discover, configure, get a certificate, verify; safe to rerun
-bitsocial reachability status    # mode, addresses, certificate expiry, last checks, requirements; --json for scripts
+bitsocial reachability status    # who can connect, then mode, addresses, certificate expiry, last checks, requirements; --json for scripts
 bitsocial reachability enable    # repair and turn back on from the stored choices, never asks anything
 bitsocial reachability disable   # stop serving and restore the kubo config; --purge also moves the state to a backup
 ```
@@ -72,14 +72,14 @@ A failed handshake is `failed` when every IP the address leads to is on one of t
 
 A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
 
-When no WSS address works (none exists, or every handshake is `failed`), `status` weighs AutoNAT's results before saying anything about browsers:
+When no WSS address works (none exists, or every handshake is `failed`), the `browser-address` check weighs AutoNAT's results. The lines `status` opens with are described in [Who can connect](#who-can-connect).
 
-| AutoNAT | Opening line of `status` | `browser-address` |
-| --- | --- | --- |
-| Reached a `/quic-v1/webtransport` address | Browsers that support WebTransport should be able to connect unless their network blocks UDP; `setup` adds WSS | `warn` |
-| Has not tested the WebTransport address yet | Not known yet whether browsers can connect over WebTransport | `unknown`, or `warn` with failed WSS addresses |
-| Reached other addresses only | Desktop nodes can reach this node and it seeds for them, but browsers cannot connect directly | `warn` with failed WSS addresses, otherwise none |
-| Reached nothing, or no answer | Browsers cannot reach this node | `fail` with failed WSS addresses, otherwise none |
+| AutoNAT | `browser-address` |
+| --- | --- |
+| Reached a `/quic-v1/webtransport` address | `warn` |
+| Has not tested the WebTransport address yet | `unknown`, or `warn` with failed WSS addresses |
+| Reached other addresses only | `warn` with failed WSS addresses, otherwise none |
+| Reached nothing, or no answer | `fail` with failed WSS addresses, otherwise none |
 
 Messages name no browsers, since WebTransport support changes over time. The daemon's warning that no browser address works (below) weighs AutoNAT the same way.
 
@@ -157,6 +157,50 @@ Either way it waits before asking again for the family that failed: 1 hour, doub
 
 The daemon sends stderr only to its log file, so these messages go to stdout where operators can see them.
 
+## Who can connect
+
+`bitsocial reachability status` opens with two lines, on every node, whether `setup` ran, was declined or never ran:
+
+```
+Desktop nodes (kubo/helia): can connect (AutoNAT reached /ip4/1.2.3.4/udp/4001/quic-v1)
+Browsers: those that support WebTransport should be able to connect, unless their network blocks UDP; run setup to add WSS (AutoNAT reached kubo over UDP 4001)
+```
+
+`--json` has the same under `connectivity`: `desktop` and `browsers`, each with a `status` (`ok`, `warn`, `fail`, `unknown`) and a `detail`. When one line says it all, `connectivity.summary` holds it and the text output prints only that line, while `desktop` and `browsers` are still both set.
+
+| Situation | Output |
+| --- | --- |
+| kubo is not running | `Cannot tell who can connect: kubo is not running. Run: bitsocial daemon`, both `unknown` |
+| No public address announced and AutoNAT reached nothing | `Nobody can connect: this node announces no public address, so it seeds nothing for anyone.`, both `fail` |
+
+AutoNAT outranks the announcement check: an address AutoNAT reached means somebody can connect, even if kubo's announcements look private.
+
+Desktop nodes:
+
+| Evidence | Line | Status |
+| --- | --- | --- |
+| AutoNAT reached an address that is not a relay | can connect | `ok` |
+| Only relayed addresses, reached or announced | can connect only through a relay | `warn` |
+| AutoNAT is still testing, or gave no results | not known yet | `unknown` |
+| AutoNAT could reach none | cannot connect | `fail` |
+
+Browsers, first match wins. `status` tries a handshake from this machine with every WSS address kubo announces, `setup`'s own included. On a node where reachability is disabled it skips `setup`'s addresses, because Caddy is off on purpose, but still tries the others, such as an AutoTLS address, which `disable` turns back on:
+
+| Evidence | Line | Status |
+| --- | --- | --- |
+| A WSS handshake succeeded | should be able to connect over WSS; the firewall was not tested from other networks | `ok` |
+| AutoNAT reached WebTransport | those that support WebTransport should be able to connect, unless their network blocks UDP; then why WSS is missing: `run setup to add WSS`, the failed handshake, an untestable WSS address, or reachability being disabled | `warn` |
+| A WSS handshake could not be tested from this machine (`unconfirmed`, usually no NAT hairpin) | may be able to connect over WSS | `unknown` |
+| AutoNAT has not tested WebTransport, or desktop nodes are not known yet | not known yet | `unknown` |
+| Reachability is disabled and no other WSS address works | cannot connect directly: reachability is disabled. Run: bitsocial reachability enable | `warn`, or `fail` if desktop nodes cannot connect |
+| Nothing | cannot connect directly | `warn` if desktop nodes can connect, `fail` otherwise |
+
+The advice for getting WSS follows what `setup` did: `run setup to add WSS` on a node that never ran it or set up no WSS, `bitsocial reachability enable` on a disabled node, and on an enabled node whose WSS is not working, a pointer to the requirements below, such as `kubo-announce`, since running `setup` again would not fix that.
+
+A handshake from this machine never crosses its provider's firewall, so `ok` says browsers *should* be able to connect, not that they can.
+
+On a node that never ran `setup`, a `Reachability: not configured` line follows, as `Reachability: declined` does on a declined node and `Enabled:` and `Mode:` on a configured one.
+
 ## Troubleshooting
 
 `bitsocial reachability status` lists each requirement with its fix (`checks` in `--json`).
@@ -166,7 +210,7 @@ The daemon sends stderr only to its log file, so these messages go to stdout whe
 | `public-address-announced` | Running kubo announces no public address: no public IPv4, no global IPv6 (`fec0::/10` and other private ranges don't count), no `/dns*` name and no relay address. No other node or browser can dial it, so it seeds nothing for anyone. Typical of a VM on NAT networking (`10.0.2.15` plus `fec0::`). Runs on every node, `setup` or not. `unknown` while kubo is down. The daemon warns once at start-up in the same case |
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
 | `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage) |
-| `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, as the program is then serving it |
+| `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, on any node, `setup`'s own addresses included, as the program is then serving it |
 | `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn`. "Reached" proves inbound UDP, not a browser handshake (see [WebTransport and AutoNAT](#webtransport-and-autonat)) |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
 | `firewall` | An active `ufw` or `firewalld` does not appear to allow port 443 |

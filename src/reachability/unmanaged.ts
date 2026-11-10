@@ -134,27 +134,3 @@ export function browserAddressCheck(addresses: UnmanagedAddress[], evidence: Aut
     if (problems.length > 0) return { id, status: "warn", detail: [...succeeded, ...problems, ...(webTransport ? [webTransport] : [])].join(". "), fix };
     return { id, status: "ok", detail: succeeded.join("") };
 }
-
-// The lines `status` opens with on a node that never ran setup, where this replaces "Browsers cannot reach this node" only if something is worth saying.
-export function notConfiguredSummary(addresses: UnmanagedAddress[], evidence: AutonatEvidence = NO_EVIDENCE): string[] {
-    const ok = ofStatus(addresses, "ok");
-    const failed = ofStatus(addresses, "failed");
-    const unconfirmed = ofStatus(addresses, "unconfirmed");
-    const unverified = ofStatus(addresses, "unverified");
-    const failures = failed.length > 0 ? [handshakeFailedMessage(failed)] : [];
-    const webTransport = evidence.webTransportReached.length > 0 ? [`${webTransportReachedMessage(evidence.webTransportReached)}.`] : [];
-    if (ok.length === 0 && unconfirmed.length === 0 && unverified.length === 0) {
-        if (webTransport.length > 0) return ["Reachability is not configured.", ...webTransport, `${ADD_WSS}.`, ...failures];
-        if (evidence.webTransportUntested.length > 0) return ["Reachability is not configured.", `${webTransportUntestedMessage(evidence.webTransportUntested)}.`, "Run: bitsocial reachability setup", ...failures];
-        if (evidence.reached.length > 0) return [`Reachability is not configured. ${desktopOnlyMessage(evidence.reached)}. To add that, run: bitsocial reachability setup`, ...failures];
-        return ["Reachability is not configured. Browsers cannot reach this node. Run: bitsocial reachability setup", ...failures];
-    }
-    return [
-        "`bitsocial reachability setup` has not been run on this node.",
-        ...ok.map(({ address }) => handshakeSucceededMessage(address)),
-        ...failures,
-        ...(unconfirmed.length > 0 ? [unconfirmedMessage(unconfirmed)] : []),
-        ...(unverified.length > 0 ? [unverifiedMessage(unverified)] : []),
-        ...webTransport
-    ];
-}

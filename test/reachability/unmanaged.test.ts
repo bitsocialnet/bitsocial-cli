@@ -3,7 +3,6 @@ import {
     autonatEvidence,
     browserAddressCheck,
     isBrowserAddress,
-    notConfiguredSummary,
     verifyUnmanagedAddresses
 } from "../../src/reachability/unmanaged.js";
 
@@ -131,28 +130,6 @@ describe("reporting", () => {
         expect(browserAddressCheck([failed, unconfirmed])!.status).toBe("warn");
     });
 
-    it("does not say browsers cannot reach the node when a dial could only not confirm it", () => {
-        const text = notConfiguredSummary([unconfirmed]).join("\n");
-        expect(text).not.toContain("Browsers cannot reach this node");
-        expect(text).toContain(unconfirmed.address);
-        expect(text).toContain("timed out");
-        expect(notConfiguredSummary([failed, unconfirmed]).join("\n")).not.toContain("Browsers cannot reach this node");
-    });
-
-    it("says browsers cannot reach the node only with nothing that works or may work", () => {
-        const cannotReach = "Browsers cannot reach this node";
-        expect(notConfiguredSummary([]).join("\n")).toContain(cannotReach);
-        expect(notConfiguredSummary([failed]).join("\n")).toContain(cannotReach);
-        expect(notConfiguredSummary([ok, failed]).join("\n")).not.toContain(cannotReach);
-        expect(notConfiguredSummary([unverified]).join("\n")).not.toContain(cannotReach);
-    });
-
-    it("reports what was tested, without claiming browsers can reach the node", () => {
-        const text = notConfiguredSummary([ok]).join("\n");
-        expect(text).toContain("a handshake from this machine succeeded");
-        expect(text).toContain("does not manage it");
-        expect(text).not.toMatch(/browsers can reach/i);
-    });
 });
 
 // Issue #238: kubo's WebTransport on UDP 4001 lets browsers in without any WSS address.
@@ -167,23 +144,11 @@ describe("WebTransport and desktop reachability from AutoNAT", () => {
     const untested = autonat({ reachable: [tcp], unknown: [quic, webTransport] });
     const desktopOnly = autonat({ reachable: [tcp, quic], unreachable: [webTransport] });
     const nothing = autonat({ unreachable: [tcp, quic, webTransport] });
-    const CANNOT_REACH = "Browsers cannot reach this node";
 
     it("sorts AutoNAT's results into WebTransport reached, untested, and anything reached", () => {
         expect(reached).toEqual({ reached: [tcp, quic, webTransport], webTransportReached: [webTransport], webTransportUntested: [] });
         expect(untested.webTransportUntested).toEqual([webTransport]);
         expect(autonatEvidence(undefined)).toEqual({ reached: [], webTransportReached: [], webTransportUntested: [] });
-    });
-
-    it("does not say browsers cannot reach a node AutoNAT reached on its WebTransport port, and says what was proven", () => {
-        const text = notConfiguredSummary([], reached).join("\n");
-        expect(text).not.toContain(CANNOT_REACH);
-        expect(text).toContain(
-            "AutoNAT reached kubo over QUIC on UDP 4001, so browsers that support WebTransport should be able to connect unless their network blocks UDP"
-        );
-        expect(text).toContain("bitsocial reachability setup");
-        expect(text).not.toMatch(/Safari|Chrom|Firefox/);
-        expect(notConfiguredSummary([failed], reached).join("\n")).not.toContain(CANNOT_REACH);
     });
 
     it("warns, not fails, on browser-address when WebTransport was reached and no WSS works", () => {
@@ -195,34 +160,25 @@ describe("WebTransport and desktop reachability from AutoNAT", () => {
         expect(browserAddressCheck([failed], reached)).toMatchObject({ status: "warn", detail: expect.stringContaining(failed.address) });
     });
 
-    it("says WebTransport is not tested yet instead of claiming browsers cannot connect", () => {
-        const text = notConfiguredSummary([], untested).join("\n");
-        expect(text).not.toContain(CANNOT_REACH);
-        expect(text).toContain("not tested");
+    it("is unknown while WebTransport is not tested yet, and warns beside a failed WSS address", () => {
         expect(browserAddressCheck([], untested)!.status).toBe("unknown");
         expect(browserAddressCheck([failed], untested)!.status).toBe("warn");
     });
 
     it("tells a node desktop peers reach that it seeds for them, and warns rather than fails on browsers", () => {
-        const text = notConfiguredSummary([], desktopOnly).join("\n");
-        expect(text).not.toContain(CANNOT_REACH);
-        expect(text).toContain("Desktop nodes can reach this node");
-        expect(text).toContain("browsers cannot connect directly");
         expect(browserAddressCheck([failed], desktopOnly)).toMatchObject({
             status: "warn",
             detail: expect.stringContaining("Desktop nodes can reach this node")
         });
     });
 
-    it("keeps failing, and saying browsers cannot reach the node, when AutoNAT reached nothing", () => {
+    it("keeps failing when AutoNAT reached nothing", () => {
         expect(browserAddressCheck([failed], nothing)!.status).toBe("fail");
         expect(browserAddressCheck([], nothing)).toBeUndefined();
-        expect(notConfiguredSummary([], nothing).join("\n")).toContain(CANNOT_REACH);
     });
 
     it("adds the WebTransport result beside a WSS address that only some checks could confirm", () => {
         const unconfirmed = { address: "/dns4/d.example/tcp/443/tls/ws", status: "unconfirmed", error: "timed out" } as const;
         expect(browserAddressCheck([unconfirmed], reached)!.detail).toContain("UDP 4001");
-        expect(notConfiguredSummary([unconfirmed], reached).join("\n")).toContain("UDP 4001");
     });
 });

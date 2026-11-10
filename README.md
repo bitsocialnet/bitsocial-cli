@@ -260,7 +260,7 @@ It finds this machine's public addresses, asks the router to forward ports throu
 | Command | What it does |
 | ------- | ------------ |
 | `bitsocial reachability setup` | Discover, configure, get a certificate, verify |
-| `bitsocial reachability status` | Show mode, addresses, certificate expiry and last checks (`--json` for scripts) |
+| `bitsocial reachability status` | Show whether desktop nodes and browsers can connect, then mode, addresses, certificate expiry and last checks (`--json` for scripts) |
 | `bitsocial reachability enable` | Repair and turn back on from the stored choices, without asking anything |
 | `bitsocial reachability disable` | Stop serving and restore the kubo config. `--purge` also moves the state to a timestamped backup |
 
@@ -1417,7 +1417,7 @@ _See code: [src/cli/commands/reachability/setup.ts](https://github.com/bitsocial
 
 ## `bitsocial reachability status`
 
-Show whether browsers can reach this node: mode, announced addresses, certificate expiry, last checks, and whether each requirement is met, including permission to bind UDP 443
+Show whether desktop nodes and browsers can connect to this node, then why: mode, announced addresses, certificate expiry, last checks, and whether each requirement is met, including permission to bind UDP 443
 
 ```
 USAGE
@@ -1430,8 +1430,8 @@ GLOBAL FLAGS
   --json  Format output as json.
 
 DESCRIPTION
-  Show whether browsers can reach this node: mode, announced addresses, certificate expiry, last checks, and whether
-  each requirement is met, including permission to bind UDP 443
+  Show whether desktop nodes and browsers can connect to this node, then why: mode, announced addresses, certificate
+  expiry, last checks, and whether each requirement is met, including permission to bind UDP 443
 
 EXAMPLES
   $ bitsocial reachability status
