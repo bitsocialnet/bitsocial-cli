@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bindPermission, evaluateChecks, parseFirewalldState, parseUfwStatus, probeUdpPort, publicAddressAnnouncedCheck, type BindPermissionInput, type CheckFacts } from "../../src/reachability/checks.js";
+import { bindPermission, evaluateChecks, noWssAddressCheck, parseFirewalldState, parseUfwStatus, probeUdpPort, publicAddressAnnouncedCheck, type BindPermissionInput, type CheckFacts } from "../../src/reachability/checks.js";
 import dgram from "dgram";
 
 const CAP_NET_BIND = 1n << 10n;
@@ -271,6 +271,21 @@ describe("evaluateChecks", () => {
 });
 
 // Issue #231: a node announcing only loopback and private addresses seeds nothing for anyone.
+describe("noWssAddressCheck (#226)", () => {
+    const stuck = { announce: [], wsPort: 4002, tcp443: "free" as const, otherWssWorks: false, droppedName: false };
+
+    it("points a node setup left without WSS at Tailscale Funnel, with its ws port", () => {
+        expect(noWssAddressCheck(stuck)).toMatchObject({ id: "browser-address", status: "warn", fix: expect.stringMatching(/Tailscale Funnel.*127\.0\.0\.1:4002.*docs\/tailscale-funnel\.md/) });
+    });
+
+    it.each([
+        ["announces a WSS address", { announce: ["/ip4/93.184.216.34/tcp/443/tls/ws"] }],
+        ["has another program on TCP 443, which setup's reverse proxy guidance covers", { tcp443: "busy" as const }],
+        ["has a working WSS address setup does not manage", { otherWssWorks: true }],
+        ["had a working name dropped, whose DNS is what needs fixing", { droppedName: true }]
+    ])("says nothing on a node that %s", (_name, change) => expect(noWssAddressCheck({ ...stuck, ...change })).toBeUndefined());
+});
+
 describe("publicAddressAnnouncedCheck", () => {
     const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
     const qemuVm = [
