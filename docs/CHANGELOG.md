@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.131 (2026-11-10)</small>
+
+* docs(reachability): name the pkc-js version from which browsers dial WebTransport ([803fc1e](https://github.com/bitsocialnet/bitsocial-cli/commit/803fc1e)), closes [pkcprotocol/pkc-js#492](https://github.com/pkcprotocol/pkc-js/issues/492)
+
 ## <small>0.19.130 (2026-11-10)</small>
 
 * test(reachability): keep the kubo restart retries inside the test's timeout ([4cad443](https://github.com/bitsocialnet/bitsocial-cli/commit/4cad443))
