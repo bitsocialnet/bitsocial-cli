@@ -27,12 +27,13 @@
 // override HOME (and XDG_DATA_HOME) for the daemon and the install command so this test sees
 // only its own daemon and never stops/restarts other tests' daemons running in parallel.
 
-import { spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
 import { describe, it, expect, afterEach } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import { readFileSync } from "fs";
 import fs from "fs/promises";
 import path from "path";
+import { pathToFileURL } from "url";
 import {
     stopPkcDaemon,
     startPkcDaemonWithDynamicPorts,
@@ -46,6 +47,7 @@ import {
 // test file's outbound socket and the daemon's kubo bind would intermittently fail.
 
 const CLI_VERSION = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf-8")).version as string;
+const DAEMON_STATE_MODULE = pathToFileURL(path.join(process.cwd(), "dist", "common-utils", "daemon-state.js")).href;
 
 // How long the old daemon holds kubo alive after SIGINT. Long enough that, with the buggy
 // (RPC-port-only) wait, the restart is guaranteed to land inside the window.
@@ -160,6 +162,20 @@ describe("bitsocial update install restart race (issue #70)", async () => {
             kuboApiUrl = daemon.kuboApiUrl;
             expect(typeof daemonA.pid).toBe("number");
             expect(await waitForKuboReady(kuboApiUrl, 45000)).toBe(true);
+
+            // The state file update install restarts from must record what argv alone does not: the
+            // daemon's working directory and the kubo env vars it was started with.
+            const readStates = `const m = await import(${JSON.stringify(DAEMON_STATE_MODULE)});
+console.log(JSON.stringify(await m.readAllDaemonStates()));`;
+            const states = JSON.parse(
+                execFileSync(process.execPath, ["--input-type=module", "-e", readStates], {
+                    env: { ...process.env, ...isolatedEnv },
+                    encoding: "utf-8"
+                })
+            );
+            expect(states).toHaveLength(1);
+            expect(states[0].cwd).toBe(process.cwd());
+            expect(states[0].env).toMatchObject({ KUBO_RPC_URL: daemon.kuboRpcUrl, IPFS_GATEWAY_URL: daemon.gatewayUrl });
 
             // Run the real `bitsocial update install <currentVersion> --force` with npm offline: it stops
             // the daemon, fails to install, and re-spawns the stopped daemon. The shim (first on PATH) is

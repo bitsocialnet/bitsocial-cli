@@ -37,6 +37,35 @@ export interface DaemonState {
     procStartTime?: string;
     /** External supervisor managing this daemon, if any. Absent for standalone or legacy daemons. */
     supervisor?: DaemonSupervisor;
+    /** Working directory the daemon started in; relative paths in argv resolve against it. Absent in legacy state files. */
+    cwd?: string;
+    /** The DAEMON_ENV_KEYS that were set when the daemon started. Absent in legacy state files. */
+    env?: Record<string, string>;
+}
+
+/** Environment variables the daemon reads at startup to pick its kubo repo and endpoints. */
+export const DAEMON_ENV_KEYS = ["IPFS_PATH", "KUBO_RPC_URL", "IPFS_GATEWAY_URL"] as const;
+
+/** The DAEMON_ENV_KEYS set in `env`, as recorded in a daemon's state file. */
+export function pickDaemonEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+    const picked: Record<string, string> = {};
+    for (const key of DAEMON_ENV_KEYS) {
+        const value = env[key];
+        if (value !== undefined) picked[key] = value;
+    }
+    return picked;
+}
+
+/**
+ * Environment to re-spawn the daemon described by `state` with: `env` (the updater's own), with the
+ * DAEMON_ENV_KEYS replaced by the ones the daemon recorded, so it comes back on the same kubo repo and
+ * endpoints whichever shell runs the update. Legacy state files without `env` keep `env` unchanged.
+ */
+export function daemonRespawnEnv(state: DaemonState, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    if (!state.env) return env;
+    const respawnEnv = { ...env };
+    for (const key of DAEMON_ENV_KEYS) delete respawnEnv[key];
+    return { ...respawnEnv, ...pickDaemonEnv(state.env) };
 }
 
 /**

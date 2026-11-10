@@ -1,5 +1,6 @@
 import { Args, Flags, Command } from "@oclif/core";
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import tcpPortUsed from "tcp-port-used";
 import { fetchLatestVersion, installGlobal } from "../../../update/npm-registry.js";
 import { fastInstallGlobal } from "../../../update/fast-update.js";
@@ -8,6 +9,7 @@ import { systemctlRestart } from "../../../update/systemctl.js";
 import {
     getAliveDaemonStates,
     resolveDaemonSupervisor,
+    daemonRespawnEnv,
     DAEMON_SHUTDOWN_TIMEOUT_MS,
     type DaemonSupervisor
 } from "../../../common-utils/daemon-state.js";
@@ -196,14 +198,30 @@ export default class Install extends Command {
                 const argStr = daemon.argv.length > 0 ? daemon.argv.join(" ") : "(defaults)";
                 this.log(`Restarting daemon with args: ${argStr}`);
 
+                // Start it where and how it was started: relative paths in argv resolve against its cwd, and
+                // its kubo repo and endpoints may come from env vars this shell does not have.
+                let cwd = daemon.cwd;
+                if (cwd !== undefined && !existsSync(cwd)) {
+                    this.warn(`  Daemon's working directory ${cwd} no longer exists; starting it from ${process.cwd()}.`);
+                    cwd = undefined;
+                }
                 const child = spawn("bitsocial", ["daemon", ...daemon.argv], {
                     detached: true,
-                    stdio: "ignore"
+                    stdio: "ignore",
+                    env: daemonRespawnEnv(daemon),
+                    ...(cwd !== undefined ? { cwd } : {})
                 });
                 child.unref();
 
-                if (!child.pid) {
-                    this.warn(`Failed to spawn daemon for args: ${argStr}`);
+                // A spawn failure (e.g. `bitsocial` not on PATH) is reported as an 'error' event; unhandled,
+                // it kills the updater with an uncaught exception and exit 1 once the event loop yields,
+                // even after a successful update.
+                const spawnError = await new Promise<Error | undefined>((resolve) => {
+                    child.once("spawn", () => resolve(undefined));
+                    child.once("error", resolve);
+                });
+                if (spawnError) {
+                    this.warn(`Failed to spawn daemon for args: ${argStr}: ${spawnError.message}`);
                     return;
                 }
 

@@ -1,4 +1,5 @@
-// `bitsocial update install` must never exit with the daemons it stopped still down.
+// `bitsocial update install` must never exit with the daemons it stopped still down, and must bring each
+// one back as it was started.
 //
 // Once update install stops an unsupervised daemon, that daemon deletes its own state file on shutdown,
 // so its args exist only in the updater's memory. Before the fix, the updater stopped the daemons first
@@ -9,6 +10,7 @@
 //
 // The respawn tests use `--force`, which skips the fast update and goes straight to `npm install -g`;
 // with npm offline it fails, so they drive stop, failed install and respawn without installing anything.
+// The one test that needs a successful update points npm at a fake registry on localhost instead.
 //
 // No real daemon or registry: a dummy long-lived process stands in for the daemon (it dies on SIGINT like
 // a real one), its state file is seeded in an isolated state dir, npm runs offline with an empty cache so
@@ -19,10 +21,12 @@
 // sees only the dummy daemon and never touches real daemons on the machine.
 
 import { spawn, spawnSync, type ChildProcess } from "child_process";
+import { createHash } from "crypto";
 import { describe, it, expect, afterEach } from "vitest";
 import { directory as randomDirectory } from "tempy";
-import { readFileSync } from "fs";
+import { readFileSync, realpathSync } from "fs";
 import fs from "fs/promises";
+import http from "http";
 import net from "net";
 import path from "path";
 import { pathToFileURL } from "url";
@@ -30,6 +34,9 @@ import { pathToFileURL } from "url";
 const REPO_ROOT = process.cwd();
 const CLI_PATH = path.join(REPO_ROOT, "bin", "run");
 const CLI_VERSION = JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf-8")).version as string;
+const PACKAGE_NAME = "@bitsocial/bitsocial-cli";
+/** The version the fake registry serves; never published, so nothing real can be installed by mistake. */
+const FAKE_VERSION = "0.0.0-respawn-test";
 const DAEMON_STATE_MODULE = pathToFileURL(path.join(REPO_ROOT, "dist", "common-utils", "daemon-state.js")).href;
 
 const isPidAlive = (pid: number): boolean => {
@@ -57,7 +64,7 @@ interface Harness {
     rpcPort: number;
 }
 
-describe.skipIf(process.platform === "win32")("bitsocial update install — stopped daemons are never left down", () => {
+describe.skipIf(process.platform === "win32")("bitsocial update install — re-spawning the daemons it stopped", () => {
     const dummies: ChildProcess[] = [];
     const servers: net.Server[] = [];
 
@@ -169,6 +176,53 @@ describe.skipIf(process.platform === "win32")("bitsocial update install — stop
             proc.on("close", (exitCode) => resolve({ exitCode, output }));
         });
 
+    /**
+     * A registry on localhost that serves one fake @bitsocial/bitsocial-cli version (a bare package.json),
+     * so `npm install -g` succeeds without the network and installs only into the harness's npm prefix.
+     */
+    async function startFakeRegistry(version: string): Promise<string> {
+        const pkgRoot = randomDirectory();
+        await fs.mkdir(path.join(pkgRoot, "package"));
+        await fs.writeFile(path.join(pkgRoot, "package", "package.json"), JSON.stringify({ name: PACKAGE_NAME, version }));
+        const tarballPath = path.join(pkgRoot, "package.tgz");
+        const tar = spawnSync("tar", ["-czf", tarballPath, "-C", pkgRoot, "package"], {
+            env: { ...process.env, COPYFILE_DISABLE: "1" },
+            encoding: "utf-8"
+        });
+        expect(tar.status, `tar stderr: ${tar.stderr}`).toBe(0);
+        const tarball = await fs.readFile(tarballPath);
+
+        let packument = "";
+        const server = http.createServer((req, res) => {
+            if (req.url?.endsWith(".tgz")) {
+                res.writeHead(200, { "content-type": "application/octet-stream" });
+                res.end(tarball);
+            } else {
+                res.writeHead(200, { "content-type": "application/json" });
+                res.end(packument);
+            }
+        });
+        servers.push(server);
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+        const registry = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}/`;
+        packument = JSON.stringify({
+            name: PACKAGE_NAME,
+            "dist-tags": { latest: version },
+            versions: {
+                [version]: {
+                    name: PACKAGE_NAME,
+                    version,
+                    dist: {
+                        tarball: `${registry}package.tgz`,
+                        integrity: `sha512-${createHash("sha512").update(tarball).digest("base64")}`,
+                        shasum: createHash("sha1").update(tarball).digest("hex")
+                    }
+                }
+            }
+        });
+        return registry;
+    }
+
     const readRespawns = async (marker: string): Promise<string[]> =>
         (await fs.readFile(marker, "utf-8").catch(() => ""))
             .split("\n")
@@ -226,5 +280,60 @@ describe.skipIf(process.platform === "win32")("bitsocial update install — stop
         expect(await waitForExit(pid, 5000)).toBe(true);
         // ...and must have been brought back with its original args before the command failed.
         expect(await waitForRespawns(h.respawnMarker, 1), result.output).toEqual([`args=daemon --pkcRpcUrl ws://localhost:${h.rpcPort}`]);
+    });
+
+    // The state file used to record argv only, and the respawn inherited the updater's cwd and env. A
+    // daemon started with IPFS_PATH or KUBO_RPC_URL (or a relative --pkcOptions.dataPath) and updated
+    // from another shell came back on the default kubo repo or endpoint while the update reported success.
+    it("re-spawns the daemon in its recorded working directory and kubo environment, not the updater's", { timeout: 60000 }, async () => {
+        const h = await setupHarness();
+        const daemonCwd = randomDirectory();
+        await startDummyDaemon(h, {
+            cwd: daemonCwd,
+            env: { IPFS_PATH: path.join(daemonCwd, "ipfs-repo"), KUBO_RPC_URL: "http://127.0.0.1:5001/api/v0" }
+        });
+
+        // The updater runs from another directory, with a different kubo endpoint and a gateway the daemon never had.
+        const result = await runUpdateInstall(
+            [CLI_VERSION, "--force"],
+            { ...h.env, KUBO_RPC_URL: "http://127.0.0.1:59999/api/v0", IPFS_GATEWAY_URL: "http://127.0.0.1:58888" },
+            randomDirectory()
+        );
+
+        expect(result.exitCode, result.output).toBe(1);
+        expect(await waitForRespawns(h.respawnMarker, 1), result.output).toHaveLength(1);
+        const record = (await fs.readFile(h.respawnMarker, "utf-8")).split("\n");
+        expect(record).toContain(`cwd=${realpathSync(daemonCwd)}`);
+        expect(record).toContain(`IPFS_PATH=${path.join(daemonCwd, "ipfs-repo")}`);
+        expect(record).toContain("KUBO_RPC_URL=http://127.0.0.1:5001/api/v0");
+        expect(record).toContain("IPFS_GATEWAY_URL=<unset>");
+    });
+
+    // The respawn used to check only `child.pid` and leave the child's 'error' event unhandled. With
+    // `bitsocial` missing from PATH it warned for every daemon, then died with an unhandled-error stack
+    // trace and exit 1 as soon as the event loop yielded, even after a successful update. Whatever the
+    // updater still had to do after that yield, such as a later respawn or a supervisor restart, was cut off.
+    it("finishes a successful update with one warning per daemon when `bitsocial` cannot be spawned", { timeout: 60000 }, async () => {
+        const h = await setupHarness();
+        await startDummyDaemon(h);
+        await startDummyDaemon(h);
+        const registry = await startFakeRegistry(FAKE_VERSION);
+
+        // --force goes straight to `npm install -g`, which installs the fake package into the harness's npm
+        // prefix. No `bitsocial` on PATH: every respawn fails with ENOENT.
+        const result = await runUpdateInstall([FAKE_VERSION, "--force"], {
+            ...h.env,
+            PATH: randomDirectory(),
+            npm_config_offline: "false",
+            npm_config_registry: registry,
+            npm_config_audit: "false",
+            npm_config_fund: "false"
+        });
+
+        expect(result.output).toContain(`Installed bitsocial v${FAKE_VERSION}`);
+        expect(result.output.match(/Failed to spawn daemon/g), result.output).toHaveLength(2);
+        // No uncaught spawn error: no stack trace, and the update exits 0.
+        expect(result.output).not.toMatch(/^\s+at /m);
+        expect(result.exitCode, result.output).toBe(0);
     });
 });

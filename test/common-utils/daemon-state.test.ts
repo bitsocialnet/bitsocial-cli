@@ -35,9 +35,15 @@ process.env["XDG_DATA_HOME"] = path.join(isolatedHome, ".local", "share");
 process.env["LOCALAPPDATA"] = path.join(isolatedHome, "AppData", "Local");
 process.env["APPDATA"] = path.join(isolatedHome, "AppData", "Roaming");
 
-const { writeDaemonState, readAllDaemonStates, deleteDaemonState, getAliveDaemonStates, pruneStaleStates } = await import(
-    "../../dist/common-utils/daemon-state.js"
-);
+const {
+    writeDaemonState,
+    readAllDaemonStates,
+    deleteDaemonState,
+    getAliveDaemonStates,
+    pruneStaleStates,
+    pickDaemonEnv,
+    daemonRespawnEnv
+} = await import("../../dist/common-utils/daemon-state.js");
 const { default: defaults } = await import("../../dist/common-utils/defaults.js");
 
 // Use a PID range that definitely doesn't exist (very large PIDs)
@@ -352,6 +358,25 @@ describe("daemon-state", () => {
             );
 
             expect(await aliveSeenBy(WRITER_ENV)).toContain(daemonPid);
+        });
+    });
+
+    // `update install` re-spawns a daemon from its state file. argv alone does not capture the kubo env
+    // vars it started with, so the respawn must restore them instead of using the updater's.
+    describe("daemonRespawnEnv", () => {
+        const updaterEnv = { PATH: "/bin", KUBO_RPC_URL: "http://127.0.0.1:59999/api/v0", IPFS_GATEWAY_URL: "http://127.0.0.1:58888" };
+
+        it("records only the daemon env vars that are set", () => {
+            expect(pickDaemonEnv({ PATH: "/bin", IPFS_PATH: "/data/ipfs", HOME: "/home/x" })).toEqual({ IPFS_PATH: "/data/ipfs" });
+        });
+
+        it("replaces the updater's daemon env vars with the recorded ones and drops those the daemon did not have", () => {
+            const env = daemonRespawnEnv({ ...makeState(1), env: { IPFS_PATH: "/data/ipfs" } }, updaterEnv);
+            expect(env).toEqual({ PATH: "/bin", IPFS_PATH: "/data/ipfs" });
+        });
+
+        it("keeps the updater's environment for a legacy state file without env", () => {
+            expect(daemonRespawnEnv(makeState(1), updaterEnv)).toEqual(updaterEnv);
         });
     });
 
