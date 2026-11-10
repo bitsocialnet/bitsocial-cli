@@ -19,6 +19,8 @@
 //     whether the kubo API port is still in use *at the moment of restart*, then exec's the
 //     real daemon. That marker — not the eventual daemon state, which self-heals via the
 //     watchdog — is the red/green discriminator.
+//   * `--force` with npm offline: the daemon is stopped, `npm install -g` fails without
+//     installing anything, and update install re-spawns the stopped daemon before it exits 1.
 //
 // Isolation: the daemon-state directory `update install` enumerates lives under env-paths'
 // data dir, which is derived from HOME on every platform (XDG_DATA_HOME only on Linux). We
@@ -51,7 +53,7 @@ const KUBO_SHUTDOWN_DELAY_MS = 8000;
 
 const runUpdateInstall = (env: Record<string, string>): Promise<{ exitCode: number | null; stdout: string; stderr: string }> => {
     return new Promise((resolve, reject) => {
-        const proc = spawn("node", ["./bin/run", "update", "install", CLI_VERSION], {
+        const proc = spawn("node", ["./bin/run", "update", "install", CLI_VERSION, "--force"], {
             stdio: ["ignore", "pipe", "pipe"],
             env: { ...process.env, ...env }
         });
@@ -98,6 +100,7 @@ describe("bitsocial update install restart race (issue #70)", async () => {
             // Isolate the daemon-state directory cross-platform (see file header).
             const isolatedHome = randomDirectory();
             const tmpBin = randomDirectory();
+            const npmDir = randomDirectory();
             const markerFile = path.join(randomDirectory(), "restart-kubo-port.marker");
             const pidFile = path.join(path.dirname(markerFile), "restart-daemon.pids");
             restartedPidFile = pidFile;
@@ -158,20 +161,26 @@ describe("bitsocial update install restart race (issue #70)", async () => {
             expect(typeof daemonA.pid).toBe("number");
             expect(await waitForKuboReady(kuboApiUrl, 45000)).toBe(true);
 
-            // Run the real `bitsocial update install <currentVersion>`: same version => skips npm,
-            // but runs the full stop + _restartDaemons path. The shim (first on PATH) is what it
-            // spawns for the restart.
+            // Run the real `bitsocial update install <currentVersion> --force` with npm offline: it stops
+            // the daemon, fails to install, and re-spawns the stopped daemon. The shim (first on PATH) is
+            // what it spawns for the restart.
             const result = await runUpdateInstall({
                 ...isolatedEnv,
                 KUBO_RPC_URL: daemon.kuboRpcUrl,
                 IPFS_GATEWAY_URL: daemon.gatewayUrl,
                 PATH: `${tmpBin}:${process.env.PATH}`,
-                PKC_CLI_TEST_RESTART_MARKER: markerFile
+                PKC_CLI_TEST_RESTART_MARKER: markerFile,
+                // Every registry call fails fast and nothing can be installed for real.
+                npm_config_offline: "true",
+                npm_config_cache: path.join(npmDir, "cache"),
+                npm_config_prefix: path.join(npmDir, "prefix"),
+                npm_config_update_notifier: "false"
             });
 
-            // The command itself must have succeeded — a non-zero exit means the restart path
-            // failed even if the marker observations happen to look right.
-            expect(result.exitCode, `update install output:\n${result.stdout}\n${result.stderr}`).toBe(0);
+            // Only the install may have failed: the restart path must still have run to the end.
+            expect(result.exitCode, `update install output:\n${result.stdout}\n${result.stderr}`).toBe(1);
+            expect(result.stderr).toContain("Update failed");
+            expect(result.stdout).toContain("Restarting daemon with args");
 
             const marker = await fs.readFile(markerFile, "utf-8").catch(() => "");
             const observations = marker.trim().split("\n").filter(Boolean);
