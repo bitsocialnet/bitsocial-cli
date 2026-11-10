@@ -60,10 +60,20 @@ export function resolveKuboRepoPath(pkcDataPath: string): string {
     return process.env["IPFS_PATH"] || path.join(pkcDataPath, ".bitsocial-cli.ipfs");
 }
 
-export async function loadKuboConfigFile(pkcDataPath: string): Promise<any | undefined> {
-    const kuboConfigPath = path.join(resolveKuboRepoPath(pkcDataPath), "config");
+// Present in the kubo repo while a new repo still lacks bitsocial-cli's first-init defaults (server profile, API and
+// gateway addresses, AutoTLS). Written before `ipfs init` and removed once they are applied, so a first start that
+// stopped in between (crash, Ctrl+C, a failed step) is finished by the next start instead of kubo's stock config being
+// kept as if the operator had chosen it.
+export const KUBO_INIT_PENDING_MARKER = ".bitsocial-cli-init-pending";
 
-    if (!fs.existsSync(kuboConfigPath)) return undefined;
+// undefined until the repo has a config bitsocial-cli has finished setting up. While the first init is pending the
+// config is kubo's stock one, whose 5001/8080 nobody chose, so callers fall back to the defaults they would give a new
+// repo and the next start writes those.
+export async function loadKuboConfigFile(pkcDataPath: string): Promise<any | undefined> {
+    const kuboRepoPath = resolveKuboRepoPath(pkcDataPath);
+    const kuboConfigPath = path.join(kuboRepoPath, "config");
+
+    if (!fs.existsSync(kuboConfigPath) || fs.existsSync(path.join(kuboRepoPath, KUBO_INIT_PENDING_MARKER))) return undefined;
 
     const kuboConfig = JSON.parse((await fsPromises.readFile(kuboConfigPath)).toString());
     return kuboConfig;

@@ -51,3 +51,16 @@ export const preInitKuboWithEphemeralSwarm = async (ipfsDataPath: string, apiUrl
     config.Addresses = { ...(config.Addresses ?? {}), Swarm: EPHEMERAL_SWARM_ADDRESSES };
     await fs.writeFile(configPath, JSON.stringify(config, null, 4));
 };
+
+// The repo a first start leaves when it stops right after `ipfs init`: kubo's stock config (API on 5001, gateway on
+// 8080, no server profile) and the marker saying bitsocial-cli's defaults are still to be applied. Only Swarm is
+// changed, to ephemeral ports as in every test repo, so nothing binds a fixed port.
+export const seedInterruptedFirstInit = async (ipfsDataPath: string) => {
+    await fs.mkdir(ipfsDataPath, { recursive: true });
+    await execFileAsync(await resolveKuboBinary(), ["init"], { env: { ...process.env, IPFS_PATH: ipfsDataPath } });
+    const configPath = path.join(ipfsDataPath, "config");
+    const config = JSON.parse(await fs.readFile(configPath, "utf-8"));
+    config.Addresses = { ...(config.Addresses ?? {}), Swarm: EPHEMERAL_SWARM_ADDRESSES };
+    await fs.writeFile(configPath, JSON.stringify(config, null, 4));
+    await fs.writeFile(path.join(ipfsDataPath, ".bitsocial-cli-init-pending"), "");
+};

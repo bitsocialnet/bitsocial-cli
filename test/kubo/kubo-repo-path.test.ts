@@ -13,6 +13,7 @@ import {
     parseMultiAddrIpfsGatewayToUrl,
     parseMultiAddrKuboRpcToUrl,
     resolveKuboRepoPath,
+    resolveKuboRpcUrl,
     toConnectableHostname,
     describeKuboEndpointMismatch
 } from "../../src/util.js";
@@ -61,6 +62,21 @@ describe("kubo repo path resolution", () => {
 
     it("loadKuboConfigFile returns undefined before kubo has been initialised", async () => {
         expect(await loadKuboConfigFile(randomDirectory())).toBeUndefined();
+    });
+
+    // A first start that stopped right after `ipfs init` leaves kubo's stock config and this marker. Its 5001/8080
+    // are nobody's choice, so reading them back would keep kubo there and point the daemon at whatever else holds them.
+    it("loadKuboConfigFile returns undefined while the first init's defaults are still pending", async () => {
+        const dataPath = randomDirectory();
+        const repoPath = path.join(dataPath, ".bitsocial-cli.ipfs");
+        await writeConfig(repoPath, { Addresses: { API: "/ip4/127.0.0.1/tcp/5001", Gateway: "/ip4/127.0.0.1/tcp/8080" } });
+        await fs.writeFile(path.join(repoPath, ".bitsocial-cli-init-pending"), "");
+        expect(await loadKuboConfigFile(dataPath)).toBeUndefined();
+        const fallback = new URL("http://127.0.0.1:50019/api/v0");
+        expect((await resolveKuboRpcUrl(dataPath, undefined, fallback)).toString()).toBe(fallback.toString());
+
+        await fs.rm(path.join(repoPath, ".bitsocial-cli-init-pending"));
+        expect((await resolveKuboRpcUrl(dataPath, undefined, fallback)).toString()).toBe("http://127.0.0.1:5001/api/v0");
     });
 });
 
