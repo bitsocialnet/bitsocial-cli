@@ -148,7 +148,7 @@ jobs:
           sudo echo "255.255.255.255 cloudflare-ipfs.com" | sudo tee -a /etc/hosts
           sudo echo "255.255.255.255 pubsubprovider.xyz" | sudo tee -a /etc/hosts
 
-      - run: DEBUG="bitsocial*, plebbit*, oclif*" npm run test:cli
+      - run: DEBUG="bitsocial*, pkc*, oclif*" npm run test:cli
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
