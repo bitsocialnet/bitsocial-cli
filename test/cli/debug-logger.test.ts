@@ -156,7 +156,8 @@ describe("DEBUG through bin/run", () => {
         await new Promise<void>((resolve, reject) => {
             child.stderr.on("data", (data: Buffer) => {
                 stderr += data.toString();
-                if (stderr.includes(namespace)) resolve();
+                // Match the whole prefix: stderr arrives in chunks, which can split the line after the namespace
+                if (stderr.includes(`${namespace} flags:`)) resolve();
             });
             child.on("error", reject);
             child.on("close", () => resolve());
