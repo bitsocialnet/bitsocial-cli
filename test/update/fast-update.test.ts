@@ -308,6 +308,80 @@ describe("fastInstallGlobal", () => {
         ).resolves.toBeUndefined();
     });
 
+    // After dist/webuis is moved into staging, a failed step used to leave the live install without it:
+    // the rollback deleted staging, web UIs included. When the npm fallback of `update install` then also
+    // fails, the stopped daemons are re-spawned on that install and cannot start without dist/webuis.
+    describe("rollback after the web UIs were moved into staging", () => {
+        const changedSeedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.11", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+
+        /** Make the first fs.rename call that matches `shouldFail` throw EPERM, as Windows can */
+        function failRename(shouldFail: (oldPath: string, newPath: string) => boolean) {
+            const originalRename = fs.rename;
+            let failed = false;
+            vi.spyOn(fs, "rename").mockImplementation(async (oldPath, newPath) => {
+                if (!failed && shouldFail(String(oldPath), String(newPath))) {
+                    failed = true;
+                    throw Object.assign(new Error("EPERM: simulated rename failure"), { code: "EPERM" });
+                }
+                return originalRename(oldPath, newPath);
+            });
+        }
+
+        async function expectOldInstallIntact() {
+            const pkg = JSON.parse(await fs.readFile(path.join(installRoot, "package.json"), "utf-8"));
+            expect(pkg.version).toBe("0.19.45");
+            await expect(fs.access(path.join(installRoot, "node_modules", "dep-a", "index.js"))).resolves.toBeUndefined();
+            const webuisDir = path.join(installRoot, "dist", "webuis");
+            expect((await fs.readdir(webuisDir)).sort()).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
+            await expect(fs.access(path.join(webuisDir, "seedit-html-0.5.10", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+            await expect(fs.access(path.join(webuisDir, "plebones-html-0.1.27", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+            for (const suffix of [".__fast_update_staging", ".__fast_update_backup", ".__fast_update_dropped_webuis"]) {
+                await expect(fs.access(installRoot + suffix)).rejects.toThrow();
+            }
+        }
+
+        beforeEach(() => {
+            setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis: [changedSeedit, MOCK_OLD_PKG.webuis[1]] });
+            stubGithubReleases();
+        });
+
+        it("puts the installed web UIs back when a downloaded web UI cannot be moved into place", async () => {
+            failRename((oldPath) => path.basename(path.dirname(oldPath)) === ".webuis-download");
+
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(false);
+            await expectOldInstallIntact();
+        });
+
+        it("puts the installed web UIs back when the current install cannot be moved aside", async () => {
+            failRename((oldPath, newPath) => oldPath === installRoot && newPath === installRoot + ".__fast_update_backup");
+
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(false);
+            await expectOldInstallIntact();
+        });
+
+        it("restores the whole install when the staged install cannot be moved into place", async () => {
+            failRename((oldPath, newPath) => oldPath === installRoot + ".__fast_update_staging" && newPath === installRoot);
+
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(false);
+            await expectOldInstallIntact();
+        });
+
+        it("leaves no holding directory behind after a successful update", async () => {
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(true);
+            const webuisDir = path.join(installRoot, "dist", "webuis");
+            expect((await fs.readdir(webuisDir)).sort()).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.11"]);
+            await expect(fs.access(installRoot + ".__fast_update_dropped_webuis")).rejects.toThrow();
+        });
+    });
+
     it("returns false when runNpmPack fails", async () => {
         vi.mocked(runNpmPack).mockRejectedValue(new Error("npm pack failed"));
 

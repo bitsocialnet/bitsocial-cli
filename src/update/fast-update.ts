@@ -25,12 +25,20 @@ export async function fastInstallGlobal(
 ): Promise<boolean> {
     const stagingDir = installRoot + ".__fast_update_staging";
     const backupDir = installRoot + ".__fast_update_backup";
+    // Holds the web UI directories the new install drops until the swap succeeds, so a rollback can put them back
+    const droppedWebuisDir = installRoot + ".__fast_update_dropped_webuis";
+    const oldWebuisDir = path.join(installRoot, "dist", "webuis");
+    const newWebuisDir = path.join(stagingDir, "dist", "webuis");
 
     // Phase: cleanup leftovers from any interrupted previous fast-update
     await fs.rm(stagingDir, { recursive: true, force: true });
     await fs.rm(backupDir, { recursive: true, force: true });
+    await fs.rm(droppedWebuisDir, { recursive: true, force: true });
 
     let nodeModulesMoved = false;
+    let webuisMoved = false;
+    const droppedWebuiNames: string[] = [];
+    const placedWebuiNames: string[] = [];
 
     try {
         // Phase: download tarball
@@ -60,8 +68,6 @@ export async function fastInstallGlobal(
         const oldWebuis: WebuiEntry[] = oldPkg.webuis ?? [];
         const newWebuis: WebuiEntry[] = newPkg.webuis ?? [];
         const oldWebuisByUrl = new Map(oldWebuis.map((w: WebuiEntry) => [w.url, w.sha256OfHtmlZip]));
-        const oldWebuisDir = path.join(installRoot, "dist", "webuis");
-        const newWebuisDir = path.join(stagingDir, "dist", "webuis");
         const oldWebuiDirNames = (await fs.readdir(oldWebuisDir, { withFileTypes: true }).catch(() => [] as never[]))
             .filter((entry) => entry.isDirectory())
             .map((entry) => entry.name);
@@ -110,22 +116,27 @@ export async function fastInstallGlobal(
             throw err;
         }
 
-        // Phase: move the entire dist/webuis/ directory from old install to staging, drop the directories
-        // of changed or removed entries, and put the downloaded ones in their place
+        // Phase: move the entire dist/webuis/ directory from old install to staging, move the directories
+        // of changed or removed entries aside, and put the downloaded ones in their place
         try {
             await fs.rename(oldWebuisDir, newWebuisDir);
+            webuisMoved = true;
         } catch (err) {
             // webuis dir missing in old install — will create fresh. Any other failure must not ship an
             // install without the web UIs it reuses.
             if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
         await fs.mkdir(newWebuisDir, { recursive: true });
-        for (const name of oldWebuiDirNames) {
-            if (!reusedDirs.has(name)) await fs.rm(path.join(newWebuisDir, name), { recursive: true, force: true });
+        const toDrop = webuisMoved ? oldWebuiDirNames.filter((name) => !reusedDirs.has(name)) : [];
+        if (toDrop.length > 0) await fs.mkdir(droppedWebuisDir, { recursive: true });
+        for (const name of toDrop) {
+            await fs.rename(path.join(newWebuisDir, name), path.join(droppedWebuisDir, name));
+            droppedWebuiNames.push(name);
         }
         if (toDownload.length > 0) {
             for (const name of await fs.readdir(downloadDir)) {
                 await fs.rename(path.join(downloadDir, name), path.join(newWebuisDir, name));
+                placedWebuiNames.push(name);
             }
             await fs.rm(downloadDir, { recursive: true, force: true });
         }
@@ -134,12 +145,25 @@ export async function fastInstallGlobal(
         await fs.rename(installRoot, backupDir);
         await fs.rename(stagingDir, installRoot);
         nodeModulesMoved = false; // now part of installRoot, no rollback needed
+        webuisMoved = false;
 
-        // Phase: cleanup backup
+        // Phase: cleanup backup and the dropped web UIs
         await fs.rm(backupDir, { recursive: true, force: true });
+        await fs.rm(droppedWebuisDir, { recursive: true, force: true });
         return true;
     } catch (err) {
-        // Rollback: restore node_modules if we moved it out
+        // Rollback. First, if installRoot was renamed to backup but staging didn't land, restore it, so
+        // node_modules and dist/webuis can be moved back into it.
+        try {
+            await fs.access(installRoot);
+        } catch {
+            try {
+                await fs.rename(backupDir, installRoot);
+            } catch {
+                // best-effort
+            }
+        }
+        // Restore node_modules if we moved it out
         if (nodeModulesMoved) {
             try {
                 await fs.rename(
@@ -150,17 +174,18 @@ export async function fastInstallGlobal(
                 // best-effort
             }
         }
-        // If installRoot was renamed to backup but staging didn't land, restore it
-        try {
-            await fs.access(installRoot);
-        } catch {
-            try {
-                await fs.rename(backupDir, installRoot);
-            } catch {
-                // best-effort
+        // Restore dist/webuis as it was: without the downloaded web UIs, with the dropped ones moved back
+        if (webuisMoved) {
+            for (const name of placedWebuiNames) {
+                await fs.rm(path.join(newWebuisDir, name), { recursive: true, force: true }).catch(() => {}); // best-effort
             }
+            for (const name of droppedWebuiNames) {
+                await fs.rename(path.join(droppedWebuisDir, name), path.join(newWebuisDir, name)).catch(() => {}); // best-effort
+            }
+            await fs.rename(newWebuisDir, oldWebuisDir).catch(() => {}); // best-effort
         }
         await fs.rm(stagingDir, { recursive: true, force: true });
+        await fs.rm(droppedWebuisDir, { recursive: true, force: true });
         log(`Fast update failed: ${(err as Error).message}`);
         return false;
     }
