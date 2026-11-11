@@ -54,9 +54,9 @@ export async function fastInstallGlobal(
         }
 
         // Phase: download web UIs, before anything in the current install is moved or deleted. A web UI is
-        // reused only when its pin is unchanged AND its directory is on disk; every other entry is downloaded
-        // into staging now. A failed download throws, so the caller falls back to a full install instead of
-        // the update succeeding without that web UI.
+        // reused only when its pin is unchanged AND its complete directory is on disk; every other entry is
+        // downloaded into staging now. A failed download throws, so the caller falls back to a full install
+        // instead of the update succeeding without that web UI.
         const oldWebuis: WebuiEntry[] = oldPkg.webuis ?? [];
         const newWebuis: WebuiEntry[] = newPkg.webuis ?? [];
         const oldWebuisByUrl = new Map(oldWebuis.map((w: WebuiEntry) => [w.url, w.sha256OfHtmlZip]));
@@ -65,10 +65,20 @@ export async function fastInstallGlobal(
         const oldWebuiDirNames = (await fs.readdir(oldWebuisDir, { withFileTypes: true }).catch(() => [] as never[]))
             .filter((entry) => entry.isDirectory())
             .map((entry) => entry.name);
+        // The daemon serves index_backup_no_rpc.html from every web UI directory and fails to start without
+        // it, so a directory missing it (e.g. left by an interrupted postinstall) is never reused.
+        const completeDirNames = new Set<string>();
+        for (const name of oldWebuiDirNames) {
+            const isComplete = await fs.access(path.join(oldWebuisDir, name, "index_backup_no_rpc.html")).then(
+                () => true,
+                () => false
+            );
+            if (isComplete) completeDirNames.add(name);
+        }
         // We don't know exact dir names, but we can match by repo name from the URL.
         const dirsOf = (webui: WebuiEntry): string[] => {
             const repoName = extractRepoName(webui.url)?.toLowerCase();
-            return repoName ? oldWebuiDirNames.filter((name) => name.toLowerCase().includes(repoName)) : [];
+            return repoName ? [...completeDirNames].filter((name) => name.toLowerCase().includes(repoName)) : [];
         };
         const reusedDirs = new Set<string>();
         const toDownload: WebuiEntry[] = [];

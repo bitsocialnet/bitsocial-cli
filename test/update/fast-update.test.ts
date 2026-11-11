@@ -74,6 +74,7 @@ describe("fastInstallGlobal", () => {
             path.join(installRoot, "dist", "webuis", "seedit-html-0.5.10", "index_backup_no_rpc.html"),
             "<html></html>"
         );
+        await fs.writeFile(path.join(installRoot, "dist", "webuis", "plebones-html-0.1.27", "index_backup_no_rpc.html"), "<html></html>");
         await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify(MOCK_OLD_PKG));
         await fs.mkdir(path.join(installRoot, "bin"), { recursive: true });
         await fs.writeFile(path.join(installRoot, "bin", "run"), "#!/usr/bin/env node");
@@ -220,6 +221,25 @@ describe("fastInstallGlobal", () => {
 
         expect(result).toBe(true);
         expect((await fs.readdir(path.join(installRoot, "dist", "webuis"))).sort()).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
+    });
+
+    // Older postinstalls extracted straight into dist/webuis, so an interrupted run could leave a directory
+    // without index_backup_no_rpc.html. The daemon reads that file from every web UI directory and fails to
+    // start without it, so such a directory must be downloaded again, not carried into the new install.
+    it("downloads an unchanged web UI whose directory is incomplete", async () => {
+        const plebones = { url: "https://github.com/plebbit/plebones/releases/tag/v0.1.27", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        const webuis = [MOCK_OLD_PKG.webuis[0], plebones];
+        await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify({ ...MOCK_OLD_PKG, webuis }));
+        await fs.rm(path.join(installRoot, "dist", "webuis", "plebones-html-0.1.27", "index_backup_no_rpc.html"));
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis });
+        stubGithubReleases();
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        const webuisDir = path.join(installRoot, "dist", "webuis");
+        expect((await fs.readdir(webuisDir)).sort()).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
+        await expect(fs.access(path.join(webuisDir, "plebones-html-0.1.27", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
     });
 
     it("removes the web UI of an entry dropped from package.json", async () => {
