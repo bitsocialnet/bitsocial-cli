@@ -146,17 +146,31 @@ async function main() {
         process.exit(1);
     }
 
-    // Swap the new set in, then move the kept web UIs over from the old one
+    // Swap the new set in, then move the kept web UIs over from the old one. If a rename fails partway (Windows
+    // can return EPERM or EBUSY while a file is open), the previous set is put back before the error is
+    // reported, so the next run can still keep its web UIs. The rollback is best effort: if one of its renames
+    // fails too, dist/webuis can still be left missing or partial, and the previous set may stay in .webuis-old.
     const oldDir = path.join(distDir, ".webuis-old");
     await fs.rm(oldDir, { recursive: true, force: true });
     await fs.rename(dstOfWebui, oldDir).catch((e) => {
         if (e.code !== "ENOENT") throw e;
     });
-    await fs.rename(stagingDir, dstOfWebui);
-    for (const name of keptDirs) {
-        await fs.rename(path.join(oldDir, name), path.join(dstOfWebui, name));
-        console.warn(`Warning: Kept the installed ${name}, because its pinned version could not be downloaded`);
+    let swapped = false;
+    const movedKeptDirs = [];
+    try {
+        await fs.rename(stagingDir, dstOfWebui);
+        swapped = true;
+        for (const name of keptDirs) {
+            await fs.rename(path.join(oldDir, name), path.join(dstOfWebui, name));
+            movedKeptDirs.push(name);
+        }
+    } catch (e) {
+        for (const name of movedKeptDirs) await fs.rename(path.join(dstOfWebui, name), path.join(oldDir, name)).catch(() => {});
+        if (swapped) await fs.rename(dstOfWebui, stagingDir).catch(() => {});
+        await fs.rename(oldDir, dstOfWebui).catch(() => {});
+        throw e;
     }
+    for (const name of keptDirs) console.warn(`Warning: Kept the installed ${name}, because its pinned version could not be downloaded`);
     await fs.rm(oldDir, { recursive: true, force: true });
     console.log(`Installed ${webuiDirs.length} web UI(s):`, webuiDirs);
     if (installed.size === webuis.length) await fs.writeFile(markerPath, pinnedWebuis);

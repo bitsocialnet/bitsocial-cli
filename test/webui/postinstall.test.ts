@@ -60,9 +60,21 @@ function makeZip(files: Record<string, string>): Buffer {
 }
 
 // Replaces fetch for the script: GitHub's release API and asset downloads are served from FAKE_RELEASES,
-// and every requested URL is appended to FAKE_FETCH_LOG.
+// and every requested URL is appended to FAKE_FETCH_LOG. With FAKE_RENAME_FAIL set, the first rename onto
+// that path fails with EPERM, as Windows can fail one while another process holds a file open.
 const FETCH_STUB = `
 import fs from "node:fs";
+if (process.env.FAKE_RENAME_FAIL) {
+    const rename = fs.promises.rename;
+    let failed = false;
+    fs.promises.rename = async (from, to) => {
+        if (!failed && String(to) === process.env.FAKE_RENAME_FAIL) {
+            failed = true;
+            throw Object.assign(new Error("EPERM: operation not permitted, rename '" + from + "' -> '" + to + "'"), { code: "EPERM" });
+        }
+        return rename(from, to);
+    };
+}
 const releases = JSON.parse(fs.readFileSync(process.env.FAKE_RELEASES, "utf-8"));
 globalThis.fetch = async (url) => {
     const href = String(url);
@@ -124,10 +136,10 @@ async function setupPackage() {
         await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "fake", version: "0.0.0", webuis }, null, 4));
     };
 
-    const run = async () => {
+    const run = async (extraEnv: Record<string, string> = {}) => {
         await fs.rm(fetchLog, { force: true });
         const result = spawnSync(process.execPath, ["--import", pathToFileURL(stubPath).href, path.join(root, "bin", "postinstall.js")], {
-            env: { ...process.env, FAKE_RELEASES: path.join(work, "releases.json"), FAKE_FETCH_LOG: fetchLog },
+            env: { ...process.env, FAKE_RELEASES: path.join(work, "releases.json"), FAKE_FETCH_LOG: fetchLog, ...extraEnv },
             encoding: "utf-8"
         });
         expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -226,6 +238,29 @@ describe("bin/postinstall.js web UI download", () => {
         await pkg.publish([SEEDIT, { ...PLEBONES, status: 403 }]);
         const { output } = await pkg.run();
 
+        expect(await pkg.installedDirs(), output).toEqual(["plebones-html-0.1.27", "seedit-html-0.6.0"]);
+    });
+
+    // The swap moves dist/webuis to dist/.webuis-old before it moves the new set in. A rename failing after
+    // that left dist/webuis missing, or holding the new set without the kept web UIs, while postinstall
+    // exited 0; the next run deleted dist/.webuis-old, so an offline run had nothing left to keep.
+    it("puts the installed web UIs back when the new set cannot be moved into place", { timeout: 60000 }, async () => {
+        const pkg = await setupPackage();
+        await pkg.publish([SEEDIT_OLD, PLEBONES]);
+        await pkg.run();
+        // seedit gets a new version; plebones cannot be downloaded, so its installed version is kept
+        await pkg.publish([SEEDIT, { ...PLEBONES, status: 503 }]);
+
+        const failedSwap = await pkg.run({ FAKE_RENAME_FAIL: pkg.webuisDir });
+        expect(failedSwap.output).toContain("EPERM");
+        expect(await pkg.installedDirs(), failedSwap.output).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
+
+        const failedKeep = await pkg.run({ FAKE_RENAME_FAIL: path.join(pkg.webuisDir, "plebones-html-0.1.27") });
+        expect(failedKeep.output).toContain("EPERM");
+        expect(await pkg.installedDirs(), failedKeep.output).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
+        await expect(fs.access(path.join(pkg.webuisDir, "plebones-html-0.1.27", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+
+        const { output } = await pkg.run();
         expect(await pkg.installedDirs(), output).toEqual(["plebones-html-0.1.27", "seedit-html-0.6.0"]);
     });
 
