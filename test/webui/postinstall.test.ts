@@ -136,13 +136,13 @@ async function setupPackage() {
         await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "fake", version: "0.0.0", webuis }, null, 4));
     };
 
-    const run = async (extraEnv: Record<string, string> = {}) => {
+    const run = async (extraEnv: Record<string, string> = {}, expectedStatus = 0) => {
         await fs.rm(fetchLog, { force: true });
         const result = spawnSync(process.execPath, ["--import", pathToFileURL(stubPath).href, path.join(root, "bin", "postinstall.js")], {
             env: { ...process.env, FAKE_RELEASES: path.join(work, "releases.json"), FAKE_FETCH_LOG: fetchLog, ...extraEnv },
             encoding: "utf-8"
         });
-        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(expectedStatus);
         const fetched = (await fs.readFile(fetchLog, "utf-8").catch(() => "")).split("\n").filter(Boolean);
         return { output: `${result.stdout}\n${result.stderr}`, fetched };
     };
@@ -262,6 +262,22 @@ describe("bin/postinstall.js web UI download", () => {
 
         const { output } = await pkg.run();
         expect(await pkg.installedDirs(), output).toEqual(["plebones-html-0.1.27", "seedit-html-0.6.0"]);
+    });
+
+    // A fresh install (every `npm install -g`, which never ships dist/webuis) has no previous set to put
+    // back. postinstall used to warn and exit 0, so the install reported success and daemon start then
+    // failed on the missing dist/webuis.
+    it("fails the install when the web UIs cannot be moved into place and none were installed before", { timeout: 60000 }, async () => {
+        const pkg = await setupPackage();
+        await pkg.publish([SEEDIT, PLEBONES]);
+
+        const failedSwap = await pkg.run({ FAKE_RENAME_FAIL: pkg.webuisDir }, 1);
+        expect(failedSwap.output).toContain("EPERM");
+        await expect(fs.access(pkg.webuisDir)).rejects.toThrow();
+
+        const { output } = await pkg.run();
+        expect(await pkg.installedDirs(), output).toEqual(["plebones-html-0.1.27", "seedit-html-0.6.0"]);
+        await expect(fs.access(path.join(pkg.webuisDir, "..", ".webuis-staging"))).rejects.toThrow();
     });
 
     it("does not keep a web UI that is no longer pinned, or an incomplete one", { timeout: 60000 }, async () => {

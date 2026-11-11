@@ -149,7 +149,9 @@ async function main() {
     // Swap the new set in, then move the kept web UIs over from the old one. If a rename fails partway (Windows
     // can return EPERM or EBUSY while a file is open), the previous set is put back before the error is
     // reported, so the next run can still keep its web UIs. The rollback is best effort: if one of its renames
-    // fails too, dist/webuis can still be left missing or partial, and the previous set may stay in .webuis-old.
+    // fails too, dist/webuis can still be left partial, and the previous set may stay in .webuis-old. If
+    // dist/webuis ends up missing (no previous set, as in every `npm install -g`, or a failed rollback), the
+    // daemon cannot start, so postinstall exits 1 and the install fails instead of reporting success.
     const oldDir = path.join(distDir, ".webuis-old");
     await fs.rm(oldDir, { recursive: true, force: true });
     await fs.rename(dstOfWebui, oldDir).catch((e) => {
@@ -168,6 +170,10 @@ async function main() {
         for (const name of movedKeptDirs) await fs.rename(path.join(dstOfWebui, name), path.join(oldDir, name)).catch(() => {});
         if (swapped) await fs.rename(dstOfWebui, stagingDir).catch(() => {});
         await fs.rename(oldDir, dstOfWebui).catch(() => {});
+        if (!(await fs.access(dstOfWebui).then(() => true, () => false))) {
+            console.error(`ERROR: Could not move the web UIs into ${dstOfWebui}: ${e}`);
+            process.exit(1);
+        }
         throw e;
     }
     for (const name of keptDirs) console.warn(`Warning: Kept the installed ${name}, because its pinned version could not be downloaded`);
