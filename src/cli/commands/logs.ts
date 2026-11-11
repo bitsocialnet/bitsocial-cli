@@ -186,14 +186,15 @@ export default class Logs extends Command {
         // Follow mode: dump existing content (filtered + tailed) then watch for new data
         let currentLogFile = latestLogFile;
 
-        const existingContent = await fsPromise.readFile(currentLogFile, "utf-8");
+        const existingBytes = await fsPromise.readFile(currentLogFile);
+        const existingContent = existingBytes.toString("utf-8");
         // Anchor the follow offset to exactly the bytes we just read, NOT a separate
         // fsPromise.stat() taken afterwards. A later stat is racy: any append landing between
         // this read and the stat is skipped (position jumps past it) yet was never in the dump
         // above, so follow mode silently drops those lines. Under load that window widens — this
         // was the cause of the intermittent CI failure where an appended line was never surfaced
-        // (issue #77). Byte length (not string length) because position indexes bytes in the file.
-        let position = Buffer.byteLength(existingContent, "utf-8");
+        // (issue #77). The raw byte count (not string length) because position indexes bytes in the file.
+        let position = existingBytes.length;
         let pendingBuffer = "";
 
         const entries = this._parseLogEntries(existingContent);
@@ -211,10 +212,13 @@ export default class Logs extends Command {
         const readBuf = Buffer.alloc(READ_BUF_SIZE);
 
         // The daemon trims its log in place: once it has written 20MB it rewrites the same file to its last 15MB
-        // (daemon-file-logger.ts), so the file can end before `position`. `anchor` holds the last bytes we read. The
-        // trimmed file still has them, so we continue right after them and neither skip nor repeat a line.
+        // (daemon-file-logger.ts), so the bytes we read move to an earlier offset. By the next poll the file can end
+        // before `position`, or already be longer again with the lines logged during the trim. `anchor` holds the last
+        // bytes we read, which must sit right before `position`. When they do not, the trimmed file still has them, so we
+        // continue right after them and neither skip nor repeat a line.
         const ANCHOR_BYTES = 4096;
-        let anchor = Buffer.from(Buffer.from(existingContent, "utf-8").subarray(-ANCHOR_BYTES));
+        let anchor = Buffer.from(existingBytes.subarray(-ANCHOR_BYTES));
+        const anchorCheckBuf = Buffer.alloc(ANCHOR_BYTES);
         const keepAnchor = (bytes: Buffer) => {
             anchor = Buffer.from(Buffer.concat([anchor, bytes]).subarray(-ANCHOR_BYTES));
         };
@@ -244,6 +248,15 @@ export default class Logs extends Command {
             let fd: fsPromise.FileHandle | undefined;
             try {
                 fd = await fsPromise.open(currentLogFile, "r");
+                if (anchor.length > 0) {
+                    // read(), unlike stat(), sees the file's real end on Windows too (see above)
+                    const { bytesRead } = await fd.read(anchorCheckBuf, 0, anchor.length, position - anchor.length);
+                    if (bytesRead < anchor.length || !anchorCheckBuf.subarray(0, anchor.length).equals(anchor)) {
+                        await followShrunkFile();
+                        return;
+                    }
+                }
+                shrunkWithoutAnchor = false;
                 let chunk = "";
                 while (true) {
                     const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, position);
@@ -253,13 +266,7 @@ export default class Logs extends Command {
                     keepAnchor(readBuf.subarray(0, bytesRead));
                     if (bytesRead < readBuf.length) break;
                 }
-                if (!chunk) {
-                    // Nothing new. Nothing at `position - 1` either means the file is now shorter than what we read.
-                    // read(), unlike stat(), sees the file's real end on Windows too (see above).
-                    if (position > 0 && (await fd.read(readBuf, 0, 1, position - 1)).bytesRead === 0) await followShrunkFile();
-                    return;
-                }
-                shrunkWithoutAnchor = false;
+                if (!chunk) return;
 
                 const combined = pendingBuffer + chunk;
                 const lastNewline = combined.lastIndexOf("\n");

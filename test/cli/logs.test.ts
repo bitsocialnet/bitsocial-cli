@@ -572,6 +572,52 @@ describe("bitsocial logs -f after the log file shrinks in place (synthetic)", ()
         expect(result.stderr).not.toContain("truncated");
     });
 
+    // The daemon buffers up to 5MB of lines while it trims and appends them right after, and a busy or slow follower
+    // polls late, so by the next poll the trimmed file can already be longer than the old offset again. Reading on from
+    // that offset skipped every line between the retained part and it.
+    it("keeps following a trimmed log that grew past the old offset before the next poll", async () => {
+        const { logDir } = await createLogDir();
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-03T00-00-00.000Z.log");
+        const lines: string[] = [];
+        for (let i = 0; i < 2000; i++) lines.push(buildLogLine(new Date(Date.UTC(2026, 5, 3, 0, 0, i)), `old line ${i} ${"x".repeat(40)}`));
+        lines.push(buildLogLine(new Date("2026-06-03T01:00:00.000Z"), "BEFORE_TRIM_MARKER"));
+        const content = lines.join("\n") + "\n";
+        await fsPromise.writeFile(file, content);
+
+        const NEW_LINES = 2000;
+        const newLines = Array.from({ length: NEW_LINES }, (_, i) =>
+            buildLogLine(new Date(Date.UTC(2026, 5, 3, 2, 0, 0, i)), `new line ${i}_ ${"y".repeat(40)}`)
+        );
+        newLines.push(buildLogLine(new Date("2026-06-03T03:00:00.000Z"), "AFTER_TRIM_MARKER"));
+        const keepFrom = content.indexOf("\n", Math.floor(content.length / 2)) + 1;
+        const regrown = content.slice(keepFrom) + newLines.join("\n") + "\n";
+        expect(regrown.length).toBeGreaterThan(content.length);
+
+        let trimmed = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            onChunk: (stdout) => {
+                if (trimmed || !stdout.includes("BEFORE_TRIM_MARKER")) return;
+                trimmed = true;
+                // The trimmed part and the lines logged meanwhile land before the follower's next poll
+                void fsPromise.writeFile(file, regrown);
+            },
+            doneWhen: (stdout) => stdout.includes("AFTER_TRIM_MARKER"),
+            graceMs: 1000,
+            maxMs: 20000
+        });
+
+        expect(result.stdout).toContain("AFTER_TRIM_MARKER");
+        const wrongCounts: string[] = [];
+        for (let i = 0; i < NEW_LINES; i++) {
+            const count = countOf(result.stdout, `new line ${i}_ `);
+            if (count !== 1) wrongCounts.push(`new line ${i}_ x${count}`);
+        }
+        expect(wrongCounts).toEqual([]);
+        expect(countOf(result.stdout, "BEFORE_TRIM_MARKER")).toBe(1);
+        expect(countOf(result.stdout, "old line 1999 ")).toBe(1);
+        expect(result.stderr).not.toContain("truncated");
+    });
+
     it("follows a log file that was emptied from its start", async () => {
         const { logDir } = await createLogDir();
         const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-02T00-00-00.000Z.log");
