@@ -246,22 +246,26 @@ describe("bin/postinstall.js web UI download", () => {
     // exited 0; the next run deleted dist/.webuis-old, so an offline run had nothing left to keep.
     it("puts the installed web UIs back when the new set cannot be moved into place", { timeout: 60000 }, async () => {
         const pkg = await setupPackage();
-        await pkg.publish([SEEDIT_OLD, PLEBONES]);
+        await pkg.publish([SEEDIT_OLD, PLEBONES, FIVECHAN]);
         await pkg.run();
-        // seedit gets a new version; plebones cannot be downloaded, so its installed version is kept
-        await pkg.publish([SEEDIT, { ...PLEBONES, status: 503 }]);
+        const before = ["5chan-0.10.2-html", "plebones-html-0.1.27", "seedit-html-0.5.10"];
+        // seedit gets a new version; plebones and 5chan cannot be downloaded, so their installed versions are kept
+        await pkg.publish([SEEDIT, { ...PLEBONES, status: 503 }, { ...FIVECHAN, status: 503 }]);
 
         const failedSwap = await pkg.run({ FAKE_RENAME_FAIL: pkg.webuisDir });
         expect(failedSwap.output).toContain("EPERM");
-        expect(await pkg.installedDirs(), failedSwap.output).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
+        expect(await pkg.installedDirs(), failedSwap.output).toEqual(before);
 
-        const failedKeep = await pkg.run({ FAKE_RENAME_FAIL: path.join(pkg.webuisDir, "plebones-html-0.1.27") });
+        // plebones is moved over first, so it has to be moved back when 5chan's move fails
+        const failedKeep = await pkg.run({ FAKE_RENAME_FAIL: path.join(pkg.webuisDir, "5chan-0.10.2-html") });
         expect(failedKeep.output).toContain("EPERM");
-        expect(await pkg.installedDirs(), failedKeep.output).toEqual(["plebones-html-0.1.27", "seedit-html-0.5.10"]);
-        await expect(fs.access(path.join(pkg.webuisDir, "plebones-html-0.1.27", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+        expect(await pkg.installedDirs(), failedKeep.output).toEqual(before);
+        for (const name of ["plebones-html-0.1.27", "5chan-0.10.2-html"]) {
+            await expect(fs.access(path.join(pkg.webuisDir, name, "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+        }
 
         const { output } = await pkg.run();
-        expect(await pkg.installedDirs(), output).toEqual(["plebones-html-0.1.27", "seedit-html-0.6.0"]);
+        expect(await pkg.installedDirs(), output).toEqual(["5chan-0.10.2-html", "plebones-html-0.1.27", "seedit-html-0.6.0"]);
     });
 
     // A fresh install (every `npm install -g`, which never ships dist/webuis) has no previous set to put
