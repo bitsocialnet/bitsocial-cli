@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.132 (2026-11-12)</small>
+
+* chore(deps): upgrade seedit web UI v0.6.0 -> v0.6.3, 5chan v0.10.2 -> v0.10.4 ([fb66198](https://github.com/bitsocialnet/bitsocial-cli/commit/fb66198))
+
 ## <small>0.19.131 (2026-11-10)</small>
 
 * docs(reachability): name the pkc-js version from which browsers dial WebTransport ([803fc1e](https://github.com/bitsocialnet/bitsocial-cli/commit/803fc1e)), closes [pkcprotocol/pkc-js#492](https://github.com/pkcprotocol/pkc-js/issues/492)
