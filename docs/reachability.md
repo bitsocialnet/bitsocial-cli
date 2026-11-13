@@ -182,6 +182,7 @@ Desktop nodes:
 | AutoNAT reached an address that is not a relay | can connect | `ok` |
 | Only relayed addresses, reached or announced | can connect only through a relay | `warn` |
 | AutoNAT is still testing, or gave no results | not known yet | `unknown` |
+| AutoNAT is still testing but kubo has no peers | not known yet: AutoNAT can't test while kubo has no peers (normal for an idle node — it connects once it fetches or publishes) | `unknown` |
 | AutoNAT could reach none | cannot connect | `fail` |
 
 Browsers, first match wins. `status` tries a handshake from this machine with every WSS address kubo announces, `setup`'s own included. On a node where reachability is disabled it skips `setup`'s addresses, because Caddy is off on purpose, but still tries the others, such as an AutoTLS address, which `disable` turns back on:
@@ -199,11 +200,13 @@ The advice for getting WSS follows what `setup` did: `run setup to add WSS` on a
 
 A handshake from this machine never crosses its provider's firewall, so `ok` says browsers *should* be able to connect, not that they can.
 
+When kubo has no peers, AutoNAT has nobody to test through, so both lines say `not known yet: AutoNAT can't test while kubo has no peers`. This is the normal idle state of a node that has not been asked to fetch or publish anything: it has not dialled out, and AutoNAT can test once it has. `status` reads the peer count from `swarm/peers` for this; it only reframes the wording and does not change the `unknown` status.
+
 On a node that never ran `setup`, a `Reachability: not configured` line follows, as `Reachability: declined` does on a declined node and `Enabled:` and `Mode:` on a configured one.
 
 ## Troubleshooting
 
-`bitsocial reachability status` lists each requirement with its fix (`checks` in `--json`).
+`bitsocial reachability status` then prints two sections: **Diagnostics**, one line per requirement (the finding only), and **Suggestions**, the fixes as a numbered list ranked by what unblocks reachability most, so [Tailscale Funnel](tailscale-funnel.md) leads when browser reachability is undetermined. `--json` carries the raw engine output under `checks` (each with an optional `fix`, unchanged for `setup` and other consumers) and adds the composed `diagnostics` (findings, no `fix`) and `suggestions` (each tying back to a diagnostic by `id`). The requirement ids are:
 
 | Check | Meaning |
 | --- | --- |
@@ -217,7 +220,7 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 | `daemon`, `kubo-ws` | With reachability enabled: the daemon is down, or kubo lacks the listener Caddy forwards to. `kubo-ws` is skipped when `setup` left the node without WSS |
 | `kubo-announce` | With reachability enabled: an address is missing from kubo's config, or running kubo does not announce it, so browsers cannot learn it. `reachability enable` repairs the config and restarts kubo. An entry in `Addresses.NoAnnounce` that matches the address hides it even then |
 | `certificate` | Under 24 hours left |
-| `inbound` | AutoNAT v2's result for each of kubo's TCP and UDP addresses: `ok` if any was reached, `warn` if none of those tested were. It is `unknown` until there are results or while kubo is down. It tests AutoTLS addresses on kubo's own listener, but did not list an address that is only announced, as one behind a reverse proxy is. Only a connection from another network can prove that one |
+| `inbound` | AutoNAT v2's result for each of kubo's TCP and UDP addresses: `ok` if any was reached, `warn` if none of those tested were. It is `unknown` until there are results or while kubo is down. It tests AutoTLS addresses on kubo's own listener, but did not list an address that is only announced, as one behind a reverse proxy is. Only a connection from another network can prove that one. When kubo has no peers, this diagnostic is reframed to say so (the normal idle state) instead of listing every untested address |
 
 **Linux, not root.** Both Caddy (TCP) and kubo (UDP) need permission for port 443, and `setcap` on one does not help the other. The sysctl covers both:
 
