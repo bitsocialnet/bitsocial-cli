@@ -7,6 +7,8 @@ import fsPromise from "fs/promises";
 import fs from "fs";
 import path from "path";
 import dns from "node:dns";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import PKC from "@pkcprotocol/pkc-js";
 import { findPageSortUsages, loadPageSortsIntoPKC, reloadPageSortsInDaemon } from "../../src/page-sort-packages/page-sort-utils.js";
 import { reloadUrlFromPkcRpcUrl } from "../../src/common-utils/package-registry.js";
@@ -278,5 +280,104 @@ describe("page sort packages in the daemon", () => {
     it("targets /api/page-sorts/reload and reports no daemon as not reloaded", async () => {
         expect(reloadUrlFromPkcRpcUrl(PAGE_SORT_PACKAGE_KIND, "ws://0.0.0.0:9138/")).toBe("http://127.0.0.1:9138/api/page-sorts/reload");
         expect(await reloadPageSortsInDaemon(NO_DAEMON_RPC_URL, 2000)).toEqual({ status: "unreachable" });
+    });
+});
+
+// oclif wraps warnings and errors at the terminal width and prefixes each line with "›" ("»" on Windows)
+const unwrap = (output: string) => output.replace(/[›»]/g, " ").replace(/\s+/g, " ");
+
+// Same reporting as `challenge install/remove` (test/cli/challenge.test.ts), through the page-sort commands and
+// their own reload endpoint and response key: a reload that answered does not mean the daemon serves the package.
+describe("bitsocial page-sort install/remove: what the daemon reload reports", () => {
+    let reloadResponse: { status: number; body: unknown };
+    let server: Server;
+    let rpcUrl: string;
+    let printedRpcUrl: string; // --pkcRpcUrl is parsed as a URL, so messages print it normalized (trailing slash)
+
+    beforeAll(async () => {
+        server = createServer((req, res) => {
+            if (req.method === "POST" && req.url === "/api/page-sorts/reload") {
+                res.writeHead(reloadResponse.status, { "content-type": "application/json" });
+                res.end(JSON.stringify(reloadResponse.body));
+                return;
+            }
+            res.writeHead(404).end();
+        });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        rpcUrl = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        printedRpcUrl = new URL(rpcUrl).href;
+    });
+
+    afterAll(async () => {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+
+    const install = async () => {
+        const srcDir = path.join(randomDirectory(), "reload-report-sort");
+        await createMinimalPageSortDir(srcDir, "reload-report-sort", { version: "2.0.0" });
+        return runBitsocialPageSort(["install", srcDir, "--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", rpcUrl]);
+    };
+
+    const removeWithForce = async () => {
+        const dataPath = randomDirectory();
+        await createMinimalPageSortDir(path.join(dataPath, "page-sorts", "test-page-sort"), "test-page-sort", { version: "1.0.0" });
+        return runBitsocialPageSort(["remove", "test-page-sort", "--force", "--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", rpcUrl]);
+    };
+
+    it("install says it reloaded the package when the daemon reports it loaded", async () => {
+        reloadResponse = { status: 200, body: { ok: true, pageSorts: ["other-sort@1.0.0", "reload-report-sort@2.0.0"] } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).toContain(`reloaded reload-report-sort@2.0.0 in the daemon at ${printedRpcUrl}`);
+        expect(unwrap(result.stderr)).not.toContain("The daemon at");
+    });
+
+    it("install warns instead of claiming a reload when the daemon reloaded without the installed version", async () => {
+        reloadResponse = { status: 200, body: { ok: true, pageSorts: ["reload-report-sort@1.0.0"] } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).toContain("added reload-report-sort@2.0.0");
+        expect(result.stdout).not.toContain("reloaded");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} reloaded its page sorts without reload-report-sort@2.0.0`);
+    });
+
+    // The challenges key is not the page sorts list: an answer without `pageSorts` is not a page sort reload
+    it("install warns when the answer has no page sorts list", async () => {
+        reloadResponse = { status: 200, body: { ok: true, challenges: ["reload-report-sort@2.0.0"] } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).not.toContain("reloaded");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} failed to reload its page sorts (HTTP 200)`);
+    });
+
+    it("install warns when the daemon failed to reload", async () => {
+        reloadResponse = { status: 500, body: { ok: false, error: "Error: disk on fire" } };
+        const result = await install();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).not.toContain("reloaded");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} failed to reload its page sorts (Error: disk on fire)`);
+    });
+
+    it("remove warns when the daemon still reports the package loaded", async () => {
+        reloadResponse = { status: 200, body: { ok: true, pageSorts: ["test-page-sort@1.0.0"] } };
+        const result = await removeWithForce();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(result.stdout).toContain("removed test-page-sort@1.0.0");
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} still has test-page-sort loaded`);
+    });
+
+    it("remove warns when the daemon failed to reload", async () => {
+        reloadResponse = { status: 500, body: { ok: false, error: "Error: disk on fire" } };
+        const result = await removeWithForce();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(unwrap(result.stderr)).toContain(`The daemon at ${printedRpcUrl} failed to reload its page sorts (Error: disk on fire)`);
+    });
+
+    it("remove says nothing more when the daemon reloaded without the package", async () => {
+        reloadResponse = { status: 200, body: { ok: true, pageSorts: [] } };
+        const result = await removeWithForce();
+        expect(result.exitCode, result.stderr).toBe(0);
+        expect(unwrap(result.stderr)).not.toContain("The daemon at");
     });
 });

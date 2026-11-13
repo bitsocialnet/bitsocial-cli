@@ -8,14 +8,18 @@ describe("bitsocial community stop", () => {
 
     // The communities the fake daemon hosts (`pkc.communities`), and whether each is running (`community.started`).
     const startedByAddress: Record<string, boolean> = {};
+    // Other identifiers pkc-js resolves to a hosted community (its public key, or an equivalent name), by listed address
+    const listedAddressByAlias: Record<string, string> = {};
     const startFake = sandbox.fake();
     const stopFake = sandbox.fake();
     const createCommunityFake = sandbox.fake((options: { address: string }) => {
         // pkc-js returns a remote instance, which has no `started`, for an address the daemon does not list
-        if (!(options.address in startedByAddress)) return { address: options.address, stop: stopFake };
+        // ...and a local instance, under the address the daemon lists, when asked by another identifier of a hosted one
+        const listedAddress = listedAddressByAlias[options.address] ?? options.address;
+        if (!(listedAddress in startedByAddress)) return { address: options.address, stop: stopFake };
         return {
-            address: options.address,
-            started: startedByAddress[options.address],
+            address: listedAddress,
+            started: startedByAddress[listedAddress],
             start: startFake,
             stop: stopFake
         };
@@ -38,6 +42,7 @@ describe("bitsocial community stop", () => {
         stopFake.resetHistory();
         createCommunityFake.resetHistory();
         for (const key of Object.keys(startedByAddress)) delete startedByAddress[key];
+        for (const key of Object.keys(listedAddressByAlias)) delete listedAddressByAlias[key];
     });
     afterAll(() => {
         clearPkcRpcConnectOverride();
@@ -86,5 +91,20 @@ describe("bitsocial community stop", () => {
         expect(stdout.trim()).toBe("");
         expect(stderr).toContain(typo);
         expect(result.error?.oclif?.exit).toBe(1);
+    });
+
+    // The hosted check compares the address pkc-js resolved, not the typed string: a community the daemon lists under
+    // its name is still stopped when asked for by its public key
+    it(`Stops a hosted community asked for by an identifier other than its listed address`, async () => {
+        const publicKey = "12D3KooWG3XbzoVyAE6Y9vHZKF64Yuuu4TjdgQKedk14iYmTEPWu";
+        startedByAddress["plebbit.bso"] = true;
+        listedAddressByAlias[publicKey] = "plebbit.bso";
+
+        const { result, stdout } = await runCliCommand(["community", "stop", publicKey]);
+
+        expect(result.error).toBeUndefined();
+        expect(startFake.callCount).toBe(1);
+        expect(stopFake.callCount).toBe(1);
+        expect(stdout.trim()).toBe(publicKey);
     });
 });
