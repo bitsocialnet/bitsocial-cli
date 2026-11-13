@@ -30,10 +30,17 @@ export interface ConnectivityInput {
     // "disabled": after `reachability disable` Caddy is off on purpose, and `wss` holds only addresses setup does not
     // manage, such as AutoTLS, which disable turns back on.
     setupWss?: "enabled" | "disabled";
+    // How many swarm peers kubo has. 0 means AutoNAT has nobody to test through, so "not known yet" is not a passing
+    // wait but the normal idle state of a node that has not been asked to fetch or publish anything. Undefined when
+    // the peer count could not be read, where the plain unfinished-test wording stands.
+    peerCount?: number;
 }
 
 export const NOBODY_CAN_CONNECT = "Nobody can connect: this node announces no public address, so it seeds nothing for anyone.";
 export const KUBO_NOT_RUNNING = "Cannot tell who can connect: kubo is not running. Run: bitsocial daemon";
+// Why reachability is unknown when kubo has no peers: AutoNAT needs other peers to test through, and a node that
+// has not fetched or published anything has not dialled out. It connects, and can be tested, once it has activity.
+export const NO_PEERS_REASON = "AutoNAT can't test while kubo has no peers (normal for an idle node — it connects once it fetches or publishes)";
 
 const isRelayed = (address: string) => address.includes("/p2p-circuit");
 
@@ -51,6 +58,7 @@ function desktopLine(input: ConnectivityInput): ConnectivityLine {
     const relayed = [...new Set([...reached, ...input.announced].filter(isRelayed))];
     if (relayed.length > 0) return { status: "warn", detail: `can connect only through a relay, so this node does not seed for them directly (${list(relayed)})` };
     if (input.autonat === undefined) return { status: "unknown", detail: "not known: kubo gave no AutoNAT results" };
+    if (input.peerCount === 0) return { status: "unknown", detail: `not known yet: ${NO_PEERS_REASON}` };
     if (input.autonat.unknown.length > 0) return { status: "unknown", detail: `not known yet: AutoNAT has not finished testing ${list(input.autonat.unknown)}` };
     if (input.autonat.unreachable.length > 0) return { status: "fail", detail: `cannot connect (AutoNAT could not reach ${list(input.autonat.unreachable)})` };
     return { status: "unknown", detail: "not known yet: AutoNAT has not tested any address" };
@@ -92,6 +100,7 @@ function browsersLine(input: ConnectivityInput, desktop: ConnectivityLine): Conn
     // Not knowing yet comes first, even on a disabled node, whose kubo may still serve WebTransport.
     const disabledNote = input.setupWss === "disabled" ? "; setup's WSS is off because reachability is disabled" : "";
     if (input.autonat === undefined) return { status: "unknown", detail: `not known: kubo gave no AutoNAT results, so WebTransport is untested${failures}${disabledNote}` };
+    if (input.peerCount === 0) return { status: "unknown", detail: `not known yet: ${NO_PEERS_REASON}${failures}${disabledNote}` };
     if (evidence.webTransportUntested.length > 0 || desktop.status === "unknown")
         return { status: "unknown", detail: `not known yet: AutoNAT has not tested WebTransport yet${failures}${disabledNote}` };
     if (input.setupWss === "disabled")

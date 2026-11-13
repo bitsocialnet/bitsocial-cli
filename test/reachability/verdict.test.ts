@@ -44,6 +44,20 @@ describe("connectivityVerdict: desktop nodes", () => {
         expect(verdict({ autonat: undefined }).desktop.status).toBe("unknown");
     });
 
+    it("blames having no peers, not an unfinished test, when kubo has none (#258)", () => {
+        const { desktop } = verdict({ autonat: autonat({ unknown: [tcp, quic] }), peerCount: 0 });
+        expect(desktop.status).toBe("unknown");
+        expect(desktop.detail).toMatch(/no peers/);
+        expect(desktop.detail).toMatch(/idle/);
+        expect(desktop.detail).not.toContain(tcp);
+    });
+
+    it("keeps the unfinished-test wording while kubo has peers (#258)", () => {
+        const { desktop } = verdict({ autonat: autonat({ unknown: [tcp, quic] }), peerCount: 3 });
+        expect(desktop.detail).toMatch(/AutoNAT has not finished testing/);
+        expect(desktop.detail).not.toMatch(/no peers/);
+    });
+
     it("fails when AutoNAT could reach none of the public addresses", () => {
         const { desktop } = verdict({ autonat: autonat({ unreachable: [tcp, quic] }) });
         expect(desktop.status).toBe("fail");
@@ -100,6 +114,13 @@ describe("connectivityVerdict: browsers", () => {
         const { browsers } = verdict({ autonat: autonat({ reachable: [tcp], unknown: [webTransport] }) });
         expect(browsers.status).toBe("unknown");
         expect(browsers.detail).toMatch(/not known yet/);
+    });
+
+    it("blames having no peers for not knowing about WebTransport when kubo has none (#258)", () => {
+        const { browsers } = verdict({ autonat: autonat({ unknown: [webTransport] }), peerCount: 0 });
+        expect(browsers.status).toBe("unknown");
+        expect(browsers.detail).toMatch(/no peers/);
+        expect(browsers.detail).toMatch(/idle/);
     });
 
     it("says WSS is off on a disabled node, and how to turn it back on", () => {
