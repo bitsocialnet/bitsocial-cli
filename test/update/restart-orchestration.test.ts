@@ -59,6 +59,22 @@ describe("stopUnmanagedDaemons", () => {
         await stopUnmanagedDaemons(plan, lifecycle);
         expect(calls).toEqual(["stop:2", "stop:3"]);
     });
+
+    // A stopped daemon deletes its own state file, so the plan is the only record of its args. When a
+    // later daemon fails to stop (e.g. it does not exit within the shutdown timeout), the update aborts:
+    // the daemons already stopped must be brought back first, or nothing would ever restart them.
+    it("re-spawns the daemons it already stopped when a later one fails to stop, then rethrows", async () => {
+        const plan = await planDaemonRestarts([mkDaemon(1), mkDaemon(2), mkDaemon(3)], resolveByField);
+        const { lifecycle, calls } = recordingLifecycle();
+        lifecycle.stopUnmanaged = async (d) => {
+            calls.push(`stop:${d.pid}`);
+            if (d.pid === 3) throw new Error("did not shut down in time");
+        };
+
+        await expect(stopUnmanagedDaemons(plan, lifecycle)).rejects.toThrow("did not shut down in time");
+        // Daemon 3 may still be running (it only failed to exit in time), so it is not re-spawned.
+        expect(calls).toEqual(["stop:1", "stop:2", "stop:3", "start:1", "start:2"]);
+    });
 });
 
 describe("startUnmanagedDaemons", () => {

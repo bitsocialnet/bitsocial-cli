@@ -37,6 +37,35 @@ export interface DaemonState {
     procStartTime?: string;
     /** External supervisor managing this daemon, if any. Absent for standalone or legacy daemons. */
     supervisor?: DaemonSupervisor;
+    /** Working directory the daemon started in; relative paths in argv resolve against it. Absent in legacy state files. */
+    cwd?: string;
+    /** The DAEMON_ENV_KEYS that were set when the daemon started. Absent in legacy state files. */
+    env?: Record<string, string>;
+}
+
+/** Environment variables the daemon reads at startup to pick its kubo repo and endpoints. */
+export const DAEMON_ENV_KEYS = ["IPFS_PATH", "KUBO_RPC_URL", "IPFS_GATEWAY_URL"] as const;
+
+/** The DAEMON_ENV_KEYS set in `env`, as recorded in a daemon's state file. */
+export function pickDaemonEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+    const picked: Record<string, string> = {};
+    for (const key of DAEMON_ENV_KEYS) {
+        const value = env[key];
+        if (value !== undefined) picked[key] = value;
+    }
+    return picked;
+}
+
+/**
+ * Environment to re-spawn the daemon described by `state` with: `env` (the updater's own), with the
+ * DAEMON_ENV_KEYS replaced by the ones the daemon recorded, so it comes back on the same kubo repo and
+ * endpoints whichever shell runs the update. Legacy state files without `env` keep `env` unchanged.
+ */
+export function daemonRespawnEnv(state: DaemonState, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    if (!state.env) return env;
+    const respawnEnv = { ...env };
+    for (const key of DAEMON_ENV_KEYS) delete respawnEnv[key];
+    return { ...respawnEnv, ...pickDaemonEnv(state.env) };
 }
 
 /**
@@ -152,9 +181,14 @@ function stateFilePath(pid: number): string {
  * OS-reported start time of a process, used as an identity token: if a state file's PID
  * was reused by an unrelated process, its start time won't match the recorded one.
  * Linux: starttime (field 22) of /proc/<pid>/stat, in clock ticks since boot.
- * Other unix: `ps -o lstart=` output. Returns undefined when it can't be determined.
+ * Other unix: `ps -o lstart=` output. ps prints it in the caller's locale and timezone, so both are
+ * pinned by default: the token a daemon records must match the one any later CLI computes, whatever
+ * shell or TZ it runs from. Returns undefined when it can't be determined.
  */
-async function getProcessStartTime(pid: number): Promise<string | undefined> {
+async function getProcessStartTime(
+    pid: number,
+    psEnv: NodeJS.ProcessEnv = { ...process.env, LC_ALL: "C", TZ: "UTC" }
+): Promise<string | undefined> {
     try {
         const stat = await fs.readFile(`/proc/${pid}/stat`, "utf-8");
         // comm (field 2) may contain spaces/parens — real fields resume after the last ')'
@@ -162,7 +196,7 @@ async function getProcessStartTime(pid: number): Promise<string | undefined> {
         return fields[19]; // field 22 (starttime), offset by the 3 fields before the split
     } catch {
         try {
-            const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="]);
+            const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="], { env: psEnv });
             return stdout.trim() || undefined;
         } catch {
             return undefined;
@@ -260,8 +294,12 @@ async function isDaemonStateAlive(state: DaemonState): Promise<boolean> {
     if (!isPidAlive(state.pid)) return false;
     if (state.procStartTime !== undefined) {
         const current = await getProcessStartTime(state.pid);
-        if (current !== undefined) return current === state.procStartTime; // mismatch — PID was reused
-        return true; // identity undeterminable — fall back to liveness only
+        if (current === undefined) return true; // identity undeterminable — fall back to liveness only
+        if (current === state.procStartTime) return true;
+        // Older CLIs recorded `ps` output in the daemon's own locale and timezone: accept a match in the
+        // caller's environment too, so a daemon still running from before the upgrade is kept when the
+        // caller shares that locale and timezone.
+        return (await getProcessStartTime(state.pid, process.env)) === state.procStartTime; // otherwise the PID was reused
     }
     // Legacy state file without procStartTime — heuristic: the command line must reference bitsocial
     const cmdline = await getProcessCommandLine(state.pid);

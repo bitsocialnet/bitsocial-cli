@@ -26,7 +26,7 @@ import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challen
 import { loadPageSortsIntoPKC } from "../../page-sort-packages/page-sort-utils.js";
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
-import { pruneStaleStates, writeDaemonState, deleteDaemonState, detectSelfSupervisor, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
+import { pruneStaleStates, writeDaemonState, deleteDaemonState, detectSelfSupervisor, pickDaemonEnv, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
 import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-utils/daemon-file-logger.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
@@ -356,7 +356,11 @@ export default class Daemon extends Command {
                 startedAt: new Date().toISOString(),
                 argv: daemonArgv,
                 pkcRpcUrl: pkcRpcUrl.toString(),
-                ...(supervisor ? { supervisor } : {})
+                ...(supervisor ? { supervisor } : {}),
+                // What argv alone does not capture, so the updater can restart it the same way: relative paths in
+                // argv resolve against cwd, and the kubo repo and endpoints may come from env vars.
+                cwd: process.cwd(),
+                env: pickDaemonEnv()
             });
 
             // Create BSO name resolvers for .bso/.eth domain resolution

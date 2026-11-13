@@ -1,5 +1,6 @@
 import { Args, Flags, Command } from "@oclif/core";
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import tcpPortUsed from "tcp-port-used";
 import { fetchLatestVersion, installGlobal } from "../../../update/npm-registry.js";
 import { fastInstallGlobal } from "../../../update/fast-update.js";
@@ -8,6 +9,7 @@ import { systemctlRestart } from "../../../update/systemctl.js";
 import {
     getAliveDaemonStates,
     resolveDaemonSupervisor,
+    daemonRespawnEnv,
     DAEMON_SHUTDOWN_TIMEOUT_MS,
     type DaemonSupervisor
 } from "../../../common-utils/daemon-state.js";
@@ -61,24 +63,12 @@ export default class Install extends Command {
         const plan = await planDaemonRestarts(aliveDaemons, (d) => resolveDaemonSupervisor(d));
         const lifecycle = this._daemonLifecycle();
 
-        if (aliveDaemons.length > 0) {
-            if (!flags["restart-daemons"]) {
-                this.error(`${aliveDaemons.length} daemon(s) running. Stop them first, then retry.`, { exit: 1 });
-            }
-
-            // Stop only the unsupervised daemons before the binary swap. Supervised daemons keep running
-            // and are restarted by their supervisor afterwards (see _restartViaSupervisor).
-            await stopUnmanagedDaemons(plan, lifecycle);
-            if (plan.unmanaged.length > 0) this.log("All unsupervised daemons stopped.");
-            for (const { daemon, supervisor } of plan.managed) {
-                this.log(
-                    `Daemon (PID ${daemon.pid}) is managed by ${supervisor.type} (${supervisor.unit}); ` +
-                        `it will be restarted by its supervisor.`
-                );
-            }
+        if (aliveDaemons.length > 0 && !flags["restart-daemons"]) {
+            this.error(`${aliveDaemons.length} daemon(s) running. Stop them first, then retry.`, { exit: 1 });
         }
 
-        // Resolve the target version
+        // Resolve the target version and decide whether to install at all before stopping any daemon, so a
+        // registry failure (e.g. offline) exits, and an up-to-date CLI returns, with every daemon still running.
         let targetVersion: string;
         if (!args.version || args.version === "latest") {
             try {
@@ -95,10 +85,22 @@ export default class Install extends Command {
         // Skip if already on this version (unless --force)
         if (compareVersions(current, targetVersion) === 0 && !flags.force) {
             this.log(`Already on v${current}. Use --force to reinstall.`);
-            // We stopped the unsupervised daemons but aren't updating — bring them back. Supervised daemons
-            // were never stopped, so leave them running (no unnecessary service bounce).
-            if (flags["restart-daemons"]) await startUnmanagedDaemons(plan, lifecycle);
             return;
+        }
+
+        if (aliveDaemons.length > 0) {
+            // Stop only the unsupervised daemons before the binary swap. Supervised daemons keep running
+            // and are restarted by their supervisor afterwards (see _restartViaSupervisor).
+            // A stopped daemon deletes its state file, so from here on its args exist only in `plan`:
+            // every exit below must re-spawn it first.
+            await stopUnmanagedDaemons(plan, lifecycle);
+            if (plan.unmanaged.length > 0) this.log("All unsupervised daemons stopped.");
+            for (const { daemon, supervisor } of plan.managed) {
+                this.log(
+                    `Daemon (PID ${daemon.pid}) is managed by ${supervisor.type} (${supervisor.unit}); ` +
+                        `it will be restarted by its supervisor.`
+                );
+            }
         }
 
         this.log(`Installing bitsocial-cli@${targetVersion}...`);
@@ -119,6 +121,10 @@ export default class Install extends Command {
             try {
                 await installGlobal(targetVersion);
             } catch (err) {
+                if (plan.unmanaged.length > 0) {
+                    this.warn("Update failed; restarting the stopped daemons on the currently installed version.");
+                    await startUnmanagedDaemons(plan, lifecycle);
+                }
                 this.error(`Update failed: ${(err as Error).message}`, { exit: 1 });
             }
         }
@@ -192,14 +198,30 @@ export default class Install extends Command {
                 const argStr = daemon.argv.length > 0 ? daemon.argv.join(" ") : "(defaults)";
                 this.log(`Restarting daemon with args: ${argStr}`);
 
+                // Start it where and how it was started: relative paths in argv resolve against its cwd, and
+                // its kubo repo and endpoints may come from env vars this shell does not have.
+                let cwd = daemon.cwd;
+                if (cwd !== undefined && !existsSync(cwd)) {
+                    this.warn(`  Daemon's working directory ${cwd} no longer exists; starting it from ${process.cwd()}.`);
+                    cwd = undefined;
+                }
                 const child = spawn("bitsocial", ["daemon", ...daemon.argv], {
                     detached: true,
-                    stdio: "ignore"
+                    stdio: "ignore",
+                    env: daemonRespawnEnv(daemon),
+                    ...(cwd !== undefined ? { cwd } : {})
                 });
                 child.unref();
 
-                if (!child.pid) {
-                    this.warn(`Failed to spawn daemon for args: ${argStr}`);
+                // A spawn failure (e.g. `bitsocial` not on PATH) is reported as an 'error' event; unhandled,
+                // it kills the updater with an uncaught exception and exit 1 once the event loop yields,
+                // even after a successful update.
+                const spawnError = await new Promise<Error | undefined>((resolve) => {
+                    child.once("spawn", () => resolve(undefined));
+                    child.once("error", resolve);
+                });
+                if (spawnError) {
+                    this.warn(`Failed to spawn daemon for args: ${argStr}: ${spawnError.message}`);
                     return;
                 }
 
