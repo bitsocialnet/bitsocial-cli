@@ -1,5 +1,13 @@
 # Changelog
 
+## <small>0.19.134 (2026-11-13)</small>
+
+* test: bound the retries when removing the run's temp directory ([f0c801d](https://github.com/bitsocialnet/bitsocial-cli/commit/f0c801d))
+* test: check that stopping a test daemon leaves no kubo running ([ce2d7b0](https://github.com/bitsocialnet/bitsocial-cli/commit/ce2d7b0))
+* test: end a test daemon together with the kubo it started on Windows ([e1e5338](https://github.com/bitsocialnet/bitsocial-cli/commit/e1e5338))
+* test: give each run one temp directory and remove it afterwards ([23e164b](https://github.com/bitsocialnet/bitsocial-cli/commit/23e164b))
+* test: keep a live run's temp directory and report a failed removal ([8c8f31e](https://github.com/bitsocialnet/bitsocial-cli/commit/8c8f31e))
+
 ## <small>0.19.133 (2026-11-13)</small>
 
 * fix(reachability): give status's Funnel pointer the public addresses kubo reports, as setup has ([350aa50](https://github.com/bitsocialnet/bitsocial-cli/commit/350aa50))
