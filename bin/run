@@ -11,8 +11,9 @@ enableCompileCache?.();
 // Save and strip DEBUG before any imports so the debug module
 // doesn't auto-enable stderr output. The daemon command will
 // re-enable namespaces programmatically and redirect to the log file.
+// setupDebugLogger (src/util.ts) and the daemon read the saved value from _PKC_DEBUG.
 if (process.env.DEBUG) {
-    process.env._PLEBBIT_DEBUG = process.env.DEBUG;
+    process.env._PKC_DEBUG = process.env.DEBUG;
     delete process.env.DEBUG;
 }
 

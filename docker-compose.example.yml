@@ -32,12 +32,12 @@ services:
       - net.core.rmem_max=7500000
       - net.core.wmem_max=7500000
     environment:
-      - DEBUG=bitsocial*, plebbit*, -plebbit*trace
+      - DEBUG=bitsocial*, pkc*, -pkc*trace
 
       # Set a fixed RPC auth key instead of a random one.
       # Useful for bookmarking the web UI URL or scripting RPC access.
       # If left unset, a random key is generated (visible in `docker compose logs`).
-      # - PLEBBIT_RPC_AUTH_KEY=your-custom-auth-key-here
+      # - PKC_RPC_AUTH_KEY=your-custom-auth-key-here
 
       # Override Kubo IPFS bind addresses / ports:
       # - KUBO_RPC_URL=http://0.0.0.0:50019/api/v0

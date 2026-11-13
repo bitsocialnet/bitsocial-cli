@@ -34,8 +34,8 @@ services:
       - net.core.wmem_max=7500000
     # Optional environment variables:
     # environment:
-    #   DEBUG: bitsocial*, plebbit*, -plebbit*trace
-    #   PLEBBIT_RPC_AUTH_KEY: your-custom-auth-key-here
+    #   DEBUG: bitsocial*, pkc*, -pkc*trace
+    #   PKC_RPC_AUTH_KEY: your-custom-auth-key-here
 
     # # Uncomment to build from source instead of pulling the image:
     # build:
