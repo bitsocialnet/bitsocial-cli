@@ -58,6 +58,13 @@ describe("connectivityVerdict: desktop nodes", () => {
         expect(desktop.detail).not.toMatch(/no peers/);
     });
 
+    it("keeps a completed AutoNAT failure even if the peer count just dropped to 0 (#258)", () => {
+        const { desktop } = verdict({ autonat: autonat({ unreachable: [tcp, quic] }), peerCount: 0 });
+        expect(desktop.status).toBe("fail");
+        expect(desktop.detail).toMatch(/cannot connect/);
+        expect(desktop.detail).not.toMatch(/no peers/);
+    });
+
     it("fails when AutoNAT could reach none of the public addresses", () => {
         const { desktop } = verdict({ autonat: autonat({ unreachable: [tcp, quic] }) });
         expect(desktop.status).toBe("fail");

@@ -44,6 +44,10 @@ export const NO_PEERS_REASON = "AutoNAT can't test while kubo has no peers (norm
 
 const isRelayed = (address: string) => address.includes("/p2p-circuit");
 
+// kubo keeps the last AutoNAT results after its peers drop, and the peer count is read in a separate RPC call just
+// after. So the no-peers wording is only right when AutoNAT has nothing completed: a recorded reach or failure stands.
+const noPeersAndUntested = (input: ConnectivityInput) => input.peerCount === 0 && (input.autonat?.reachable.length ?? 0) === 0 && (input.autonat?.unreachable.length ?? 0) === 0;
+
 const list = (addresses: string[]) => {
     const shown = addresses.slice(0, 3).join(", ");
     return addresses.length > 3 ? `${shown} and ${addresses.length - 3} more` : shown;
@@ -58,7 +62,7 @@ function desktopLine(input: ConnectivityInput): ConnectivityLine {
     const relayed = [...new Set([...reached, ...input.announced].filter(isRelayed))];
     if (relayed.length > 0) return { status: "warn", detail: `can connect only through a relay, so this node does not seed for them directly (${list(relayed)})` };
     if (input.autonat === undefined) return { status: "unknown", detail: "not known: kubo gave no AutoNAT results" };
-    if (input.peerCount === 0) return { status: "unknown", detail: `not known yet: ${NO_PEERS_REASON}` };
+    if (noPeersAndUntested(input)) return { status: "unknown", detail: `not known yet: ${NO_PEERS_REASON}` };
     if (input.autonat.unknown.length > 0) return { status: "unknown", detail: `not known yet: AutoNAT has not finished testing ${list(input.autonat.unknown)}` };
     if (input.autonat.unreachable.length > 0) return { status: "fail", detail: `cannot connect (AutoNAT could not reach ${list(input.autonat.unreachable)})` };
     return { status: "unknown", detail: "not known yet: AutoNAT has not tested any address" };
@@ -100,7 +104,7 @@ function browsersLine(input: ConnectivityInput, desktop: ConnectivityLine): Conn
     // Not knowing yet comes first, even on a disabled node, whose kubo may still serve WebTransport.
     const disabledNote = input.setupWss === "disabled" ? "; setup's WSS is off because reachability is disabled" : "";
     if (input.autonat === undefined) return { status: "unknown", detail: `not known: kubo gave no AutoNAT results, so WebTransport is untested${failures}${disabledNote}` };
-    if (input.peerCount === 0) return { status: "unknown", detail: `not known yet: ${NO_PEERS_REASON}${failures}${disabledNote}` };
+    if (noPeersAndUntested(input)) return { status: "unknown", detail: `not known yet: ${NO_PEERS_REASON}${failures}${disabledNote}` };
     if (evidence.webTransportUntested.length > 0 || desktop.status === "unknown")
         return { status: "unknown", detail: `not known yet: AutoNAT has not tested WebTransport yet${failures}${disabledNote}` };
     if (input.setupWss === "disabled")

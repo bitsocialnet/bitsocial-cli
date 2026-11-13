@@ -200,7 +200,7 @@ The advice for getting WSS follows what `setup` did: `run setup to add WSS` on a
 
 A handshake from this machine never crosses its provider's firewall, so `ok` says browsers *should* be able to connect, not that they can.
 
-When kubo has no peers, AutoNAT has nobody to test through, so both lines say `not known yet: AutoNAT can't test while kubo has no peers`. This is the normal idle state of a node that has not been asked to fetch or publish anything: it has not dialled out, and AutoNAT can test once it has. `status` reads the peer count from `swarm/peers` for this; it only reframes the wording and does not change the `unknown` status.
+When kubo has no peers **and** AutoNAT has no completed result, both lines say `not known yet: AutoNAT can't test while kubo has no peers`. This is the normal idle state of a node that has not been asked to fetch or publish anything: it has not dialled out, and AutoNAT can test once it has. `status` reads the peer count from `swarm/peers` for this. It applies only to a verdict that was already `unknown`: a successful WSS handshake still reads `ok`, a node with no public address still gets the `fail` summary, and a reach or failure AutoNAT recorded before its last peer dropped is kept rather than overwritten (so the no-peers wording can turn such a stale `fail` into `unknown`, but never hides a live result).
 
 On a node that never ran `setup`, a `Reachability: not configured` line follows, as `Reachability: declined` does on a declined node and `Enabled:` and `Mode:` on a configured one.
 

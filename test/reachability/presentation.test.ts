@@ -68,6 +68,13 @@ describe("composeStatus: no-peers reframing", () => {
         expect(diagnostics.find((d) => d.id === "inbound")!.detail).toBe(wall);
     });
 
+    it("keeps a completed inbound result even when the peer count is 0 (#258)", () => {
+        const reached = "AutoNAT reached: /ip6/a/udp/4001/quic-v1. This does not cover WSS ...";
+        const { diagnostics } = compose([{ id: "inbound", status: "ok", detail: reached }], { noPeers: true });
+        const inbound = diagnostics.find((d) => d.id === "inbound")!;
+        expect(inbound).toMatchObject({ status: "ok", detail: reached });
+    });
+
     it("does not blame bootstrap, framing it as normal for an idle node", () => {
         expect(NO_PEERS_DIAGNOSTIC).toMatch(/idle/);
         expect(NO_PEERS_DIAGNOSTIC).not.toMatch(/fail|error|bootstrap/i);

@@ -27,7 +27,9 @@ const rankOf = (id: string) => (id === "browser-address" ? 0 : 1);
 
 export function composeStatus(input: { connectivity: Connectivity; checks: ReachabilityCheck[]; noPeers: boolean; funnelFix?: string }): StatusPresentation {
     const diagnostics = input.checks.map((check) => {
-        const finding = input.noPeers && check.id === "inbound" ? { ...check, status: "unknown" as const, detail: NO_PEERS_DIAGNOSTIC } : check;
+        // Reframe only an inbound check that is itself unknown. A completed AutoNAT result (ok/warn) must stand even
+        // if the peer count read just afterwards is 0, or the verdict and this diagnostic would contradict each other.
+        const finding = input.noPeers && check.id === "inbound" && check.status === "unknown" ? { ...check, detail: NO_PEERS_DIAGNOSTIC } : check;
         // A finding carries no remedy; the remedy moves to Suggestions.
         const { fix, ...rest } = finding;
         void fix;
