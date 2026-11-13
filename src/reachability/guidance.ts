@@ -65,6 +65,42 @@ export const unreachableStatement = (reason: string) =>
         "Any one of these would change that: a public IPv4 address from your ISP, global IPv6, a router that allows UPnP or manual port forwarding, or a domain on a reverse proxy that can reach this node (--domain)."
     ].join(EOL);
 
+export const TAILSCALE_FUNNEL_DOC = "https://github.com/bitsocialnet/bitsocial-cli/blob/master/docs/tailscale-funnel.md";
+
+const funnelHostSteps = (wsPort: number) => [
+    "  1. Install Tailscale (https://tailscale.com/download) and sign in.",
+    "  2. Rename this machine in Tailscale's admin console unless its name may be public: the name is published for good.",
+    `  3. Run: tailscale funnel --bg ${wsPort}     (the first run prints a link to approve Funnel)`,
+    "  4. Once the name resolves in public DNS, which can take up to 10 minutes, run: bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws"
+];
+
+// For a node the internet cannot reach on TCP 443. Tailscale's relays take the connection and tailscaled on this
+// machine ends TLS, so nothing has to be opened on a router. Setup does not run Tailscale itself.
+// In a container Tailscale runs in a sidecar, which the compose example carries, so there is nothing to install here.
+export const tailscaleFunnelGuidance = (wsPort: number, inContainer = false) =>
+    [
+        "One tested way to give this node a browser-reachable address without opening ports is Tailscale Funnel.",
+        "It is free with a one-time signup, and browser connections then pass through Tailscale's relays:",
+        ...(inContainer
+            ? [
+                  "  1. Pick a machine name that may be public: the name is published for good.",
+                  `  2. Add the Tailscale sidecar from docker-compose.example.yml, forwarding to 127.0.0.1:${wsPort}, and start it.`,
+                  "  3. Once the name resolves in public DNS, which can take up to 10 minutes, run in this container: bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws"
+              ]
+            : funnelHostSteps(wsPort)),
+        `Walkthrough, Docker, and what Tailscale can see: ${TAILSCALE_FUNNEL_DOC}`
+    ].join(EOL);
+
+export const tailscaleFunnelFix = (wsPort: number) =>
+    `Tailscale Funnel can give this node a browser address without opening ports, by forwarding to 127.0.0.1:${wsPort}. Rerun setup for the steps, or see ${TAILSCALE_FUNNEL_DOC}`;
+
+// A handshake from this machine may never leave it, so a proxied address still needs a look from outside.
+export const proxiedAddressTestHint = (address: string): string | undefined => {
+    const match = address.match(/^\/(?:dns[46]?|ip[46])\/([^/]+)\/tcp\/(\d+)\//);
+    if (!match) return undefined;
+    return `The handshake above came from this machine, which does not prove other networks can connect through ${address}.\n${testCommandHint(match[1]!, Number(match[2]))}`;
+};
+
 // A real WebSocket upgrade through the terminator to kubo, which answers 101 when the whole path works.
 export const testCommandHint = (host: string, port: number) =>
     "Test from another network while the daemon runs (expect 101):\n" +
