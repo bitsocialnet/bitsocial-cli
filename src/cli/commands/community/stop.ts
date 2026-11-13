@@ -33,6 +33,13 @@ export default class Stop extends BaseCommand {
         for (const address of addresses) {
             try {
                 const community = await pkc.createCommunity({ address });
+                // pkc-js returns a remote instance for an address the daemon does not host (a typo, or a
+                // community of another node). It has nothing to stop, so fail instead of printing the address
+                // as if it was stopped. A local instance carries the address the daemon lists it under.
+                if (!pkc.communities.some((entry) => entry.address === community.address))
+                    throw new Error(
+                        `Community ${address} is not hosted by the daemon at ${flags.pkcRpcUrl}. Run "bitsocial community list" to see its communities`
+                    );
                 // `community.started` comes from the daemon's record (it is what `community list`
                 // prints). A fresh RPC instance is never in client state "started" itself, and
                 // pkc-js's RpcLocalCommunity.stop() only sends the stopCommunity RPC for an instance

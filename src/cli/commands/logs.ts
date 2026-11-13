@@ -186,14 +186,15 @@ export default class Logs extends Command {
         // Follow mode: dump existing content (filtered + tailed) then watch for new data
         let currentLogFile = latestLogFile;
 
-        const existingContent = await fsPromise.readFile(currentLogFile, "utf-8");
+        const existingBytes = await fsPromise.readFile(currentLogFile);
+        const existingContent = existingBytes.toString("utf-8");
         // Anchor the follow offset to exactly the bytes we just read, NOT a separate
         // fsPromise.stat() taken afterwards. A later stat is racy: any append landing between
         // this read and the stat is skipped (position jumps past it) yet was never in the dump
         // above, so follow mode silently drops those lines. Under load that window widens — this
         // was the cause of the intermittent CI failure where an appended line was never surfaced
-        // (issue #77). Byte length (not string length) because position indexes bytes in the file.
-        let position = Buffer.byteLength(existingContent, "utf-8");
+        // (issue #77). The raw byte count (not string length) because position indexes bytes in the file.
+        let position = existingBytes.length;
         let pendingBuffer = "";
 
         const entries = this._parseLogEntries(existingContent);
@@ -209,19 +210,78 @@ export default class Logs extends Command {
         // to miss new bytes. read() sees the true file end at syscall time.
         const READ_BUF_SIZE = 64 * 1024;
         const readBuf = Buffer.alloc(READ_BUF_SIZE);
+
+        // The daemon trims its log in place: once it has written 20MB it rewrites the same file to its last 15MB
+        // (daemon-file-logger.ts), so the bytes we read move to an earlier offset. By the next poll the file can end
+        // before `position`, or already be longer again with the lines logged during the trim. `anchor` holds the last
+        // bytes we read, which must sit right before `position`. When they do not, the trimmed file still has them, so we
+        // continue right after them and neither skip nor repeat a line.
+        const ANCHOR_BYTES = 4096;
+        let anchor = Buffer.from(existingBytes.subarray(-ANCHOR_BYTES));
+        const anchorCheckBuf = Buffer.alloc(ANCHOR_BYTES);
+        const keepAnchor = (bytes: Buffer) => {
+            anchor = Buffer.from(Buffer.concat([anchor, bytes]).subarray(-ANCHOR_BYTES));
+        };
+        let shrunkWithoutAnchor = false;
+        const followShrunkFile = async () => {
+            const content = await fsPromise.readFile(currentLogFile);
+            const anchorAt = anchor.length > 0 ? content.lastIndexOf(anchor) : -1;
+            if (anchorAt >= 0) {
+                position = anchorAt + anchor.length;
+                shrunkWithoutAnchor = false;
+                return;
+            }
+            // The file was emptied or replaced, or a trim is still rewriting it. Only the second poll in a row that
+            // finds no anchor follows the file from its start, so a trim caught halfway does not reprint the file.
+            if (!shrunkWithoutAnchor) {
+                shrunkWithoutAnchor = true;
+                return;
+            }
+            shrunkWithoutAnchor = false;
+            position = 0;
+            pendingBuffer = "";
+            anchor = Buffer.alloc(0);
+            process.stderr.write(`\n--- log file was truncated, following it from its start ---\n\n`);
+        };
+
         const readNewData = async () => {
             let fd: fsPromise.FileHandle | undefined;
             try {
                 fd = await fsPromise.open(currentLogFile, "r");
-                let chunk = "";
+                if (anchor.length > 0) {
+                    // read(), unlike stat(), sees the file's real end on Windows too (see above)
+                    const { bytesRead } = await fd.read(anchorCheckBuf, 0, anchor.length, position - anchor.length);
+                    if (bytesRead < anchor.length || !anchorCheckBuf.subarray(0, anchor.length).equals(anchor)) {
+                        await followShrunkFile();
+                        return;
+                    }
+                }
+                shrunkWithoutAnchor = false;
+                const readChunks: Buffer[] = [];
+                let readPosition = position;
                 while (true) {
-                    const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, position);
+                    const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, readPosition);
                     if (bytesRead === 0) break;
-                    position += bytesRead;
-                    chunk += readBuf.subarray(0, bytesRead).toString("utf-8");
+                    readPosition += bytesRead;
+                    readChunks.push(Buffer.from(readBuf.subarray(0, bytesRead)));
                     if (bytesRead < readBuf.length) break;
                 }
-                if (!chunk) return;
+                if (readChunks.length === 0) return;
+                if (anchor.length > 0) {
+                    // A trim can land between the check above and these reads, or between two of them, with the file
+                    // already longer than `position` again. The bytes just read are then not the ones that follow
+                    // what was printed. Only when the anchor still sits before `position` after the reads did the
+                    // file keep its layout throughout; otherwise drop them and find the anchor in the trimmed file.
+                    const { bytesRead } = await fd.read(anchorCheckBuf, 0, anchor.length, position - anchor.length);
+                    if (bytesRead < anchor.length || !anchorCheckBuf.subarray(0, anchor.length).equals(anchor)) {
+                        await followShrunkFile();
+                        return;
+                    }
+                }
+                const readBytes = Buffer.concat(readChunks);
+                position = readPosition;
+                keepAnchor(readBytes);
+                const chunk = readBytes.toString("utf-8");
 
                 const combined = pendingBuffer + chunk;
                 const lastNewline = combined.lastIndexOf("\n");
@@ -255,6 +315,10 @@ export default class Logs extends Command {
                 const newestFile = await this._findLatestLogFile(logPath);
                 if (newestFile === currentLogFile) return;
 
+                // Read the new file before switching to it, and anchor the offset to the bytes read, as for the initial
+                // dump: an offset from a later stat() skips whatever was appended in between (issue #77)
+                const newBytes = await fsPromise.readFile(newestFile);
+
                 // Flush any remaining partial line from old file
                 if (pendingBuffer) {
                     if (!since && !until && !streamFilter) {
@@ -268,13 +332,17 @@ export default class Logs extends Command {
                     }
                 }
 
+                // Switch in one synchronous step, so the file, the offset and the anchor always agree
                 currentLogFile = newestFile;
+                position = newBytes.length;
                 pendingBuffer = "";
+                anchor = Buffer.from(newBytes.subarray(-ANCHOR_BYTES));
+                shrunkWithoutAnchor = false;
 
                 process.stderr.write(`\n--- switched to new log file: ${path.basename(newestFile)} ---\n\n`);
 
-                // Read and output entire new file content (with filters, no tail limit)
-                const newContent = await fsPromise.readFile(currentLogFile, "utf-8");
+                // Output entire new file content (with filters, no tail limit)
+                const newContent = newBytes.toString("utf-8");
                 if (newContent) {
                     if (!since && !until && !streamFilter) {
                         process.stdout.write(newContent);
@@ -288,9 +356,6 @@ export default class Logs extends Command {
                         if (output) process.stdout.write(output + "\n");
                     }
                 }
-
-                const newStat = await fsPromise.stat(currentLogFile);
-                position = newStat.size;
             } catch {
                 // Directory listing failed or file disappeared — retry next cycle
             }
@@ -300,21 +365,23 @@ export default class Logs extends Command {
         // reliably notify on cross-process appends on Windows (see nodejs/node#36888).
         let polling = true;
         let pollTimer: NodeJS.Timeout | null = null;
+        let pollCount = 0;
         const pollLoop = async () => {
             if (!polling) return;
             try {
                 await readNewData();
+                // Every 10th poll (~3s) look for a newer log file. In this loop rather than on its own timer, so a read
+                // never runs halfway through a switch, with the new file and the old file's offset
+                if (++pollCount % 10 === 0) await checkForNewLogFile();
             } finally {
                 if (polling) pollTimer = setTimeout(pollLoop, 300);
             }
         };
         pollTimer = setTimeout(pollLoop, 300);
-        const newFileCheckInterval = setInterval(checkForNewLogFile, 3000);
 
         const shutdown = () => {
             polling = false;
             if (pollTimer) clearTimeout(pollTimer);
-            clearInterval(newFileCheckInterval);
             process.exit(0);
         };
         process.on("SIGINT", shutdown);
