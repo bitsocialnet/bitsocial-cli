@@ -1,5 +1,17 @@
 # Changelog
 
+## <small>0.19.135 (2026-11-13)</small>
+
+* fix(challenge): claim a daemon reload only when it loaded the installed version [skip github-alerts] ([a793dab](https://github.com/bitsocialnet/bitsocial-cli/commit/a793dab))
+* fix(cli): register dynamic flags when the only argument is a flag [skip github-alerts] ([37a07a4](https://github.com/bitsocialnet/bitsocial-cli/commit/37a07a4))
+* fix(community): fail `community stop` for an address the daemon does not host [skip github-alerts] ([331b313](https://github.com/bitsocialnet/bitsocial-cli/commit/331b313))
+* fix(logs): detect a trim when the log already grew past the old offset [skip github-alerts] ([95027f0](https://github.com/bitsocialnet/bitsocial-cli/commit/95027f0))
+* fix(logs): keep following the log after the daemon trims it in place [skip github-alerts] ([a6887cd](https://github.com/bitsocialnet/bitsocial-cli/commit/a6887cd))
+* fix(logs): re-check the trim anchor after reading, before using the bytes ([880e418](https://github.com/bitsocialnet/bitsocial-cli/commit/880e418))
+* fix(logs): switch to a new log file in one step, from the bytes it read [skip github-alerts] ([6d4ffe4](https://github.com/bitsocialnet/bitsocial-cli/commit/6d4ffe4))
+* fix(rpc): fail fast on a refused auth key or an export the daemon lost [skip github-alerts] ([0377e28](https://github.com/bitsocialnet/bitsocial-cli/commit/0377e28))
+* test: cover export drops and private-key refusal against a real daemon ([e000c4f](https://github.com/bitsocialnet/bitsocial-cli/commit/e000c4f))
+
 ## <small>0.19.134 (2026-11-13)</small>
 
 * test: bound the retries when removing the run's temp directory ([f0c801d](https://github.com/bitsocialnet/bitsocial-cli/commit/f0c801d))
