@@ -59,6 +59,9 @@ const autoTlsWaitMinutes = (kuboConfig: any): number | undefined => {
 export const UNDECIDED_RECHECK_INTERVAL_MS = HOUR_MS;
 export const DECLINED_MESSAGE = "Reachability is off because it was declined. To turn it on, run: bitsocial reachability setup";
 export const NOT_CONFIGURED_MESSAGE = "Browsers cannot reach this node. To fix that, run: bitsocial reachability setup";
+// The daemon summarizes a reachability problem in one line and points at `status` for the full picture, rather than
+// reproducing its Diagnostics and Suggestions (such as the no-peers wording or the Tailscale Funnel advice) here.
+export const STATUS_HINT = "For the full diagnosis and what to do, run: bitsocial reachability status";
 
 // The IPs we should now serve, or undefined for no change. A family we find nothing for is left alone,
 // because a router not answering or kubo not yet having peers says nothing about the address.
@@ -312,7 +315,7 @@ export class ReachabilityRuntime {
 
     private reportNoWorkingAddress(message: string) {
         this.browserAddressesWork = false;
-        this.deps.warn(message);
+        this.deps.warn(`${message}. ${STATUS_HINT}`);
     }
 
     private async verifyBrowserAddresses(identity: NonNullable<RuntimeDependencies["kuboIdentity"]>, inConfig: string[], attempts: number) {

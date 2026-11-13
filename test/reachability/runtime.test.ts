@@ -16,6 +16,7 @@ import {
     planIpChange,
     PUBLIC_ANNOUNCE_ATTEMPTS,
     ReachabilityRuntime,
+    STATUS_HINT,
     STALE_NAME_DROP_AFTER_MS,
     UNDECIDED_RECHECK_INTERVAL_MS,
     type RuntimeDependencies
@@ -199,7 +200,7 @@ describe("ReachabilityRuntime", () => {
         await fs.writeFile(path.join(kuboRepoPath, "config"), kuboConfigWithAutoTls({ Enabled: false }));
         await runtime.start();
         await runtime.stop();
-        expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
+        expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}. ${STATUS_HINT}`]);
     });
 
     describe("a node with an address setup does not manage (#222)", () => {
@@ -304,7 +305,7 @@ describe("ReachabilityRuntime", () => {
             ])("warns once when nothing appears within the window, with AutoTLS %s", async (_name, autoTls, minutes) => {
                 const kuboIdentity = vi.fn(noAddresses);
                 const { runtime, events } = await start(autoTls, { kuboIdentity });
-                await vi.waitFor(() => expect(warnings(events)).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]), { timeout: 10_000 });
+                await vi.waitFor(() => expect(warnings(events)).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}. ${STATUS_HINT}`]), { timeout: 10_000 });
                 await runtime.stop();
                 // One read decides to wait, then one per 15 s attempt.
                 expect(kuboIdentity).toHaveBeenCalledTimes((minutes * 60) / 15 + 1);
@@ -336,7 +337,7 @@ describe("ReachabilityRuntime", () => {
             await fs.writeFile(path.join(kuboRepoPath, "config"), '{"Addresses": {"Sw');
             await expect(runtime.start()).resolves.toBeUndefined();
             await runtime.stop();
-            expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
+            expect(events).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}. ${STATUS_HINT}`]);
         });
 
         it("stops verifying when the daemon stops, and reports nothing", async () => {
@@ -398,7 +399,16 @@ describe("ReachabilityRuntime", () => {
         });
 
         it("keeps the plain warning when AutoNAT reached nothing", async () => {
-            expect(await warnOnStart({ autonat: autonat({ unreachable: [quic, webTransport] }) })).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}`]);
+            expect(await warnOnStart({ autonat: autonat({ unreachable: [quic, webTransport] }) })).toEqual([`warn: ${NOT_CONFIGURED_MESSAGE}. ${STATUS_HINT}`]);
+        });
+
+        it("points the operator at status for the full diagnosis, instead of reproducing it (#258)", async () => {
+            const [reached] = await warnOnStart({ autonat: autonat({ reachable: [quic, webTransport] }) });
+            expect(reached).toContain(STATUS_HINT);
+            const [untested] = await warnOnStart({ autonat: autonat({ unknown: [webTransport] }) });
+            expect(untested).toContain(STATUS_HINT);
+            // The daemon does not reproduce the status-only no-peers phrasing; it defers to status for it.
+            expect(untested).not.toMatch(/no peers/);
         });
     });
 
@@ -489,7 +499,7 @@ describe("ReachabilityRuntime", () => {
             advance(UNDECIDED_RECHECK_INTERVAL_MS);
             await runtime.recheckUndecided();
             await runtime.stop();
-            expect(warnings(events)).toEqual(Array(3).fill(`warn: ${NOT_CONFIGURED_MESSAGE}`));
+            expect(warnings(events)).toEqual(Array(3).fill(`warn: ${NOT_CONFIGURED_MESSAGE}. ${STATUS_HINT}`));
         });
 
         it("checks once an hour", () => expect(UNDECIDED_RECHECK_INTERVAL_MS).toBe(60 * 60_000));
@@ -547,7 +557,7 @@ describe("ReachabilityRuntime", () => {
             await runtime.recheckUndecided();
             await runtime.stop();
             expect(kuboIdentity.mock.calls.length).toBeLessThanOrEqual(2);
-            expect(warnings(events)).toEqual(Array(2).fill(`warn: ${NOT_CONFIGURED_MESSAGE}`));
+            expect(warnings(events)).toEqual(Array(2).fill(`warn: ${NOT_CONFIGURED_MESSAGE}. ${STATUS_HINT}`));
             expect(dials).toBe(0);
         });
 
