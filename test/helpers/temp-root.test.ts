@@ -1,8 +1,9 @@
+import { spawnSync } from "child_process";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { directory as randomDirectory } from "tempy";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { removeStaleRuns } from "./temp-root.global-setup.js";
 
 // #248: the suite used to leave every temp directory behind in the OS temp dir.
@@ -26,5 +27,39 @@ describe("the run's temp directory", () => {
         await removeStaleRuns(tempDirectory);
 
         expect((await fs.readdir(tempDirectory)).sort()).toEqual(["bsc-test-running", "someone-elses"]);
+    });
+
+    it("keeps an old directory while the process that made it is alive, as a watch session idle for days is", async () => {
+        const tempDirectory = randomDirectory();
+        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+        const exitedPid = spawnSync(process.execPath, ["-e", ""]).pid;
+        const names = [`bsc-test-${process.pid}-watching`, `bsc-test-${exitedPid}-killed`];
+        for (const name of names) {
+            await fs.mkdir(path.join(tempDirectory, name, "repo"), { recursive: true });
+            await fs.utimes(path.join(tempDirectory, name), twoDaysAgo, twoDaysAgo);
+        }
+
+        await removeStaleRuns(tempDirectory);
+
+        expect(await fs.readdir(tempDirectory)).toEqual([`bsc-test-${process.pid}-watching`]);
+    });
+
+    it("says which directory it could not remove", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("EBUSY: resource busy or locked"));
+        const tempDirectory = randomDirectory();
+        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+        await fs.mkdir(path.join(tempDirectory, "bsc-test-locked"));
+        await fs.utimes(path.join(tempDirectory, "bsc-test-locked"), twoDaysAgo, twoDaysAgo);
+
+        try {
+            await removeStaleRuns(tempDirectory);
+            expect(warn).toHaveBeenCalledOnce();
+            expect(warn.mock.calls[0].join(" ")).toContain(path.join(tempDirectory, "bsc-test-locked"));
+            expect(warn.mock.calls[0].join(" ")).toContain("EBUSY");
+        } finally {
+            rm.mockRestore();
+            warn.mockRestore();
+        }
     });
 });
