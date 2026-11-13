@@ -70,6 +70,7 @@ export default class Status extends Command {
                   wsPort: config.wsPort,
                   tcp443: facts.tcp443,
                   hasPublicAddress: hasPublicAddressEvidence(facts, config.announce),
+                  forcedDomain: config.domain !== undefined && config.domainForced === true,
                   otherWssWorks: wssAddresses.some(({ status }) => status === "ok"),
                   droppedName: (config.droppedAnnounce ?? []).length > 0
               })
