@@ -8,10 +8,24 @@ import path from "path";
 const PREFIX = "bsc-test-";
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-// Processes the tests started can still hold files for a moment, which on Windows blocks the removal. A directory that
-// outlasts the retries is left for a later run to remove, and named here so that it is not left unnoticed.
-const remove = (directory: string) =>
-    fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch((error) => console.warn(`Could not remove the test temp directory ${directory}:`, String(error)));
+// Processes the tests started can still hold files for a moment, which on Windows blocks the removal, so it is tried a
+// few times. The retries are done here and not with fs.rm's maxRetries: a recursive fs.rm applies those at every level
+// of the tree, so one locked file six directories down multiplies them into hours, and the teardown hung CI on Windows.
+// A directory that outlasts the attempts is left for a later run to remove, and named here so that it is not left unnoticed.
+const REMOVE_ATTEMPTS = 5;
+const REMOVE_RETRY_DELAY_MS = 200;
+async function remove(directory: string) {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt++) {
+        try {
+            return await fs.rm(directory, { recursive: true, force: true });
+        } catch (error) {
+            lastError = error;
+            if (attempt < REMOVE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, attempt * REMOVE_RETRY_DELAY_MS));
+        }
+    }
+    console.warn(`Could not remove the test temp directory ${directory}:`, String(lastError));
+}
 
 // The run directory's name carries the pid of the vitest process that made it. Signal 0 only asks whether that process exists.
 function isRunning(pid: number) {

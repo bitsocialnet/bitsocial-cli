@@ -44,7 +44,7 @@ describe("the run's temp directory", () => {
         expect(await fs.readdir(tempDirectory)).toEqual([`bsc-test-${process.pid}-watching`]);
     });
 
-    it("says which directory it could not remove", async () => {
+    it("gives up on a directory it cannot remove after a few attempts, and says which one", async () => {
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("EBUSY: resource busy or locked"));
         const tempDirectory = randomDirectory();
@@ -54,6 +54,9 @@ describe("the run's temp directory", () => {
 
         try {
             await removeStaleRuns(tempDirectory);
+            // A recursive fs.rm applies maxRetries at every level of the tree, which hung the teardown on Windows.
+            expect(rm).toHaveBeenCalledTimes(5);
+            for (const [, options] of rm.mock.calls) expect(options).toEqual({ recursive: true, force: true });
             expect(warn).toHaveBeenCalledOnce();
             expect(warn.mock.calls[0].join(" ")).toContain(path.join(tempDirectory, "bsc-test-locked"));
             expect(warn.mock.calls[0].join(" ")).toContain("EBUSY");
