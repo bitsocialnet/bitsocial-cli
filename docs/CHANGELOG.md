@@ -1,5 +1,16 @@
 # Changelog
 
+## <small>0.19.136 (2026-11-13)</small>
+
+* fix(reachability): don't let a 0 peer count mask a completed AutoNAT result ([50f5c4a](https://github.com/bitsocialnet/bitsocial-cli/commit/50f5c4a))
+* fix(reachability): make the bind-permission fix clearly either/or ([c0de119](https://github.com/bitsocialnet/bitsocial-cli/commit/c0de119))
+* fix(reachability): narrow Funnel promotion to the no-WSS-address case ([4eb66af](https://github.com/bitsocialnet/bitsocial-cli/commit/4eb66af))
+* feat(reachability): add a status-only Diagnostics/Suggestions composition layer ([f7487e3](https://github.com/bitsocialnet/bitsocial-cli/commit/f7487e3))
+* feat(reachability): point the daemon's browser-unreachable warning at status ([a71f939](https://github.com/bitsocialnet/bitsocial-cli/commit/a71f939))
+* feat(reachability): reframe the verdict when kubo has no peers ([f7bcf33](https://github.com/bitsocialnet/bitsocial-cli/commit/f7bcf33))
+* feat(reachability): render Diagnostics and Suggestions in status, extend --json ([952dfd1](https://github.com/bitsocialnet/bitsocial-cli/commit/952dfd1))
+* docs(reachability): describe the Diagnostics/Suggestions sections and no-peers reframing ([fb7f7bd](https://github.com/bitsocialnet/bitsocial-cli/commit/fb7f7bd))
+
 ## <small>0.19.135 (2026-11-13)</small>
 
 * fix(challenge): claim a daemon reload only when it loaded the installed version [skip github-alerts] ([a793dab](https://github.com/bitsocialnet/bitsocial-cli/commit/a793dab))
