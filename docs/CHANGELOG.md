@@ -1,5 +1,16 @@
 # Changelog
 
+## <small>0.19.133 (2026-11-13)</small>
+
+* fix(reachability): give status's Funnel pointer the public addresses kubo reports, as setup has ([350aa50](https://github.com/bitsocialnet/bitsocial-cli/commit/350aa50))
+* fix(reachability): keep status's Funnel pointer when TCP 443 is busy and no address is public ([1e22374](https://github.com/bitsocialnet/bitsocial-cli/commit/1e22374))
+* fix(reachability): leave status's Funnel pointer out while a forced domain waits for a reverse proxy ([8aeda38](https://github.com/bitsocialnet/bitsocial-cli/commit/8aeda38))
+* test(reachability): show setup's output when the existing-Caddy run exceeds its time limit ([428ae8f](https://github.com/bitsocialnet/bitsocial-cli/commit/428ae8f))
+* docs(reachability): add a Tailscale Funnel walkthrough and an optional compose sidecar ([955cc98](https://github.com/bitsocialnet/bitsocial-cli/commit/955cc98))
+* docs(reachability): describe the burst failures seen through Funnel and the Docker retest ([c5c1478](https://github.com/bitsocialnet/bitsocial-cli/commit/c5c1478))
+* feat(reachability): point status at Tailscale Funnel on a node setup left without WSS ([2509a21](https://github.com/bitsocialnet/bitsocial-cli/commit/2509a21))
+* feat(reachability): suggest Tailscale Funnel when setup cannot serve WSS on the node's own address ([b05ad29](https://github.com/bitsocialnet/bitsocial-cli/commit/b05ad29))
+
 ## <small>0.19.132 (2026-11-12)</small>
 
 * chore(deps): upgrade seedit web UI v0.6.0 -> v0.6.3, 5chan v0.10.2 -> v0.10.4 ([fb66198](https://github.com/bitsocialnet/bitsocial-cli/commit/fb66198))
