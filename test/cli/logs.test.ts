@@ -618,6 +618,80 @@ describe("bitsocial logs -f after the log file shrinks in place (synthetic)", ()
         expect(result.stderr).not.toContain("truncated");
     });
 
+    // The check that the last bytes read still sit before the offset, and the read from that offset, are two calls.
+    // A trim that lands between them, with the file already longer than the offset again, passed the check and was
+    // then read from the old offset, and the next poll took the bytes of the regrown file as its anchor, so the
+    // skipped lines never came back. The preload does that rewrite right before the first data read after the
+    // trigger file appears, which is the window a stalled follower leaves open.
+    it("keeps following a log trimmed and regrown between its trim check and its read", async () => {
+        const { logDir } = await createLogDir();
+        const auxDir = randomDirectory(); // outside logDir, which the follower scans for log files
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-04T00-00-00.000Z.log");
+        const regrownFile = path.join(auxDir, "regrown");
+        const triggerFile = path.join(auxDir, "swap-now");
+        const lines: string[] = [];
+        for (let i = 0; i < 2000; i++) lines.push(buildLogLine(new Date(Date.UTC(2026, 5, 4, 0, 0, i)), `old line ${i} ${"x".repeat(40)}`));
+        lines.push(buildLogLine(new Date("2026-06-04T01:00:00.000Z"), "BEFORE_TRIM_MARKER"));
+        const content = lines.join("\n") + "\n";
+        await fsPromise.writeFile(file, content);
+
+        const NEW_LINES = 2000;
+        const newLines = Array.from({ length: NEW_LINES }, (_, i) =>
+            buildLogLine(new Date(Date.UTC(2026, 5, 4, 2, 0, 0, i)), `new line ${i}_ ${"y".repeat(40)}`)
+        );
+        newLines.push(buildLogLine(new Date("2026-06-04T03:00:00.000Z"), "AFTER_TRIM_MARKER"));
+        const keepFrom = content.indexOf("\n", Math.floor(content.length / 2)) + 1;
+        const regrown = content.slice(keepFrom) + newLines.join("\n") + "\n";
+        expect(regrown.length).toBeGreaterThan(content.length);
+        await fsPromise.writeFile(regrownFile, regrown);
+
+        // 65536 is the follower's read buffer: the trim check reads at most 4096 bytes, so only the data read matches
+        const swapBeforeDataRead = `import fs from "node:fs"; import fsp from "node:fs/promises";
+            const handle = await fsp.open(process.execPath, "r"); const proto = Object.getPrototypeOf(handle); await handle.close();
+            const realRead = proto.read;
+            proto.read = async function (...args) {
+                if (args[2] === 65536 && fs.existsSync(process.env.LOGS_TEST_SWAP_TRIGGER)) {
+                    fs.writeFileSync(process.env.LOGS_TEST_LOG_FILE, fs.readFileSync(process.env.LOGS_TEST_REGROWN));
+                    fs.rmSync(process.env.LOGS_TEST_SWAP_TRIGGER);
+                }
+                return realRead.apply(this, args);
+            };`;
+
+        let triggered = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            env: {
+                NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(swapBeforeDataRead)}`,
+                LOGS_TEST_SWAP_TRIGGER: triggerFile,
+                LOGS_TEST_LOG_FILE: file,
+                LOGS_TEST_REGROWN: regrownFile
+            },
+            onChunk: (stdout) => {
+                if (triggered || !stdout.includes("BEFORE_TRIM_MARKER")) return;
+                triggered = true;
+                void fsPromise.writeFile(triggerFile, "");
+            },
+            doneWhen: (stdout) => stdout.includes("AFTER_TRIM_MARKER"),
+            graceMs: 1000,
+            maxMs: 20000
+        });
+
+        const triggerLeft = await fsPromise.stat(triggerFile).then(
+            () => true,
+            () => false
+        );
+        expect(triggerLeft, "the follower never reached a data read after the trigger").toBe(false);
+        expect(result.stdout).toContain("AFTER_TRIM_MARKER");
+        const wrongCounts: string[] = [];
+        for (let i = 0; i < NEW_LINES; i++) {
+            const count = countOf(result.stdout, `new line ${i}_ `);
+            if (count !== 1) wrongCounts.push(`new line ${i}_ x${count}`);
+        }
+        expect(wrongCounts).toEqual([]);
+        expect(countOf(result.stdout, "BEFORE_TRIM_MARKER")).toBe(1);
+        expect(countOf(result.stdout, "old line 1999 ")).toBe(1);
+        expect(result.stderr).not.toContain("truncated");
+    });
+
     it("follows a log file that was emptied from its start", async () => {
         const { logDir } = await createLogDir();
         const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-02T00-00-00.000Z.log");

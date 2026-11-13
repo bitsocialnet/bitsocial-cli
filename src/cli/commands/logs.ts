@@ -257,16 +257,31 @@ export default class Logs extends Command {
                     }
                 }
                 shrunkWithoutAnchor = false;
-                let chunk = "";
+                const readChunks: Buffer[] = [];
+                let readPosition = position;
                 while (true) {
-                    const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, position);
+                    const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, readPosition);
                     if (bytesRead === 0) break;
-                    position += bytesRead;
-                    chunk += readBuf.subarray(0, bytesRead).toString("utf-8");
-                    keepAnchor(readBuf.subarray(0, bytesRead));
+                    readPosition += bytesRead;
+                    readChunks.push(Buffer.from(readBuf.subarray(0, bytesRead)));
                     if (bytesRead < readBuf.length) break;
                 }
-                if (!chunk) return;
+                if (readChunks.length === 0) return;
+                if (anchor.length > 0) {
+                    // A trim can land between the check above and these reads, or between two of them, with the file
+                    // already longer than `position` again. The bytes just read are then not the ones that follow
+                    // what was printed. Only when the anchor still sits before `position` after the reads did the
+                    // file keep its layout throughout; otherwise drop them and find the anchor in the trimmed file.
+                    const { bytesRead } = await fd.read(anchorCheckBuf, 0, anchor.length, position - anchor.length);
+                    if (bytesRead < anchor.length || !anchorCheckBuf.subarray(0, anchor.length).equals(anchor)) {
+                        await followShrunkFile();
+                        return;
+                    }
+                }
+                const readBytes = Buffer.concat(readChunks);
+                position = readPosition;
+                keepAnchor(readBytes);
+                const chunk = readBytes.toString("utf-8");
 
                 const combined = pendingBuffer + chunk;
                 const lastNewline = combined.lastIndexOf("\n");
