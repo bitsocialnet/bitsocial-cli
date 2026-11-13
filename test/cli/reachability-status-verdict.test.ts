@@ -30,10 +30,11 @@ const run = (args: string[], kuboRpcUrl: string): Promise<{ stdout: string; stde
         child.on("close", (exitCode) => resolve({ stdout, stderr, exitCode }));
     });
 
-const withKubo = async <T>(answers: { announced: string[]; autonat?: object }, test: (kuboRpcUrl: string) => Promise<T>): Promise<T> => {
+const withKubo = async <T>(answers: { announced: string[]; autonat?: object; peers?: unknown[] }, test: (kuboRpcUrl: string) => Promise<T>): Promise<T> => {
     const server = http.createServer((request, response) => {
         response.setHeader("content-type", "application/json");
         if (request.url?.startsWith("/api/v0/swarm/addrs/autonat") && answers.autonat) response.end(JSON.stringify(answers.autonat));
+        else if (request.url?.startsWith("/api/v0/swarm/peers") && answers.peers) response.end(JSON.stringify({ Peers: answers.peers }));
         else if (request.url?.startsWith("/api/v0/swarm/addrs/listen")) response.end(JSON.stringify({ Strings: [] }));
         else if (request.url?.startsWith("/api/v0/id")) response.end(JSON.stringify({ ID: peerId, Addresses: answers.announced.map((address) => `${address}/p2p/${peerId}`) }));
         else {
@@ -92,6 +93,25 @@ describe("reachability status opens with who can connect", () => {
 
             const { connectivity } = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
             expect(connectivity).toMatchObject({ desktop: { status: "fail" }, browsers: { status: "fail" }, summary: NOBODY_CAN_CONNECT });
+        });
+    });
+
+    it("reframes an idle node with no peers instead of listing untested addresses (#258)", { timeout: 60_000 }, async () => {
+        const autonat = { reachable: [], unreachable: [], unknown: [tcp, quic, webTransport] };
+        await withKubo({ announced: [tcp, quic, webTransport], autonat, peers: [] }, async (url) => {
+            const { stdout } = await run(["--pkcOptions.dataPath", randomDirectory()], url);
+            expect(lines(stdout)[0]).toMatch(/^Desktop nodes \(kubo\/helia\): not known yet: AutoNAT can't test while kubo has no peers/);
+            expect(lines(stdout)[0]).toMatch(/idle/);
+            expect(lines(stdout)[1]).toMatch(/^Browsers: not known yet: AutoNAT can't test while kubo has no peers/);
+            // The ~10-address "not tested yet" wall is gone from the verdict lines.
+            expect(lines(stdout)[0]).not.toContain(webTransport);
+
+            const { connectivity, diagnostics } = JSON.parse((await run(["--json", "--pkcOptions.dataPath", randomDirectory()], url)).stdout);
+            expect(connectivity).toMatchObject({ desktop: { status: "unknown" }, browsers: { status: "unknown" } });
+            // The inbound diagnostic is reframed as the normal idle state, not a wall of addresses.
+            const inbound = diagnostics.find((d: { id: string }) => d.id === "inbound");
+            expect(inbound.detail).toMatch(/no peers/);
+            expect(inbound.detail).not.toContain(webTransport);
         });
     });
 

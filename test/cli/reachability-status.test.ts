@@ -89,10 +89,25 @@ describe("bitsocial reachability status", () => {
         expect(ids).toEqual(expect.arrayContaining(["public-address", "tcp-443", "udp-443", "tcp-80", "inbound"]));
     });
 
-    it("prints requirements for a person even when not configured", async () => {
+    it("prints a Diagnostics section for a person even when not configured (#258)", async () => {
         const { stdout } = await runStatus(["--pkcOptions.dataPath", randomDirectory()]);
-        expect(stdout).toContain("Requirements:");
+        expect(stdout).toContain("Diagnostics:");
+        expect(stdout).not.toContain("Requirements:");
         expect(stdout).toMatch(/UDP 443/);
+    });
+
+    it("--json adds composed diagnostics and suggestions next to the raw checks (#258)", async () => {
+        const { stdout } = await runStatus(["--json", "--pkcOptions.dataPath", randomDirectory()]);
+        const parsed = JSON.parse(stdout);
+        // The raw engine output stays, for setup and existing consumers.
+        expect(Array.isArray(parsed.checks)).toBe(true);
+        // Diagnostics are findings only — the fix moved to suggestions.
+        expect(Array.isArray(parsed.diagnostics)).toBe(true);
+        expect(parsed.diagnostics.every((d: { fix?: string }) => d.fix === undefined)).toBe(true);
+        expect(Array.isArray(parsed.suggestions)).toBe(true);
+        // Every suggestion ties back to a diagnostic by id.
+        const diagnosticIds = new Set(parsed.diagnostics.map((d: { id: string }) => d.id));
+        expect(parsed.suggestions.every((s: { id: string }) => diagnosticIds.has(s.id))).toBe(true);
     });
 
     it("names the setup command for a person when not configured", async () => {

@@ -1,6 +1,9 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
 import { evaluateChecks, formatCheck, gatherCheckFacts, hasPublicAddressEvidence, noWssAddressCheck, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
+import { kuboSwarmPeerCount } from "../../../reachability/discovery.js";
+import { tailscaleFunnelFix } from "../../../reachability/guidance.js";
+import { composeStatus, type StatusPresentation } from "../../../reachability/presentation.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
 import { autonatEvidence, browserAddressCheck, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
@@ -25,7 +28,7 @@ export default class Status extends Command {
 
     static override examples = ["bitsocial reachability status", "bitsocial reachability status --json"];
 
-    async run(): Promise<ReachabilityStatus & { connectivity: Connectivity; unmanagedAddresses: UnmanagedAddress[]; checks: ReachabilityCheck[] }> {
+    async run(): Promise<ReachabilityStatus & { connectivity: Connectivity; unmanagedAddresses: UnmanagedAddress[]; checks: ReachabilityCheck[] } & StatusPresentation> {
         const { flags } = await this.parse(Status);
         const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
         const status = await readReachabilityStatus(dataPath);
@@ -33,10 +36,11 @@ export default class Status extends Command {
         const override = process.env["BITSOCIAL_TEST_REACHABILITY_PUBLIC_IPS"];
         const testHttpsPort = Number(process.env["BITSOCIAL_TEST_REACHABILITY_HTTPS_PORT"]);
         const httpsPort = config?.httpsPort ?? (testHttpsPort || undefined);
+        const kuboRpcUrl = await resolveKuboRpcUrl(dataPath, process.env["KUBO_RPC_URL"], defaults.KUBO_RPC_URL);
         const facts = await gatherCheckFacts({
             dataPath,
             kuboPath: await resolveKuboBinaryPath(),
-            kuboRpcUrl: await resolveKuboRpcUrl(dataPath, process.env["KUBO_RPC_URL"], defaults.KUBO_RPC_URL),
+            kuboRpcUrl,
             enabled: status.enabled,
             certificates: status.certificates,
             announce: status.addresses,
@@ -80,13 +84,17 @@ export default class Status extends Command {
             inContainer: facts.inContainer,
             ...(override ? { treatAsPublic: override.split(",") } : {})
         });
+        // Status-only: whether kubo has peers tells a passing wait for AutoNAT apart from the normal idle state of a
+        // node with nobody to be tested through. Undefined when the count could not be read, where the plain wording stands.
+        const peerCount = facts.kuboRunningAnnounce !== undefined ? await kuboSwarmPeerCount(kuboRpcUrl) : undefined;
         const connectivity = connectivityVerdict({
             kuboRunning: facts.kuboRunningAnnounce !== undefined,
             publicAddressAnnounced: announcedCheck.status === "ok",
             announced: facts.kuboRunningAnnounce ?? [],
             autonat: facts.kuboAutonat,
             wss: wssAddresses,
-            ...(setupWss ? { setupWss } : {})
+            ...(setupWss ? { setupWss } : {}),
+            ...(peerCount !== undefined ? { peerCount } : {})
         });
         const checks = [
             announcedCheck,
@@ -94,16 +102,28 @@ export default class Status extends Command {
             // Every handshake that worked, setup's own included: one through an operator's server shows that server on the port is no problem.
             ...evaluateChecks({ ...facts, verifiedWss: wssAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
         ];
-        const printChecks = () => {
-            this.log("Requirements:");
-            for (const check of checks) this.log(formatCheck(check));
+        // Compose the shared checks into findings (Diagnostics) and ranked actions (Suggestions). This layer is status-only.
+        const { diagnostics, suggestions } = composeStatus({
+            connectivity,
+            checks,
+            noPeers: peerCount === 0,
+            ...(config ? { funnelFix: tailscaleFunnelFix(config.wsPort) } : {})
+        });
+        const printSections = () => {
+            this.log("Diagnostics:");
+            for (const diagnostic of diagnostics) this.log(formatCheck(diagnostic));
+            if (suggestions.length > 0) {
+                this.log("Suggestions:");
+                suggestions.forEach((suggestion, index) => this.log(`  ${index + 1}. ${suggestion.detail}`));
+            }
         };
+        const result = { ...status, connectivity, unmanagedAddresses, checks, diagnostics, suggestions };
 
         for (const line of formatConnectivity(connectivity)) this.log(line);
         if (!status.configured) {
             this.log(status.declined ? DECLINED_STATUS_LINE : NOT_CONFIGURED_STATUS_LINE);
-            printChecks();
-            return { ...status, connectivity, unmanagedAddresses, checks };
+            printSections();
+            return result;
         }
         this.log(`Enabled: ${status.enabled ? "yes" : "no"}`);
         this.log(`Mode: ${status.mode}${status.staging ? " (Let's Encrypt staging)" : ""}`);
@@ -122,7 +142,7 @@ export default class Status extends Command {
             this.log(`Domain check ${domain}: ${state}${check.droppedFromAnnounce ? ", no longer announced" : ""} (checked ${check.lastCheckAt})`);
         }
         if (status.lastChecks?.caddy) this.log(`Caddy: ${status.lastChecks.caddy.running ? "running" : "not running"}`);
-        printChecks();
-        return { ...status, connectivity, unmanagedAddresses, checks };
+        printSections();
+        return result;
     }
 }
