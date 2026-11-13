@@ -232,6 +232,18 @@ export async function kuboAutonat(kuboRpcUrl: URL): Promise<KuboAutonat | undefi
     }
 }
 
+// How many swarm peers kubo has. A node with none has nobody for AutoNAT to test through; status uses this to tell
+// the normal idle state apart from a test that is still running. Undefined when the count could not be read.
+export async function kuboSwarmPeerCount(kuboRpcUrl: URL): Promise<number | undefined> {
+    try {
+        const response = await kuboPost(kuboRpcUrl, "swarm/peers");
+        if (!response.ok) return undefined;
+        return (((await response.json()) as { Peers?: unknown[] | null }).Peers ?? []).length;
+    } catch {
+        return undefined;
+    }
+}
+
 export async function kuboListenAddresses(kuboRpcUrl: URL): Promise<string[] | undefined> {
     try {
         const response = await kuboPost(kuboRpcUrl, "swarm/addrs/listen");

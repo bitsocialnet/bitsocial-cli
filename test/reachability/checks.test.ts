@@ -195,6 +195,8 @@ describe("evaluateChecks", () => {
             expect(result.detail).toContain("silently");
             expect(result.fix).toContain("ip_unprivileged_port_start");
             expect(result.fix).toContain('"/x/ipfs"');
+            // The two commands are alternatives; make it clear an operator need not run both (#258).
+            expect(result.fix).toMatch(/only need one/);
         });
 
         it("in a container points at the capability, not sudo", () => {

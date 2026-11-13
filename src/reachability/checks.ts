@@ -118,7 +118,7 @@ export interface CheckFacts {
 
 const bindFix = (facts: CheckFacts, binaryPath: string) => {
     if (facts.inContainer) return "Add cap_add: [NET_BIND_SERVICE] to your compose file";
-    return `Run ${UNPRIVILEGED_PORT_SYSCTL} (persist it in /etc/sysctl.d/) or ${setcapCommand(binaryPath)}`;
+    return `You only need one of these: ${UNPRIVILEGED_PORT_SYSCTL} (persist it in /etc/sysctl.d/), or ${setcapCommand(binaryPath)}`;
 };
 
 // "Announced addresses" in status is our own record, so only this says whether kubo really announces them.
