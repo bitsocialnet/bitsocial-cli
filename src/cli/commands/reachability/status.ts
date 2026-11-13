@@ -2,7 +2,6 @@ import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
 import { evaluateChecks, formatCheck, gatherCheckFacts, hasPublicAddressEvidence, noWssAddressCheck, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
 import { kuboSwarmPeerCount } from "../../../reachability/discovery.js";
-import { tailscaleFunnelFix } from "../../../reachability/guidance.js";
 import { composeStatus, type StatusPresentation } from "../../../reachability/presentation.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
@@ -103,12 +102,7 @@ export default class Status extends Command {
             ...evaluateChecks({ ...facts, verifiedWss: wssAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
         ];
         // Compose the shared checks into findings (Diagnostics) and ranked actions (Suggestions). This layer is status-only.
-        const { diagnostics, suggestions } = composeStatus({
-            connectivity,
-            checks,
-            noPeers: peerCount === 0,
-            ...(config ? { funnelFix: tailscaleFunnelFix(config.wsPort) } : {})
-        });
+        const { diagnostics, suggestions } = composeStatus({ checks, noPeers: peerCount === 0 });
         const printSections = () => {
             this.log("Diagnostics:");
             for (const diagnostic of diagnostics) this.log(formatCheck(diagnostic));

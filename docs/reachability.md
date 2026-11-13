@@ -206,7 +206,7 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 
 ## Troubleshooting
 
-`bitsocial reachability status` then prints two sections: **Diagnostics**, one line per requirement (the finding only), and **Suggestions**, the fixes as a numbered list ranked by what unblocks reachability most, so [Tailscale Funnel](tailscale-funnel.md) leads when browser reachability is undetermined. `--json` carries the raw engine output under `checks` (each with an optional `fix`, unchanged for `setup` and other consumers) and adds the composed `diagnostics` (findings, no `fix`) and `suggestions` (each tying back to a diagnostic by `id`). The requirement ids are:
+`bitsocial reachability status` then prints two sections: **Diagnostics**, one line per requirement (the finding only), and **Suggestions**, the fixes as a numbered list ranked by what unblocks reachability most. The [Tailscale Funnel](tailscale-funnel.md) fix, which the `browser-address` check contributes when `setup` could not give the node a WSS address, leads whenever it is present. Suggestions come only from the checks' own fixes, so an undetermined verdict with another cause (the daemon stopped, reachability disabled, a WSS address that could not be tested from here) keeps that cause's own fix, not Funnel. `--json` carries the raw engine output under `checks` (each with an optional `fix`, unchanged for `setup` and other consumers) and adds the composed `diagnostics` (findings, no `fix`) and `suggestions` (each tying back to a diagnostic by `id`). The requirement ids are:
 
 | Check | Meaning |
 | --- | --- |

@@ -1,9 +1,8 @@
-// Status-only composition layer (issue #258). It takes the shared check engine's output plus the connectivity
-// verdict and turns them into two sections the human-facing `status` command renders: Diagnostics (findings,
-// with their fixes stripped off) and Suggestions (the fixes, as ranked actions). `setup` and the daemon keep
-// using the raw checks, so none of this ripples into them.
+// Status-only composition layer (issue #258). It takes the shared check engine's output and turns it into two
+// sections the human-facing `status` command renders: Diagnostics (findings, with their fixes stripped off) and
+// Suggestions (the fixes, as ranked actions). `setup` and the daemon keep using the raw checks, so none of this
+// ripples into them.
 import type { ReachabilityCheck } from "./checks.js";
-import type { Connectivity } from "./verdict.js";
 
 export interface Suggestion {
     // The id of the diagnostic this suggestion resolves, so a reader (and JSON consumers) can tie the two together.
@@ -22,10 +21,13 @@ export interface StatusPresentation {
 export const NO_PEERS_DIAGNOSTIC =
     "AutoNAT has not tested reachability yet: kubo has no peers. This is normal for an idle node — it connects once it fetches or publishes, and AutoNAT can test then";
 
-// Tailscale Funnel is the one action that makes an otherwise-unreachable node reachable, so it always leads.
+// The browser-address check carries the Tailscale Funnel advice, and it fires exactly when setup could not give the
+// node a WSS address — the one case where Funnel is the right lead. So rank it first; every other fix keeps its order.
+// Reachability can be undetermined for other reasons (daemon stopped, disabled, a WSS address that could not be tested
+// from here), where Funnel is the wrong advice, so this does not synthesize a Funnel suggestion from the verdict alone.
 const rankOf = (id: string) => (id === "browser-address" ? 0 : 1);
 
-export function composeStatus(input: { connectivity: Connectivity; checks: ReachabilityCheck[]; noPeers: boolean; funnelFix?: string }): StatusPresentation {
+export function composeStatus(input: { checks: ReachabilityCheck[]; noPeers: boolean }): StatusPresentation {
     const diagnostics = input.checks.map((check) => {
         // Reframe only an inbound check that is itself unknown. A completed AutoNAT result (ok/warn) must stand even
         // if the peer count read just afterwards is 0, or the verdict and this diagnostic would contradict each other.
@@ -37,11 +39,6 @@ export function composeStatus(input: { connectivity: Connectivity; checks: Reach
     });
 
     const suggestions: Suggestion[] = input.checks.filter((check) => check.fix !== undefined).map((check) => ({ id: check.id, detail: check.fix! }));
-    // Undetermined browser reachability still warrants the Funnel suggestion, even though no check failed outright.
-    // Promote it only if the checks did not already carry one, so it is never duplicated.
-    if (input.connectivity.browsers.status === "unknown" && input.funnelFix !== undefined && !suggestions.some((s) => s.id === "browser-address"))
-        suggestions.push({ id: "browser-address", detail: input.funnelFix });
-
     const ranked = suggestions.map((suggestion, index) => ({ suggestion, index })).sort((a, b) => rankOf(a.suggestion.id) - rankOf(b.suggestion.id) || a.index - b.index);
     return { diagnostics, suggestions: ranked.map(({ suggestion }) => suggestion) };
 }

@@ -3,17 +3,9 @@
 // browser reachability is undetermined.
 import { describe, expect, it } from "vitest";
 import type { ReachabilityCheck } from "../../src/reachability/checks.js";
-import type { Connectivity } from "../../src/reachability/verdict.js";
 import { composeStatus, NO_PEERS_DIAGNOSTIC } from "../../src/reachability/presentation.js";
 
-const line = (status: ReachabilityCheck["status"], detail: string) => ({ status, detail });
-const connectivity = (browsers: ReachabilityCheck["status"] = "ok"): Connectivity => ({
-    desktop: line("ok", "can connect"),
-    browsers: line(browsers, "should be able to connect over WSS")
-});
-
-const compose = (checks: ReachabilityCheck[], opts: { noPeers?: boolean; browsers?: ReachabilityCheck["status"]; funnelFix?: string } = {}) =>
-    composeStatus({ connectivity: connectivity(opts.browsers), checks, noPeers: opts.noPeers ?? false, ...(opts.funnelFix ? { funnelFix: opts.funnelFix } : {}) });
+const compose = (checks: ReachabilityCheck[], opts: { noPeers?: boolean } = {}) => composeStatus({ checks, noPeers: opts.noPeers ?? false });
 
 describe("composeStatus: diagnostics are findings only", () => {
     it("strips the fix off each diagnostic", () => {
@@ -81,30 +73,33 @@ describe("composeStatus: no-peers reframing", () => {
     });
 });
 
-describe("composeStatus: Funnel promoted when browser reachability is undetermined", () => {
-    it("synthesizes a top Funnel suggestion when browsers are undetermined and no browser-address check carried one", () => {
-        const { suggestions } = compose([{ id: "udp-443", status: "fail", detail: "no UDP 443", fix: "run setcap" }], {
-            browsers: "unknown",
-            funnelFix: "Tailscale Funnel can give this node a browser address ..."
-        });
+describe("composeStatus: Funnel leads only when a browser-address check carries it", () => {
+    it("ranks the browser-address Funnel fix first when a check supplies it", () => {
+        const { suggestions } = compose([
+            { id: "udp-443", status: "fail", detail: "no UDP 443", fix: "run setcap" },
+            { id: "browser-address", status: "warn", detail: "no WSS address", fix: "Tailscale Funnel ..." }
+        ]);
         expect(suggestions[0]).toMatchObject({ id: "browser-address" });
         expect(suggestions[0]!.detail).toContain("Tailscale Funnel");
     });
 
-    it("does not duplicate the Funnel suggestion when a browser-address check already carried one", () => {
-        const { suggestions } = compose([{ id: "browser-address", status: "warn", detail: "no WSS", fix: "Funnel A" }], {
-            browsers: "unknown",
-            funnelFix: "Funnel B"
-        });
-        expect(suggestions.filter((s) => s.id === "browser-address")).toHaveLength(1);
-        expect(suggestions[0]!.detail).toBe("Funnel A");
+    it("does not invent a Funnel suggestion from the verdict when no check carries one", () => {
+        // Browsers can be undetermined for reasons where Funnel is the wrong advice (daemon stopped, disabled,
+        // a WSS address that could not be tested here); those carry their own fixes, not Funnel.
+        const { suggestions } = compose([
+            { id: "daemon", status: "warn", detail: "The daemon is not running", fix: "Run: bitsocial daemon" },
+            { id: "inbound", status: "unknown", detail: "not tested" }
+        ]);
+        expect(suggestions.some((s) => s.id === "browser-address")).toBe(false);
+        expect(suggestions[0]).toMatchObject({ id: "daemon" });
     });
 
-    it("does not synthesize a Funnel suggestion when browser reachability is not undetermined", () => {
-        const { suggestions } = compose([{ id: "udp-443", status: "fail", detail: "x", fix: "run setcap" }], {
-            browsers: "ok",
-            funnelFix: "Funnel"
-        });
-        expect(suggestions.some((s) => s.id === "browser-address")).toBe(false);
+    it("keeps every suggestion tied to a diagnostic of the same id", () => {
+        const { diagnostics, suggestions } = compose([
+            { id: "udp-443", status: "fail", detail: "no UDP 443", fix: "run setcap" },
+            { id: "browser-address", status: "warn", detail: "no WSS address", fix: "Tailscale Funnel ..." }
+        ]);
+        const ids = new Set(diagnostics.map((d) => d.id));
+        expect(suggestions.every((s) => ids.has(s.id))).toBe(true);
     });
 });
