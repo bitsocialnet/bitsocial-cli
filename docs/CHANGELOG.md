@@ -1,5 +1,14 @@
 # Changelog
 
+## <small>0.19.139 (2026-11-15)</small>
+
+* ci: reject accidental breaking-change markers in commits and PR titles ([118adb6](https://github.com/bitsocialnet/bitsocial-cli/commit/118adb6)), closes [#265](https://github.com/bitsocialnet/bitsocial-cli/issues/265)
+* ci: release only after a CI run for a push to master ([2d72f35](https://github.com/bitsocialnet/bitsocial-cli/commit/2d72f35)), closes [#267](https://github.com/bitsocialnet/bitsocial-cli/issues/267)
+* ci(docker): decide the moving tags from the workflow's own commit ([8ea327a](https://github.com/bitsocialnet/bitsocial-cli/commit/8ea327a)), closes [#266](https://github.com/bitsocialnet/bitsocial-cli/issues/266)
+* ci(docker): do not move latest, major or minor tags back on a re-run ([e2aeed1](https://github.com/bitsocialnet/bitsocial-cli/commit/e2aeed1)), closes [#266](https://github.com/bitsocialnet/bitsocial-cli/issues/266)
+* docs: add CONTRIBUTING.md and a versioning and release guide ([d2d43b8](https://github.com/bitsocialnet/bitsocial-cli/commit/d2d43b8))
+* docs(versioning): describe the marker checks, push-only releases and Docker re-runs ([de2e887](https://github.com/bitsocialnet/bitsocial-cli/commit/de2e887))
+
 ## <small>0.19.138 (2026-11-15)</small>
 
 * fix(webui): remove a web UI's doctype whatever its case ([508a6d4](https://github.com/bitsocialnet/bitsocial-cli/commit/508a6d4))
