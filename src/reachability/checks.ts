@@ -5,8 +5,8 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 import { caddyBinaryPath, isOurCaddyRunning } from "./caddy.js";
-import { addressesNotAnnounced, detectContainer, findPortHolder, worstPortState, isPublicMultiaddr, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
-import { setcapCommand, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
+import { addressesNotAnnounced, publicIpsFromMultiaddrs, detectContainer, findPortHolder, worstPortState, isPublicMultiaddr, kuboAutonat, kuboIdentity, kuboListenAddresses, parseSsHolder, probeTcpPort, publicIpsFromInterfaces, type KuboAutonat, type PortState } from "./discovery.js";
+import { setcapCommand, tailscaleFunnelFix, UNPRIVILEGED_PORT_SYSCTL } from "./guidance.js";
 import type { CertificateInfo } from "./state.js";
 import { loadKuboConfigFile } from "../util.js";
 
@@ -204,6 +204,33 @@ function inboundCheck(facts: CheckFacts): ReachabilityCheck {
     ].join(". ");
     const status = reachable.length > 0 ? "ok" : unreachable.length > 0 ? "warn" : "unknown";
     return { id: "inbound", status, detail: `${results}. This does not cover WSS through a reverse proxy, which only a connection from another network can prove` };
+}
+
+// A node setup ran on and left without WSS, because the internet could not reach it on TCP 443. With another program
+// on that port and a public address, setup's reverse proxy guidance applies instead. Without a public address that
+// program cannot be reached either, and Funnel does not use this machine's TCP 443, so the pointer still applies.
+// A forced name is the exception: setup takes it without a public address to match, and prints the reverse proxy
+// snippet for it. A stored name that was not forced gets that only where it resolves to a public address found here.
+// Nor does it apply while a WSS address setup does not manage works, such as one from AutoTLS, or after a name
+// that worked here was dropped, where its DNS is what needs fixing.
+// The public-address evidence setup uses, as far as status can have it: interfaces, and the addresses running kubo
+// reports apart from the ones we told it to announce. kubo maps ports on a UPnP router itself and then reports the
+// router's external address. Status does not ask the router as setup does, so with the daemon stopped only interfaces count.
+export const hasPublicAddressEvidence = (facts: Pick<CheckFacts, "publicIps" | "kuboRunningAnnounce">, ownAnnounce: string[]): boolean =>
+    facts.publicIps.length > 0 || publicIpsFromMultiaddrs(facts.kuboRunningAnnounce ?? [], ownAnnounce).length > 0;
+
+export function noWssAddressCheck(input: {
+    announce: string[];
+    wsPort: number;
+    tcp443: PortState | undefined;
+    hasPublicAddress: boolean;
+    forcedDomain: boolean;
+    otherWssWorks: boolean;
+    droppedName: boolean;
+}): ReachabilityCheck | undefined {
+    const proxyGuidanceApplies = input.tcp443 === "busy" && (input.hasPublicAddress || input.forcedDomain);
+    if (input.announce.length > 0 || proxyGuidanceApplies || input.otherWssWorks || input.droppedName) return undefined;
+    return { id: "browser-address", status: "warn", detail: "Setup could not give this node a WSS address, so browsers depend on WebTransport", fix: tailscaleFunnelFix(input.wsPort) };
 }
 
 export function evaluateChecks(facts: CheckFacts): ReachabilityCheck[] {

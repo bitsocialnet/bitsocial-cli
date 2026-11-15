@@ -666,8 +666,8 @@ describe("challenge integration tests", { timeout: 600_000 }, () => {
             const authUrl = daemonProcess?.capturedStdout?.match(/listening on (\S+) \(secret auth key/)?.[1];
             expect(authUrl).toBeDefined();
             expect(new URL(authUrl!).pathname.length).toBeGreaterThan(1);
-            expect(await reloadPageSortsInDaemon(authUrl!)).toBe(true);
-            expect(await reloadChallengesInDaemon(authUrl!)).toBe(true);
+            expect((await reloadPageSortsInDaemon(authUrl!)).status).toBe("reloaded");
+            expect((await reloadChallengesInDaemon(authUrl!)).status).toBe("reloaded");
         });
     });
 });

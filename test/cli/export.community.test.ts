@@ -1,4 +1,4 @@
-import { describe, it, beforeAll, afterAll, afterEach, beforeEach, expect } from "vitest";
+import { describe, it, beforeAll, afterAll, afterEach, beforeEach, expect, vi } from "vitest";
 import Sinon from "sinon";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
@@ -548,6 +548,163 @@ describe("community export _runExport", () => {
 
         expect(record).toEqual(TERMINAL_RECORD);
         expect(emitter.listenerCount("exportschange")).toBe(0);
+    });
+});
+
+// The export's progress and result only arrive over the RPC connection. After a drop, pkc-js reconnects and
+// re-subscribes to the exports, and the daemon answers with the exports it has (they outlive client connections).
+// A daemon that died never answers, so the command used to sit at its last percentage until Ctrl+C, and a restarted
+// one answers without the export.
+describe("community export _runExport when the RPC connection drops", () => {
+    const RUNNING_RECORD: FakeExportRecord = { exportId: EXPORT_ID, publicKey: "12D3KooWTest", includePrivateKey: false, progress: 0.4 };
+    const FINISHED_RECORD: FakeExportRecord = {
+        ...RUNNING_RECORD,
+        progress: 1,
+        size: snapshotContent.length,
+        sha256: snapshotSha256,
+        url: `http://127.0.0.1:1/exports/${EXPORT_ID}`
+    };
+    const OTHER_FINISHED_RECORD: FakeExportRecord = { ...FINISHED_RECORD, exportId: "99999999-8888-7777-6666-555555555555" };
+
+    let ExportCommand: (typeof import("../../src/cli/commands/community/export.js"))["default"];
+    beforeAll(async () => {
+        ExportCommand = (await import("../../src/cli/commands/community/export.js")).default;
+    });
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    // Starts _runExport against a fake community and a fake pkc-js RPC client, and waits until it listens
+    const startExport = async (initialState = "connected") => {
+        const emitter = new EventEmitter();
+        const community = {
+            address: COMMUNITY_ADDRESS,
+            on: emitter.on.bind(emitter),
+            removeListener: emitter.removeListener.bind(emitter),
+            exports: [] as FakeExportRecord[],
+            export: async () => ({ exportId: EXPORT_ID })
+        };
+        const rpcClient = Object.assign(new EventEmitter(), { state: initialState });
+        const setState = (state: string) => {
+            rpcClient.state = state;
+            rpcClient.emit("statechange", state);
+        };
+        const commandInstance = Object.create(ExportCommand.prototype) as { _runExport: Function };
+        const signal = new AbortController().signal;
+        const exportPromise = commandInstance._runExport(community, false, signal, true, rpcClient) as Promise<FakeExportRecord>;
+        let outcome = "pending";
+        exportPromise.then(
+            () => (outcome = "resolved"),
+            (err: Error) => (outcome = err.message)
+        );
+        await vi.advanceTimersByTimeAsync(0); // community.export() resolves and _runExport attaches its listeners
+        const expectListenersRemoved = () => {
+            expect(emitter.listenerCount("exportschange")).toBe(0);
+            expect(rpcClient.listenerCount("statechange")).toBe(0);
+            expect(vi.getTimerCount()).toBe(0); // no grace timer left behind
+        };
+        return { emitter, setState, exportPromise, outcome: () => outcome, expectListenersRemoved };
+    };
+
+    it("Waits through a short drop and finishes from the exports the daemon sends after the reconnect", async () => {
+        const { emitter, setState, exportPromise, outcome, expectListenersRemoved } = await startExport();
+        emitter.emit("exportschange", [RUNNING_RECORD]);
+
+        setState("stopped");
+        setState("connecting");
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(outcome()).toBe("pending");
+
+        setState("connected");
+        emitter.emit("exportschange", [FINISHED_RECORD]); // what the daemon sends when pkc-js re-subscribes
+
+        await expect(exportPromise).resolves.toEqual(FINISHED_RECORD);
+        expectListenersRemoved();
+    });
+
+    it("Keeps following the export's progress after a reconnect", async () => {
+        const { emitter, setState, exportPromise, outcome, expectListenersRemoved } = await startExport();
+
+        setState("connecting");
+        setState("connected");
+        emitter.emit("exportschange", [RUNNING_RECORD]);
+        await vi.advanceTimersByTimeAsync(120_000); // the grace period no longer applies
+        expect(outcome()).toBe("pending");
+
+        emitter.emit("exportschange", [FINISHED_RECORD]);
+        await expect(exportPromise).resolves.toEqual(FINISHED_RECORD);
+        expectListenersRemoved();
+    });
+
+    it("Rejects when the daemon no longer has the export after the reconnect (it restarted)", async () => {
+        const { emitter, setState, exportPromise, expectListenersRemoved } = await startExport();
+        emitter.emit("exportschange", [RUNNING_RECORD]);
+
+        setState("connecting");
+        setState("connected");
+        emitter.emit("exportschange", [OTHER_FINISHED_RECORD]);
+
+        await expect(exportPromise).rejects.toThrow(`The RPC server no longer has export ${EXPORT_ID}`);
+        expectListenersRemoved();
+    });
+
+    it("Rejects when the connection does not come back within the grace period", async () => {
+        const { setState, outcome, expectListenersRemoved } = await startExport();
+
+        setState("connecting");
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(outcome()).toBe("pending");
+
+        await vi.runOnlyPendingTimersAsync();
+        expect(outcome()).toMatch(/^Lost the connection to the RPC server during the export/);
+        expectListenersRemoved();
+    });
+
+    it("Rejects when the connection comes back but the daemon sends no exports within the grace period", async () => {
+        const { setState, outcome, expectListenersRemoved } = await startExport();
+
+        setState("connecting");
+        setState("connected"); // the re-subscription failed, so no exportschange follows
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(outcome()).toBe("pending");
+
+        await vi.runOnlyPendingTimersAsync();
+        expect(outcome()).toMatch(/^Lost the connection to the RPC server during the export/);
+        expectListenersRemoved();
+    });
+
+    it("Rejects at once when pkc-js stops reconnecting", async () => {
+        const { setState, exportPromise, expectListenersRemoved } = await startExport();
+
+        setState("failed"); // what pkc-js sets after the server refuses the auth key
+
+        await expect(exportPromise).rejects.toThrow("pkc-js stopped reconnecting");
+        expectListenersRemoved();
+    });
+
+    it("Starts the grace period when the connection was already down before the listener was attached", async () => {
+        const { outcome, expectListenersRemoved } = await startExport("stopped");
+
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(outcome()).toBe("pending");
+
+        await vi.runOnlyPendingTimersAsync();
+        expect(outcome()).toMatch(/^Lost the connection to the RPC server during the export/);
+        expectListenersRemoved();
+    });
+
+    it("Keeps waiting for the export while the RPC connection stays up", async () => {
+        const { emitter, exportPromise, outcome, expectListenersRemoved } = await startExport();
+
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(outcome()).toBe("pending");
+
+        emitter.emit("exportschange", [FINISHED_RECORD]);
+        await expect(exportPromise).resolves.toEqual(FINISHED_RECORD);
+        expectListenersRemoved();
     });
 });
 

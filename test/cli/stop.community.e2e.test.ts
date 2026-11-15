@@ -95,6 +95,17 @@ describe("bitsocial community stop (real pkc daemon, issue #152)", () => {
         await Promise.all([waitForPortFree(RPC_PORT), waitForPortFree(KUBO_API_PORT), waitForPortFree(GATEWAY_PORT)]);
     }, 60_000);
 
+    // pkc-js hands back a remote instance for an address the daemon does not list. `community stop` used to
+    // print that address and exit 0, exactly like a real stop, while the intended community kept running
+    it("fails for an address the daemon does not host", { timeout: 120_000 }, async () => {
+        const notHosted = "not-hosted-by-this-daemon.bso";
+        const stop = await runBitsocialCommand(["community", "stop", notHosted, "--pkcRpcUrl", rpcWsUrl]);
+        expect(stop.exitCode, `community stop exited 0 for an address the daemon does not host: ${stop.stdout}`).toBe(1);
+        expect(stop.stdout.trim()).toBe("");
+        expect(stop.stderr).toContain(notHosted);
+        expect(await isStartedOnDaemon(communityAddress)).toBe(true);
+    });
+
     it("stops a community the daemon is running", { timeout: 120_000 }, async () => {
         const stop = await runBitsocialCommand(["community", "stop", communityAddress, "--pkcRpcUrl", rpcWsUrl]);
         expect(stop.exitCode, `community stop failed: ${stop.stderr}`).toBe(0);

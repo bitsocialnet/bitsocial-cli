@@ -1,6 +1,6 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../../../common-utils/defaults.js";
-import { evaluateChecks, formatCheck, gatherCheckFacts, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
+import { evaluateChecks, formatCheck, gatherCheckFacts, hasPublicAddressEvidence, noWssAddressCheck, publicAddressAnnouncedCheck, type ReachabilityCheck } from "../../../reachability/checks.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
 import { autonatEvidence, browserAddressCheck, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
@@ -64,7 +64,17 @@ export default class Status extends Command {
         // Only a node setup does not manage reports these: on one it does, kubo-announce and the daemon's own checks cover them.
         const unmanagedAddresses = status.configured ? [] : wssAddresses;
         const evidence = autonatEvidence(facts.kuboAutonat);
-        const browserCheck = status.configured ? undefined : browserAddressCheck(unmanagedAddresses, evidence);
+        const browserCheck = config
+            ? noWssAddressCheck({
+                  announce: config.announce,
+                  wsPort: config.wsPort,
+                  tcp443: facts.tcp443,
+                  hasPublicAddress: hasPublicAddressEvidence(facts, config.announce),
+                  forcedDomain: config.domain !== undefined && config.domainForced === true,
+                  otherWssWorks: wssAddresses.some(({ status }) => status === "ok"),
+                  droppedName: (config.droppedAnnounce ?? []).length > 0
+              })
+            : browserAddressCheck(unmanagedAddresses, evidence);
         const announcedCheck = publicAddressAnnouncedCheck({
             running: facts.kuboRunningAnnounce,
             inContainer: facts.inContainer,

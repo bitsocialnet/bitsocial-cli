@@ -1,5 +1,40 @@
 # Changelog
 
+## <small>0.19.135 (2026-11-13)</small>
+
+* fix(challenge): claim a daemon reload only when it loaded the installed version [skip github-alerts] ([a793dab](https://github.com/bitsocialnet/bitsocial-cli/commit/a793dab))
+* fix(cli): register dynamic flags when the only argument is a flag [skip github-alerts] ([37a07a4](https://github.com/bitsocialnet/bitsocial-cli/commit/37a07a4))
+* fix(community): fail `community stop` for an address the daemon does not host [skip github-alerts] ([331b313](https://github.com/bitsocialnet/bitsocial-cli/commit/331b313))
+* fix(logs): detect a trim when the log already grew past the old offset [skip github-alerts] ([95027f0](https://github.com/bitsocialnet/bitsocial-cli/commit/95027f0))
+* fix(logs): keep following the log after the daemon trims it in place [skip github-alerts] ([a6887cd](https://github.com/bitsocialnet/bitsocial-cli/commit/a6887cd))
+* fix(logs): re-check the trim anchor after reading, before using the bytes ([880e418](https://github.com/bitsocialnet/bitsocial-cli/commit/880e418))
+* fix(logs): switch to a new log file in one step, from the bytes it read [skip github-alerts] ([6d4ffe4](https://github.com/bitsocialnet/bitsocial-cli/commit/6d4ffe4))
+* fix(rpc): fail fast on a refused auth key or an export the daemon lost [skip github-alerts] ([0377e28](https://github.com/bitsocialnet/bitsocial-cli/commit/0377e28))
+* test: cover export drops and private-key refusal against a real daemon ([e000c4f](https://github.com/bitsocialnet/bitsocial-cli/commit/e000c4f))
+
+## <small>0.19.134 (2026-11-13)</small>
+
+* test: bound the retries when removing the run's temp directory ([f0c801d](https://github.com/bitsocialnet/bitsocial-cli/commit/f0c801d))
+* test: check that stopping a test daemon leaves no kubo running ([ce2d7b0](https://github.com/bitsocialnet/bitsocial-cli/commit/ce2d7b0))
+* test: end a test daemon together with the kubo it started on Windows ([e1e5338](https://github.com/bitsocialnet/bitsocial-cli/commit/e1e5338))
+* test: give each run one temp directory and remove it afterwards ([23e164b](https://github.com/bitsocialnet/bitsocial-cli/commit/23e164b))
+* test: keep a live run's temp directory and report a failed removal ([8c8f31e](https://github.com/bitsocialnet/bitsocial-cli/commit/8c8f31e))
+
+## <small>0.19.133 (2026-11-13)</small>
+
+* fix(reachability): give status's Funnel pointer the public addresses kubo reports, as setup has ([350aa50](https://github.com/bitsocialnet/bitsocial-cli/commit/350aa50))
+* fix(reachability): keep status's Funnel pointer when TCP 443 is busy and no address is public ([1e22374](https://github.com/bitsocialnet/bitsocial-cli/commit/1e22374))
+* fix(reachability): leave status's Funnel pointer out while a forced domain waits for a reverse proxy ([8aeda38](https://github.com/bitsocialnet/bitsocial-cli/commit/8aeda38))
+* test(reachability): show setup's output when the existing-Caddy run exceeds its time limit ([428ae8f](https://github.com/bitsocialnet/bitsocial-cli/commit/428ae8f))
+* docs(reachability): add a Tailscale Funnel walkthrough and an optional compose sidecar ([955cc98](https://github.com/bitsocialnet/bitsocial-cli/commit/955cc98))
+* docs(reachability): describe the burst failures seen through Funnel and the Docker retest ([c5c1478](https://github.com/bitsocialnet/bitsocial-cli/commit/c5c1478))
+* feat(reachability): point status at Tailscale Funnel on a node setup left without WSS ([2509a21](https://github.com/bitsocialnet/bitsocial-cli/commit/2509a21))
+* feat(reachability): suggest Tailscale Funnel when setup cannot serve WSS on the node's own address ([b05ad29](https://github.com/bitsocialnet/bitsocial-cli/commit/b05ad29))
+
+## <small>0.19.132 (2026-11-12)</small>
+
+* chore(deps): upgrade seedit web UI v0.6.0 -> v0.6.3, 5chan v0.10.2 -> v0.10.4 ([fb66198](https://github.com/bitsocialnet/bitsocial-cli/commit/fb66198))
+
 ## <small>0.19.131 (2026-11-10)</small>
 
 * docs(reachability): name the pkc-js version from which browsers dial WebTransport ([803fc1e](https://github.com/bitsocialnet/bitsocial-cli/commit/803fc1e)), closes [pkcprotocol/pkc-js#492](https://github.com/pkcprotocol/pkc-js/issues/492)

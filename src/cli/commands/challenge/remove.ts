@@ -8,7 +8,8 @@ import {
     isBuiltInPackageName,
     PackageNotInstalledError,
     InvalidPackageNameError,
-    assertValidPackageName
+    assertValidPackageName,
+    removeReloadWarning
 } from "../../../common-utils/package-registry.js";
 import { CHALLENGE_PACKAGE_KIND, findChallengeUsages, reloadChallengesInDaemon } from "../../../challenge-packages/challenge-utils.js";
 
@@ -71,7 +72,9 @@ export default class Remove extends BaseCommand {
 
         // Best-effort reload in the daemon at --pkcRpcUrl, so the removal takes effect
         // without a restart
-        await reloadChallengesInDaemon(flags.pkcRpcUrl);
+        const reload = await reloadChallengesInDaemon(flags.pkcRpcUrl);
+        const reloadWarning = removeReloadWarning(CHALLENGE_PACKAGE_KIND, reload, args.name, flags.pkcRpcUrl);
+        if (reloadWarning) this.warn(reloadWarning);
     }
 
     // A community whose settings.challenges names an unregistered challenge rejects every publication, and pkc-js

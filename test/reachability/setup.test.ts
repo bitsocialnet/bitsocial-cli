@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { caddyfilePath, generateCaddyfile, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from "../../src/reachability/caddy.js";
 import { ReachabilityRuntime } from "../../src/reachability/runtime.js";
 import { caddyDataDir, isReachabilityDeclined, readReachabilityConfig, reachabilityDir, writeReachabilityDeclined, type ReachabilityConfig } from "../../src/reachability/state.js";
-import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, existingServerGuidance, noWssStatement, reverseProxySnippet, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
+import { bindDeniedGuidance, busyPortMessage, dnsMismatchMessage, existingServerGuidance, noWssStatement, proxiedAddressTestHint, reverseProxySnippet, tailscaleFunnelGuidance, testCommandHint, unreachableStatement, webTransportNotListeningGuidance } from "../../src/reachability/guidance.js";
 import {
     assertAcmeDirectoryAllowed,
     applyKuboConfig,
@@ -269,6 +269,7 @@ describe("a setup run that cannot issue any certificate", () => {
             await fs.writeFile(caddyfilePath(dataPath), CADDYFILE);
         }
         const warnings: string[] = [];
+        const logs: string[] = [];
         const dialed: string[] = [];
         const options = (overrides: Partial<SetupOptions> = {}): SetupOptions => ({
             dataPath,
@@ -280,7 +281,7 @@ describe("a setup run that cannot issue any certificate", () => {
             ...overrides
         });
         const deps: SetupDependencies = {
-            log: () => {},
+            log: (message) => logs.push(message),
             warn: (message) => warnings.push(message),
             platform: process.platform,
             inContainer: false,
@@ -301,7 +302,7 @@ describe("a setup run that cannot issue any certificate", () => {
             caddyfile: await fs.readFile(caddyfilePath(dataPath), "utf-8"),
             kubo: await fs.readFile(path.join(kuboRepoPath, "config"), "utf-8")
         });
-        return { options, deps, warnings, dialed, snapshot };
+        return { options, deps, warnings, logs, dialed, snapshot };
     };
 
     it("leaves a node serving WSS as it was when its address moved", async () => {
@@ -394,6 +395,112 @@ describe("a setup run that cannot issue any certificate", () => {
         it("still replaces a disabled node", async () => {
             const { options, deps } = await prepare(servingNode({ enabled: false }));
             expect(await runReachabilitySetup(options(NOTHING_FOUND), deps)).toMatchObject({ enabled: true, publicIps: [], announce: [] });
+        });
+    });
+
+    // #226: only a node the internet cannot reach on TCP 443 is pointed at Tailscale Funnel.
+    describe("Tailscale Funnel guidance (#226)", () => {
+        const FUNNEL = "tailscale funnel --bg 4002";
+        const kuboRpc = async () => {
+            // Stops answering for a moment after a shutdown request, as a kubo being restarted does, so setup does not wait for it.
+            let downUntil = 0;
+            const server = http.createServer((request, response) => {
+                if (request.url?.includes("/shutdown")) downUntil = Date.now() + 300;
+                else if (Date.now() < downUntil) return void response.writeHead(503).end();
+                response.end(JSON.stringify({ ID: "peer", Addresses: [], Strings: [] }));
+            });
+            await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+            return { url: new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v0`), close: () => new Promise((resolve) => server.close(resolve)) };
+        };
+
+        it("is printed with the node's ws port when no public address was found", async () => {
+            const { options, deps, logs } = await prepare();
+            await runReachabilitySetup(options({ overrides: { publicIps: [], wsPort: 4002 } }), deps);
+            expect(logs.join("\n")).toContain(FUNNEL);
+        });
+
+        it("is printed when a public address was found but no certificate could be issued", async () => {
+            const { options, deps, logs, warnings } = await prepare();
+            await runReachabilitySetup(options({ overrides: { publicIps: [NEW_IP], wsPort: 4002 } }), deps);
+            expect(warnings.join("\n")).toContain("Browsers cannot reach this node over WSS yet");
+            expect(logs.join("\n")).toContain(FUNNEL);
+        });
+
+        it("is not printed when another program holds TCP 443 on a reachable node", async () => {
+            const { options, deps, logs } = await prepare();
+            await runReachabilitySetup(options({ overrides: { publicIps: [NEW_IP], wsPort: 4002 } }), { ...deps, probePort: async () => "busy", confirm: async () => false }).catch(() => {});
+            expect(logs.join("\n")).not.toContain("tailscale");
+        });
+
+        it("is not printed when another program holds TCP 443 and a domain waits for its reverse proxy", async () => {
+            const { options, deps, logs } = await prepare();
+            const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
+            await runReachabilitySetup(options({ domain: "node.example", overrides: { publicIps: [NEW_IP], wsPort: 4002 } }), { ...deps, resolveDomain, probePort: async () => "busy", confirm: async () => false }).catch(() => {});
+            expect(logs.join("\n")).toContain("node.example");
+            expect(logs.join("\n")).not.toContain("tailscale");
+        });
+
+        it("is not printed once a WSS address is announced, which gets a test command for another network instead", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const { options, deps, logs, dialed } = await prepare();
+                const address = "/dns4/node.tailnet.ts.net/tcp/443/tls/ws";
+                const result = await runReachabilitySetup(options({ kuboRpcUrl: rpc.url, announce: address, overrides: { publicIps: [], wsPort: 4002 } }), deps);
+                expect(dialed).toEqual([`${address}/p2p/peer`]);
+                expect(result.announce).toEqual([address]);
+                expect(logs.join("\n")).not.toContain("tailscale funnel");
+                expect(logs.join("\n")).toContain("does not prove other networks can connect");
+                expect(logs.join("\n")).toContain("https://node.tailnet.ts.net/");
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("dials a just-enabled proxy again before refusing it, and refuses one that never answers", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const address = "/dns4/node.tailnet.ts.net/tcp/443/tls/ws";
+                const run = async (failures: number) => {
+                    const { options, deps, logs } = await prepare();
+                    let dials = 0;
+                    const dial = async () => {
+                        if (++dials <= failures) throw new Error("Received network error or non-101 status code.");
+                        return { peerId: "peer" };
+                    };
+                    const result = await runReachabilitySetup(options({ kuboRpcUrl: rpc.url, announce: address, overrides: { publicIps: [], wsPort: 4002 } }), { ...deps, dial, announceRetryMs: 1 }).catch((error) => error);
+                    return { result, dials, logs };
+                };
+                const recovered = await run(2);
+                expect(recovered.result.announce).toEqual([address]);
+                expect(recovered.logs.join("\n")).toContain("attempt 3 of 3");
+                const never = await run(99);
+                expect(never.result).toBeInstanceOf(SetupRefusedError);
+                expect(never.dials).toBe(3);
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("presents Funnel as one option, has the rename step before the funnel command, and never mentions sudo", () => {
+            const text = tailscaleFunnelGuidance(4002);
+            expect(text).toMatch(/One tested way/);
+            expect(text.indexOf("Rename this machine")).toBeLessThan(text.indexOf("tailscale funnel"));
+            expect(text).not.toContain("sudo");
+            expect(text).toContain("docs/tailscale-funnel.md");
+        });
+
+        it("points a container at the compose sidecar instead of installing Tailscale in it", async () => {
+            const { options, deps, logs } = await prepare();
+            await runReachabilitySetup(options({ overrides: { publicIps: [], wsPort: 4002 } }), { ...deps, inContainer: true });
+            const text = logs.join("\n");
+            expect(text).toContain("docker-compose.example.yml");
+            expect(text).toContain("127.0.0.1:4002");
+            expect(text).not.toContain("tailscale funnel --bg");
+        });
+
+        it("builds the outside test from any proxied address, and none from one without a host and port", () => {
+            expect(proxiedAddressTestHint("/ip4/93.184.216.34/tcp/8443/tls/ws")).toContain("https://93.184.216.34:8443/");
+            expect(proxiedAddressTestHint("/dnsaddr/node.example/tls/ws")).toBeUndefined();
         });
     });
 

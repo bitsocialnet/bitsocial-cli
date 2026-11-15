@@ -1,4 +1,4 @@
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess, spawn, spawnSync } from "child_process";
 import net from "net";
 import path from "path";
 import { directory as randomDirectory } from "tempy";
@@ -7,6 +7,14 @@ import defaults from "../../dist/common-utils/defaults.js";
 import { preInitKuboWithEphemeralSwarm } from "./kubo-helpers.js";
 
 export type ManagedChildProcess = ChildProcess & { kuboRpcUrl?: URL; capturedStdout?: string; capturedStderr?: string };
+
+// On Windows a kill ends the process at once, so a daemon never gets to stop the kubo it started, and that kubo then
+// outlives the suite holding its repo.lock (#248). taskkill /T ends the process together with everything it started.
+// On other platforms the plain kill stays, so that the daemon's own shutdown is what the tests exercise.
+const killProcessAndItsChildren = (proc: ChildProcess) => {
+    if (process.platform !== "win32" || proc.pid === undefined) return proc.kill();
+    return spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true }).status === 0 || proc.kill();
+};
 
 export const killChildProcess = async (proc?: ChildProcess) => {
     if (!proc) return;
@@ -24,7 +32,7 @@ export const killChildProcess = async (proc?: ChildProcess) => {
         }, 5000);
         proc.once("exit", cleanup);
         proc.once("close", cleanup);
-        const killed = proc.kill();
+        const killed = killProcessAndItsChildren(proc);
         if (!killed && (proc.exitCode !== null || proc.signalCode !== null)) cleanup();
     });
 };

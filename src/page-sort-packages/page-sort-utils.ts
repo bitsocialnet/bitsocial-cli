@@ -8,6 +8,7 @@ import {
     reloadPackagesInDaemon,
     PACKAGE_RELOAD_TIMEOUT_MS,
     type InstalledPackage,
+    type PackageReloadResult,
     type PackageKind
 } from "../common-utils/package-registry.js";
 
@@ -29,7 +30,7 @@ export const getPageSortsDir = (dataPath?: string): string => getPackagesDir(PAG
 export const listInstalledPageSorts = (dataPath?: string): Promise<InstalledPageSort[]> =>
     listInstalledPackages(PAGE_SORT_PACKAGE_KIND, dataPath);
 
-export const reloadPageSortsInDaemon = (pkcRpcUrl: string | URL, timeoutMs = PACKAGE_RELOAD_TIMEOUT_MS): Promise<boolean> =>
+export const reloadPageSortsInDaemon = (pkcRpcUrl: string | URL, timeoutMs = PACKAGE_RELOAD_TIMEOUT_MS): Promise<PackageReloadResult> =>
     reloadPackagesInDaemon(PAGE_SORT_PACKAGE_KIND, pkcRpcUrl, timeoutMs);
 
 export const loadPageSortsIntoPKC = (dataPath?: string): Promise<InstalledPageSort[]> =>

@@ -6,6 +6,7 @@ import { validatePageSortFileFactory } from "@pkcprotocol/pkc-js/page-sorts";
 import {
     importPackageFactory,
     installPackage,
+    installReloadWarning,
     InvalidPackageArchiveError,
     InvalidPackageNameError,
     packageNameToDir,
@@ -81,9 +82,10 @@ export default class Install extends BaseCommand {
         }
 
         // Best-effort reload in the daemon at --pkcRpcUrl, so the install takes effect
-        // without a restart
-        if (await reloadPageSortsInDaemon(flags.pkcRpcUrl)) {
-            this.log(`reloaded ${installed.name}${version} in the daemon at ${flags.pkcRpcUrl}`);
-        }
+        // without a restart. Only claim it when the daemon reports this version loaded.
+        const reload = await reloadPageSortsInDaemon(flags.pkcRpcUrl);
+        const reloadWarning = installReloadWarning(PAGE_SORT_PACKAGE_KIND, reload, installed, flags.pkcRpcUrl);
+        if (reloadWarning) this.warn(reloadWarning);
+        else if (reload.status === "reloaded") this.log(`reloaded ${installed.name}${version} in the daemon at ${flags.pkcRpcUrl}`);
     }
 }

@@ -61,6 +61,17 @@ const setNestedValue = (obj: any, path: string, value: any) => {
     return obj;
 };
 
+// True when oclif already resolves `--<flagName>` to a statically declared flag: the flag's own name, or `no-<name>` for a
+// boolean flag with allowNo (`daemon --no-allowPrivateKeyExport`). A dynamic flag registered under `no-<name>` would win,
+// because oclif matches an exact name before it tries negation, and the negation would be silently lost.
+const isResolvedByStaticFlag = (flags: Record<string, any> | undefined, flagName: string) => {
+    if (!flags) return false;
+    if (flagName in flags) return true;
+    if (!flagName.startsWith("no-")) return false;
+    const negatedFlag = flags[flagName.slice("no-".length)];
+    return negatedFlag?.type === "boolean" && negatedFlag.allowNo === true;
+};
+
 const traverseObjectToSetAsFlagInOclif = (opts: Parameters<Hook<"prerun">>[0], flagsGrouped: any, path = "") => {
     for (const flagName of Object.keys(flagsGrouped)) {
         if (remeda.isPlainObject(flagsGrouped[flagName])) {
@@ -69,8 +80,8 @@ const traverseObjectToSetAsFlagInOclif = (opts: Parameters<Hook<"prerun">>[0], f
         }
 
         const fullFlagName = path + flagName;
-        // Skip flags that are already statically declared on the command
-        if (opts.Command.flags && fullFlagName in opts.Command.flags) continue;
+        // Skip flags that are already statically declared on the command, including their `--no-` form
+        if (isResolvedByStaticFlag(opts.Command.flags, fullFlagName)) continue;
 
         const flagsIndices = <Record<string, number>>Object.assign({}, ...Object.keys(flagsGrouped).map((flag) => ({ [flag]: 0 })));
         const multipleValues = Array.isArray(flagsGrouped[flagName]) && flagsGrouped[flagName].length > 1;
@@ -104,8 +115,10 @@ const hook: Hook<"prerun"> = async function (opts) {
         }
 
         // Parse the dynamic flags and add them to opts.Command.flags so that it wouldn't throw
-        if (opts.argv.length <= 1) return; // if no flags are provided, then we don't need to do anything
         for (let i = 0; i < opts.argv.length; i++) if (typeof opts.argv[i] !== "string") opts.argv[i] = String(opts.argv[i]);
+        // If no flags are provided, then we don't need to do anything. Check the tokens, not their count:
+        // a single token can be a flag (`community create --title=Hello`)
+        if (!opts.argv.some((arg) => arg.startsWith("--"))) return;
 
         const flagsGrouped = <Record<string, any>>parseFlags(opts.Command.id === "daemon" ? ["", ...opts.argv] : opts.argv);
         if (Object.keys(flagsGrouped).length > 0 && !opts.Command.flags) opts.Command.flags = {};

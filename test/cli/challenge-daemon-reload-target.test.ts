@@ -42,9 +42,9 @@ describe("challengeReloadUrlFromPkcRpcUrl", () => {
 });
 
 describe("reloadChallengesInDaemon", () => {
-    it("returns false when nothing is listening", async () => {
+    it("reports nothing listening as unreachable", async () => {
         // Port 1 is privileged and unbound — connection is refused immediately
-        expect(await reloadChallengesInDaemon("ws://127.0.0.1:1", 5000)).toBe(false);
+        expect(await reloadChallengesInDaemon("ws://127.0.0.1:1", 5000)).toEqual({ status: "unreachable" });
     });
 
     it("gives up on a daemon that accepts the request but never answers", async () => {
@@ -57,7 +57,7 @@ describe("reloadChallengesInDaemon", () => {
 
         try {
             const startedAt = Date.now();
-            expect(await reloadChallengesInDaemon(`ws://127.0.0.1:${port}`, 300)).toBe(false);
+            expect(await reloadChallengesInDaemon(`ws://127.0.0.1:${port}`, 300)).toEqual({ status: "unreachable" });
             expect(Date.now() - startedAt).toBeLessThan(5000);
         } finally {
             server.closeAllConnections();
@@ -65,11 +65,11 @@ describe("reloadChallengesInDaemon", () => {
         }
     });
 
-    it("reports a successful reload", async () => {
+    const withReloadEndpoint = async (status: number, body: unknown, run: (pkcRpcUrl: string) => Promise<void>) => {
         const server = createServer((req, res) => {
             if (req.method === "POST" && req.url === "/api/challenges/reload") {
-                res.writeHead(200, { "content-type": "application/json" });
-                res.end(JSON.stringify({ ok: true, challenges: [] }));
+                res.writeHead(status, { "content-type": "application/json" });
+                res.end(JSON.stringify(body));
                 return;
             }
             res.writeHead(404).end();
@@ -78,9 +78,28 @@ describe("reloadChallengesInDaemon", () => {
         const { port } = server.address() as AddressInfo;
 
         try {
-            expect(await reloadChallengesInDaemon(`ws://127.0.0.1:${port}`)).toBe(true);
+            await run(`ws://127.0.0.1:${port}`);
         } finally {
             await new Promise<void>((resolve) => server.close(() => resolve()));
         }
+    };
+
+    // The list is what tells `install` whether the daemon serves the version it just installed: an answer alone does not
+    it("reports a successful reload with the challenges the daemon loaded", async () => {
+        await withReloadEndpoint(200, { ok: true, challenges: ["a-challenge@1.0.0", "b-challenge"] }, async (pkcRpcUrl) => {
+            expect(await reloadChallengesInDaemon(pkcRpcUrl)).toEqual({ status: "reloaded", loaded: ["a-challenge@1.0.0", "b-challenge"] });
+        });
+    });
+
+    it("reports a daemon that answered but did not reload, with its error", async () => {
+        await withReloadEndpoint(500, { ok: false, error: "Error: boom" }, async (pkcRpcUrl) => {
+            expect(await reloadChallengesInDaemon(pkcRpcUrl)).toEqual({ status: "failed", error: "Error: boom" });
+        });
+    });
+
+    it("reports an answer without the loaded list as a failed reload", async () => {
+        await withReloadEndpoint(403, "This endpoint does not exist for remote connections", async (pkcRpcUrl) => {
+            expect(await reloadChallengesInDaemon(pkcRpcUrl)).toEqual({ status: "failed", error: "HTTP 403" });
+        });
     });
 });

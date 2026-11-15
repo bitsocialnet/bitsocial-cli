@@ -352,23 +352,86 @@ export function reloadUrlFromPkcRpcUrl(kind: PackageKind, pkcRpcUrl: string): st
 export const PACKAGE_RELOAD_TIMEOUT_MS = 30000;
 
 /**
+ * What a reload request found. "reloaded" carries the packages the daemon reports it loaded, as
+ * formatPackageNameVersion strings. "unreachable" means no daemon answered, which is not an error.
+ * "failed" means something answered at the reload URL but did not reload.
+ */
+export type PackageReloadResult =
+    | { status: "reloaded"; loaded: string[] }
+    | { status: "unreachable" }
+    | { status: "failed"; error: string };
+
+/**
  * Ask the daemon at `pkcRpcUrl` to reload its `kind` packages, so an install/remove takes
- * effect without a restart. Returns whether a daemon actually reloaded — best-effort, since
- * no daemon running is not an error.
+ * effect without a restart. Best-effort, since no daemon running is not an error.
  *
  * The request is bounded: a daemon that accepts the connection but never answers (busy, wedged,
  * or something else listening on the port) would otherwise hold the CLI for undici's 300s
  * default. Aborting only ends our wait — the daemon may still finish the reload.
  */
-export async function reloadPackagesInDaemon(kind: PackageKind, pkcRpcUrl: string | URL, timeoutMs = PACKAGE_RELOAD_TIMEOUT_MS): Promise<boolean> {
+export async function reloadPackagesInDaemon(
+    kind: PackageKind,
+    pkcRpcUrl: string | URL,
+    timeoutMs = PACKAGE_RELOAD_TIMEOUT_MS
+): Promise<PackageReloadResult> {
     const reloadUrl = reloadUrlFromPkcRpcUrl(kind, pkcRpcUrl.toString());
-    if (!reloadUrl) return false;
+    if (!reloadUrl) return { status: "unreachable" };
+    let res: Response;
     try {
-        const res = await fetch(reloadUrl, { method: "POST", signal: AbortSignal.timeout(timeoutMs) });
-        return res.ok;
+        res = await fetch(reloadUrl, { method: "POST", signal: AbortSignal.timeout(timeoutMs) });
     } catch {
-        return false; // daemon not running or not answering, that's fine
+        return { status: "unreachable" }; // daemon not running or not answering, that's fine
     }
+    // The daemon answers { ok: true, [kind.registryKey]: ["name@version", ...] } (registerPackageReloadEndpoints in
+    // src/webui/daemon-server.ts) or { ok: false, error } with a 500
+    const body: unknown = await res.json().catch(() => undefined);
+    const field = (key: string): unknown => (body && typeof body === "object" ? (body as Record<string, unknown>)[key] : undefined);
+    const loaded = field(kind.registryKey);
+    if (res.ok && Array.isArray(loaded)) return { status: "reloaded", loaded: loaded.map(String) };
+    const error = field("error");
+    return { status: "failed", error: typeof error === "string" ? error : `HTTP ${res.status}` };
+}
+
+/**
+ * Why the daemon does not serve `installed` after `install` asked it to reload, or undefined when it does or no daemon
+ * answered. An answer alone does not mean it serves the package: the daemon loads from its own data path, and keeps
+ * the previous build of a package whose new build fails to import (loadPackagesIntoPKC).
+ */
+export function installReloadWarning(
+    kind: PackageKind,
+    reload: PackageReloadResult,
+    installed: { name: string; version?: string },
+    pkcRpcUrl: string | URL
+): string | undefined {
+    const nameVersion = formatPackageNameVersion({ name: installed.name, version: installed.version ?? "" });
+    if (reload.status === "unreachable") return undefined;
+    if (reload.status === "failed")
+        return `The daemon at ${pkcRpcUrl} failed to reload its ${kind.label}s (${reload.error}). Restart it to load ${nameVersion}.`;
+    if (reload.loaded.includes(nameVersion)) return undefined;
+    return (
+        `The daemon at ${pkcRpcUrl} reloaded its ${kind.label}s without ${nameVersion}, so it keeps serving what it had before. ` +
+        `Either the package failed to import in the daemon (see \`bitsocial logs\`), or the daemon uses another --pkcOptions.dataPath.`
+    );
+}
+
+/** Why the daemon still has `name` after `remove` asked it to reload, or undefined when it does not or no daemon answered. */
+export function removeReloadWarning(
+    kind: PackageKind,
+    reload: PackageReloadResult,
+    name: string,
+    pkcRpcUrl: string | URL
+): string | undefined {
+    if (reload.status === "unreachable") return undefined;
+    if (reload.status === "failed")
+        return (
+            `The daemon at ${pkcRpcUrl} failed to reload its ${kind.label}s (${reload.error}), ` +
+            `so it keeps ${name} loaded until it restarts.`
+        );
+    if (!reload.loaded.some((entry) => entry === name || entry.startsWith(`${name}@`))) return undefined;
+    return (
+        `The daemon at ${pkcRpcUrl} still has ${name} loaded. ` +
+        `It reads ${kind.label}s from its own data path, which is not the one ${name} was removed from.`
+    );
 }
 
 // Hash of a package's own source, used as the import cache key (see loadPackagesIntoPKC).

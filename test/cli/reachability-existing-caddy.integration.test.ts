@@ -381,7 +381,8 @@ describe("another Caddy holds only the HTTP port", { timeout: 300_000 }, () => {
     });
 
     it("finishes well inside the 90 seconds setup allows", () => {
-        expect(elapsedMs, `setup took ${elapsedMs} ms`).toBeLessThan(60_000);
+        // The output shows where the time went, such as a certificate attempt that had to be retried.
+        expect(elapsedMs, `setup took ${elapsedMs} ms\n${run.stdout}\n${run.stderr}`).toBeLessThan(60_000);
     });
 
     it("warned that HTTP validation is unavailable", () => {

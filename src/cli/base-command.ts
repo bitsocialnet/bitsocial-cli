@@ -30,6 +30,8 @@ export abstract class BaseCommand extends Command {
             return connectOverride(pkcRpcUrl);
         }
         const pkc = await PKC({ pkcRpcClientsOptions: [pkcRpcUrl] });
+        const isAuthRequiredError = (err: unknown) =>
+            Boolean(err && typeof err === "object" && "code" in err && err.code === "ERR_RPC_AUTH_REQUIRED");
         const errors: Error[] = [];
         pkc.on("error", (err) => {
             errors.push(err);
@@ -39,12 +41,22 @@ export abstract class BaseCommand extends Command {
                 const lastError = errors[errors.length - 1];
                 reject(lastError ?? new Error(`Timed out waiting for RPC server at ${pkcRpcUrl} to respond`));
             }, 20000);
+            // pkc-js stops reconnecting once the server refuses the auth key, so no communities list can follow:
+            // report it now instead of after the timeout
+            const onAuthRequired = (err: Error) => {
+                if (!isAuthRequiredError(err)) return;
+                clearTimeout(timeout);
+                pkc.removeListener("error", onAuthRequired);
+                reject(err);
+            };
+            pkc.on("error", onAuthRequired);
             pkc.once("communitieschange", () => {
                 clearTimeout(timeout);
+                pkc.removeListener("error", onAuthRequired);
                 resolve();
             });
         }).catch((err) => {
-            if (err && typeof err === "object" && "code" in err && err.code === "ERR_RPC_AUTH_REQUIRED") {
+            if (isAuthRequiredError(err)) {
                 throw err;
             }
             throw new Error(`Could not connect to the daemon at ${pkcRpcUrl}. Is it running? Start it with: bitsocial daemon`);

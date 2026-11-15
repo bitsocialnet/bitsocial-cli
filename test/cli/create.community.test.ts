@@ -79,6 +79,24 @@ describe("bitsocial community create", () => {
         expect(startFake.calledOnce).toBe(true);
     });
 
+    // The prerun hook used to skip registering dynamic flags whenever argv had a single token, so a lone
+    // `--flag=value` was rejected as a nonexistent flag while `--flag value` worked
+    it("Accepts a single --flag=value token", async () => {
+        const result = await runCreateCommand("community create --title=SingleTokenTitle");
+        expect(result.error).toBeUndefined();
+        expect(pkcCreateStub.calledOnce).toBe(true);
+        const parsedArgs = <CreateCommunityOptions>pkcCreateStub.args[0][0];
+        expect(parsedArgs.title).toBe("SingleTokenTitle");
+    });
+
+    it("Accepts a single nested --flag=value token", async () => {
+        const result = await runCreateCommand("community create --suggested.language=singleTokenLanguage");
+        expect(result.error).toBeUndefined();
+        expect(pkcCreateStub.calledOnce).toBe(true);
+        const parsedArgs = <CreateCommunityOptions>pkcCreateStub.args[0][0];
+        expect(parsedArgs.suggested?.language).toBe("singleTokenLanguage");
+    });
+
     // --jsonFile flag
 
     it("Can create using a JSON file", async () => {

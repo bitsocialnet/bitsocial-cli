@@ -52,6 +52,37 @@ describe("bitsocial reachability status", () => {
         expect(stdout).toContain("Caddy: not running");
     });
 
+    it("--json carries the Tailscale Funnel hint on a node setup left without WSS (#226)", async () => {
+        const dataPath = randomDirectory();
+        const server = http.createServer();
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const httpsPort = (server.address() as AddressInfo).port;
+        await new Promise((resolve) => server.close(resolve));
+        await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "webtransport-only", wsPort: 4002, serveWss: false, announce: [], publicIps: [], staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019, httpsPort });
+        const { stdout } = await runStatus(["--json", "--pkcOptions.dataPath", dataPath]);
+        const check = JSON.parse(stdout).checks.find((check: { id: string }) => check.id === "browser-address");
+        expect(check).toMatchObject({ status: "warn" });
+        expect(check.fix).toContain("Tailscale Funnel");
+        expect(check.fix).toContain("127.0.0.1:4002");
+    });
+
+    // setup --domain --force with another program on TCP 443 prints the reverse proxy snippet, even with no public address.
+    it("--json leaves the Funnel hint out while a forced domain waits for a reverse proxy on a busy TCP 443 (#226)", async () => {
+        const dataPath = randomDirectory();
+        const server = http.createServer();
+        await new Promise<void>((resolve) => server.listen(0, resolve));
+        try {
+            const httpsPort = (server.address() as AddressInfo).port;
+            await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "webtransport-only", wsPort: 4002, announce: [], publicIps: [], domain: "node.example", domainForced: true, staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019, httpsPort });
+            const { stdout } = await runStatus(["--json", "--pkcOptions.dataPath", dataPath]);
+            const checks: { id: string; status: string; fix?: string }[] = JSON.parse(stdout).checks;
+            expect(checks.find((check) => check.id === "tcp-443")).toMatchObject({ status: "fail", fix: expect.stringContaining("reverse proxy") });
+            expect(checks.find((check) => check.id === "browser-address")).toBeUndefined();
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
     it("--json lists each requirement it checked, including UDP 443", async () => {
         const { stdout } = await runStatus(["--json", "--pkcOptions.dataPath", randomDirectory()]);
         const ids = JSON.parse(stdout).checks.map((check: { id: string }) => check.id);
