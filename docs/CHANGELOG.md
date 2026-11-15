@@ -1,5 +1,24 @@
 # Changelog
 
+## <small>0.19.137 (2026-11-15)</small>
+
+* fix(daemon-state): pin locale and timezone of the ps start-time token [skip github-alerts] ([345c979](https://github.com/bitsocialnet/bitsocial-cli/commit/345c979))
+* fix(daemon): serve a web UI only in its pinned version [skip github-alerts] ([5eed5c7](https://github.com/bitsocialnet/bitsocial-cli/commit/5eed5c7))
+* fix(update): download changed web UIs before the fast-update swap [skip github-alerts] ([e78dc77](https://github.com/bitsocialnet/bitsocial-cli/commit/e78dc77))
+* fix(update): never reuse an incomplete web UI directory in a fast update [skip github-alerts] ([c1f7ae5](https://github.com/bitsocialnet/bitsocial-cli/commit/c1f7ae5))
+* fix(update): put the web UIs back when a fast update fails after moving them [skip github-alerts] ([76b6711](https://github.com/bitsocialnet/bitsocial-cli/commit/76b6711))
+* fix(update): re-spawn daemons with their own cwd and kubo env vars [skip github-alerts] ([0399ef9](https://github.com/bitsocialnet/bitsocial-cli/commit/0399ef9))
+* fix(update): reuse a web UI in a fast update only in its pinned version [skip github-alerts] ([de92bd6](https://github.com/bitsocialnet/bitsocial-cli/commit/de92bd6))
+* fix(update): stop daemons only for a real install and never leave them down [skip github-alerts] ([d4b827c](https://github.com/bitsocialnet/bitsocial-cli/commit/d4b827c))
+* fix(webui): download web UIs per pinned set, not per dist/webuis existence [skip github-alerts] ([3ff401e](https://github.com/bitsocialnet/bitsocial-cli/commit/3ff401e))
+* fix(webui): fail postinstall when a failed swap leaves no web UIs [skip github-alerts] ([8b64f2b](https://github.com/bitsocialnet/bitsocial-cli/commit/8b64f2b))
+* fix(webui): install a web UI only in its pinned version [skip github-alerts] ([d88604c](https://github.com/bitsocialnet/bitsocial-cli/commit/d88604c))
+* fix(webui): pin only a web UI release that has a release manifest [skip github-alerts] ([3f3cdf9](https://github.com/bitsocialnet/bitsocial-cli/commit/3f3cdf9))
+* fix(webui): restore the installed web UIs when the postinstall swap fails [skip github-alerts] ([fca647d](https://github.com/bitsocialnet/bitsocial-cli/commit/fca647d))
+* fix(webui): stop shipping plebones [skip github-alerts] ([f90f860](https://github.com/bitsocialnet/bitsocial-cli/commit/f90f860))
+* docs: describe the release manifest rule for web UIs [skip github-alerts] ([32ff654](https://github.com/bitsocialnet/bitsocial-cli/commit/32ff654))
+* test(webui): cover moving kept web UIs back when a later one fails [skip github-alerts] ([6cdcef6](https://github.com/bitsocialnet/bitsocial-cli/commit/6cdcef6))
+
 ## <small>0.19.136 (2026-11-13)</small>
 
 * fix(reachability): don't let a 0 peer count mask a completed AutoNAT result ([50f5c4a](https://github.com/bitsocialnet/bitsocial-cli/commit/50f5c4a))

@@ -1,6 +1,6 @@
 {
     "name": "@bitsocial/bitsocial-cli",
-    "version": "0.19.136",
+    "version": "0.19.137",
     "description": "Command line interface to Bitsocial API",
     "types": "./dist/index.d.ts",
     "homepage": "https://github.com/bitsocialnet/bitsocial-cli",
@@ -32,6 +32,7 @@
         "/bin",
         "/dist",
         "!/dist/webuis",
+        "!/dist/.webuis-*",
         "!/dist/*.tar.gz",
         "!/dist/*.tsbuildinfo",
         "/npm-shrinkwrap.json",
@@ -150,10 +151,6 @@
         {
             "url": "https://github.com/bitsocialnet/seedit/releases/tag/v0.6.3",
             "sha256OfHtmlZip": "61047535cd43d16ed848c8a0af26a5e0813e52af52a28b69e45579294d6aa98b"
-        },
-        {
-            "url": "https://github.com/plebbit/plebones/releases/tag/v0.1.27",
-            "sha256OfHtmlZip": "14653b19e88868fda6fef26601f477947e44251cc52bd95d7d6fec158ae67b6f"
         },
         {
             "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.4",

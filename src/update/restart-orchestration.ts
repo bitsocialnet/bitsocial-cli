@@ -51,9 +51,22 @@ export async function planDaemonRestarts(
 /**
  * Stop the daemons that must come down before the binary swap: only the unsupervised ones.
  * Supervised daemons keep running — their supervisor restarts them after the swap.
+ *
+ * A stopped daemon deletes its own state file, so from then on its args exist only in `plan`. If one
+ * fails to stop, the ones already stopped are re-spawned before the error is rethrown; the daemon that
+ * failed is left alone, since it may still be running.
  */
 export async function stopUnmanagedDaemons(plan: DaemonPlan, lifecycle: DaemonLifecycle): Promise<void> {
-    for (const daemon of plan.unmanaged) await lifecycle.stopUnmanaged(daemon);
+    const stopped: DaemonState[] = [];
+    try {
+        for (const daemon of plan.unmanaged) {
+            await lifecycle.stopUnmanaged(daemon);
+            stopped.push(daemon);
+        }
+    } catch (err) {
+        for (const daemon of stopped) await lifecycle.startUnmanaged(daemon);
+        throw err;
+    }
 }
 
 /** Re-spawn the unsupervised daemons that were stopped. Safe to call even after a no-op update. */
