@@ -145,16 +145,35 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.ref.outputs.tag }}
 
+      # Node 22.18 or newer runs the TypeScript file below directly, without npm ci.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # A re-run for an older release must not move latest, <major> or <major>.<minor> back to it (issue #266).
+      # The checkout above fetches every tag (fetch-depth: 0).
+      - name: Decide which moving tags to push
+        id: moving
+        env:
+          RELEASE_TAG: ${{ steps.ref.outputs.tag }}
+        # bash is named so that the step runs with pipefail and fails when the script does.
+        shell: bash
+        run: |
+          git tag --list | node --no-warnings ci-bin/docker-moving-tags.ts | tee -a "$GITHUB_OUTPUT"
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/bitsocialnet/bitsocial-cli
+          # metadata-action would otherwise add `latest` on its own for every semver tag.
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ steps.ref.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ref.outputs.tag }}
-            type=semver,pattern={{major}},value=${{ steps.ref.outputs.tag }}
-            type=raw,value=latest
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ref.outputs.tag }},enable=${{ steps.moving.outputs.minor }}
+            type=semver,pattern={{major}},value=${{ steps.ref.outputs.tag }},enable=${{ steps.moving.outputs.major }}
+            type=raw,value=latest,enable=${{ steps.moving.outputs.latest }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4

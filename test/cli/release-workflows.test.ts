@@ -19,4 +19,15 @@ describe("release workflows", () => {
         expect(condition).toContain("github.event.workflow_run.event == 'push'");
         expect(condition).not.toContain("||");
     });
+
+    // Issue #266
+    it("Docker Publish pushes each moving tag only when ci-bin/docker-moving-tags.ts allows it", () => {
+        const text = workflow("docker-publish.yml");
+        expect(text).toContain("node --no-warnings ci-bin/docker-moving-tags.ts");
+        // Without this, metadata-action adds `latest` on its own for every semver tag.
+        expect(text).toMatch(/flavor: \|\s+latest=false/);
+        expect(text).toMatch(/type=semver,pattern=\{\{major\}\}\.\{\{minor\}\},.*enable=\$\{\{ steps\.moving\.outputs\.minor \}\}/);
+        expect(text).toMatch(/type=semver,pattern=\{\{major\}\},.*enable=\$\{\{ steps\.moving\.outputs\.major \}\}/);
+        expect(text).toMatch(/type=raw,value=latest,enable=\$\{\{ steps\.moving\.outputs\.latest \}\}/);
+    });
 });
