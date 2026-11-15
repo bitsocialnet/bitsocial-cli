@@ -7,11 +7,9 @@ import { finished as streamFinished } from "node:stream/promises";
 import decompress from "decompress";
 import { runNpmPack, ensureNpmAvailable } from "../common-utils/npm.js";
 import { PACKAGE_NAME } from "./npm-registry.js";
+import { parseWebuiPinUrl, readWebuiReleaseTag, whyWebuiDirDoesNotMatchPins, type WebuiPin } from "../webui/release-manifest.js";
 
-interface WebuiEntry {
-    url: string;
-    sha256OfHtmlZip: string;
-}
+type WebuiEntry = WebuiPin;
 
 /**
  * Attempt a fast update by downloading only the tarball and reusing node_modules/
@@ -62,35 +60,30 @@ export async function fastInstallGlobal(
         }
 
         // Phase: download web UIs, before anything in the current install is moved or deleted. A web UI is
-        // reused only when its pin is unchanged AND its complete directory is on disk; every other entry is
-        // downloaded into staging now. A failed download throws, so the caller falls back to a full install
-        // instead of the update succeeding without that web UI.
-        const oldWebuis: WebuiEntry[] = oldPkg.webuis ?? [];
+        // reused only when a complete directory of it on disk holds the pinned version, which its release
+        // manifest says; every other entry is downloaded into staging now. A failed download throws, so the
+        // caller falls back to a full install instead of the update succeeding without that web UI.
         const newWebuis: WebuiEntry[] = newPkg.webuis ?? [];
-        const oldWebuisByUrl = new Map(oldWebuis.map((w: WebuiEntry) => [w.url, w.sha256OfHtmlZip]));
         const oldWebuiDirNames = (await fs.readdir(oldWebuisDir, { withFileTypes: true }).catch(() => [] as never[]))
             .filter((entry) => entry.isDirectory())
             .map((entry) => entry.name);
-        // The daemon serves index_backup_no_rpc.html from every web UI directory and fails to start without
-        // it, so a directory missing it (e.g. left by an interrupted postinstall) is never reused.
-        const completeDirNames = new Set<string>();
-        for (const name of oldWebuiDirNames) {
-            const isComplete = await fs.access(path.join(oldWebuisDir, name, "index_backup_no_rpc.html")).then(
-                () => true,
-                () => false
-            );
-            if (isComplete) completeDirNames.add(name);
-        }
-        // We don't know exact dir names, but we can match by repo name from the URL.
-        const dirsOf = (webui: WebuiEntry): string[] => {
-            const repoName = extractRepoName(webui.url)?.toLowerCase();
-            return repoName ? [...completeDirNames].filter((name) => name.toLowerCase().includes(repoName)) : [];
-        };
         const reusedDirs = new Set<string>();
         const toDownload: WebuiEntry[] = [];
         for (const webui of newWebuis) {
-            const dirs = dirsOf(webui);
-            if (oldWebuisByUrl.get(webui.url) === webui.sha256OfHtmlZip && dirs.length > 0) dirs.forEach((dir) => reusedDirs.add(dir));
+            let reusedDir: string | undefined;
+            for (const name of oldWebuiDirNames) {
+                // The daemon serves index_backup_no_rpc.html from every web UI directory and fails to start
+                // without it, so a directory missing it (e.g. left by an interrupted postinstall) is never reused.
+                const isComplete = await fs.access(path.join(oldWebuisDir, name, "index_backup_no_rpc.html")).then(
+                    () => true,
+                    () => false
+                );
+                if (isComplete && (await whyWebuiDirDoesNotMatchPins(path.join(oldWebuisDir, name), [webui])) === undefined) {
+                    reusedDir = name;
+                    break;
+                }
+            }
+            if (reusedDir) reusedDirs.add(reusedDir);
             else toDownload.push(webui);
         }
         const downloadDir = path.join(stagingDir, ".webuis-download");
@@ -191,17 +184,11 @@ export async function fastInstallGlobal(
     }
 }
 
-/** Extract repo name from a GitHub release URL (e.g. "seedit" from ".../plebbit/seedit/releases/tag/v0.5.10") */
-function extractRepoName(url: string): string | undefined {
-    const match = url.match(/github\.com\/[^/]+\/([^/]+)\/releases\/tag\//);
-    return match?.[1];
-}
-
 /** Download a single webui entry — mirrors the logic in bin/postinstall.js */
 async function downloadWebui(entry: WebuiEntry, webuisDir: string, log: (msg: string) => void): Promise<void> {
-    const match = entry.url.match(/github\.com\/([^/]+\/[^/]+)\/releases\/tag\/(.+)$/);
-    if (!match) throw new Error(`Could not parse GitHub release URL: ${entry.url}`);
-    const [, ownerRepo, tag] = match;
+    const pin = parseWebuiPinUrl(entry.url);
+    if (!pin) throw new Error(`Could not parse GitHub release URL: ${entry.url}`);
+    const { ownerRepo, tag } = pin;
 
     const githubToken = process.env["GITHUB_TOKEN"];
     const headers: Record<string, string> = {};
@@ -235,8 +222,13 @@ async function downloadWebui(entry: WebuiEntry, webuisDir: string, log: (msg: st
     await decompress(zipfilePath, webuisDir);
     await fs.rm(zipfilePath);
 
-    // Rename index.html to prevent access to unconfigured version
     const extractedDirName = htmlZipAsset.name.replace(".zip", "");
+    const releaseTag = await readWebuiReleaseTag(path.join(webuisDir, extractedDirName));
+    if (releaseTag === undefined)
+        throw new Error(`${ownerRepo}@${tag} has no release manifest (<app>-release-manifest.json with a releaseTag)`);
+    if (releaseTag !== tag) throw new Error(`The release manifest of ${ownerRepo}@${tag} names ${releaseTag}`);
+
+    // Rename index.html to prevent access to unconfigured version
     const indexPath = path.join(webuisDir, extractedDirName, "index.html");
     const backupPath = path.join(webuisDir, extractedDirName, "index_backup_no_rpc.html");
     await fs.rename(indexPath, backupPath);
