@@ -10,4 +10,5 @@ When you add a topic doc under `docs/`, add a row here.
 | [page-sorts.md](page-sorts.md) | Page sort packages: `bitsocial page-sort install/list/remove`, `sortName` vs package name and the upgrade warning, the in-use refusal on remove, configuring `settings.pages` with `community edit` |
 | [reachability.md](reachability.md) | Making a node dialable from browsers: `bitsocial reachability setup/status/enable/disable`, choosing a path, what changes in the kubo config, what the daemon keeps doing, troubleshooting |
 | [tailscale-funnel.md](tailscale-funnel.md) | A browser address for a node behind NAT through Tailscale Funnel: when `setup` and `status` suggest it, the steps, the Docker sidecar, what Tailscale can see, limits |
+| [web-uis.md](web-uis.md) | Web UIs: the release manifest every web UI build must ship, how postinstall, the fast update and the daemon use it, what happens when a web UI cannot be installed |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes (generated on release; do not edit by hand) |
