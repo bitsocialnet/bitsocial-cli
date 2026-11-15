@@ -80,6 +80,7 @@ Topic docs live flat under `docs/`; [docs/README.md](docs/README.md) is the inde
 | `src/reachability/`, `src/cli/commands/reachability/`                    | [docs/reachability.md](docs/reachability.md) |
 | `bin/postinstall.js`, `bin/update-webuis.js`, `src/update/fast-update.ts`, `src/webui/`, `webuis` in `package.json` | [docs/web-uis.md](docs/web-uis.md) |
 | `tailscaleFunnelGuidance` / `tailscaleFunnelFix` in `src/reachability/guidance.ts`, the `--announce` dial in `src/reachability/setup.ts`, the Tailscale block in `docker-compose.example.yml` | [docs/tailscale-funnel.md](docs/tailscale-funnel.md) |
+| `config/.release-it.json`, `.github/workflows/CI.yml` (path filters), `.github/workflows/CI-build.yml`, `.github/workflows/docker-publish.yml`, `.github/workflows/commit-messages.yml`, `ci-bin/pkc-js-changelog.ts`, `ci-bin/breaking-change-marker.ts`, `ci-bin/docker-moving-tags.ts`, `commitlint.config.mjs`, the package version, breaking changes | [docs/versioning.md](docs/versioning.md) |
 
 When a change alters behavior a doc describes (commands, flags, paths, endpoints, output), update the doc in the same PR.
 
@@ -141,7 +142,7 @@ npm run build:test:watch             # watch mode for test build
 
 ## Playbooks (Load On Demand)
 
-_No playbooks yet. As recurring workflows emerge (e.g., release process, adding a new command, upgrading pkc-js), create them as separate files and reference them here._
+_No playbooks yet. The release process is covered by [docs/versioning.md](docs/versioning.md). As other recurring workflows emerge (e.g., adding a new command, upgrading pkc-js), create them as separate files and reference them here._
 
 <!-- Example future entry:
 - [Adding a new CLI command](playbooks/new-command.md)

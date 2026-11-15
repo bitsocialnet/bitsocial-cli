@@ -1,0 +1,43 @@
+# Fails a pull request whose title or commit messages would be read as a breaking-change note by the release
+# tooling without being marked as one. With preMajor such a note makes the next release a minor, and the
+# pull request title counts because GitHub writes it into the merge commit body (issue #265).
+# See docs/versioning.md.
+name: Commit messages
+
+on:
+  pull_request:
+    # Releases are cut from master only, and a pull request into another branch may not have the script.
+    branches:
+      - master
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commit-messages-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  breaking-change-markers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # Node 22.18 or newer runs the TypeScript file below directly, without npm ci.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Check the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node --no-warnings ci-bin/breaking-change-marker.ts check-pr-title
+
+      - name: Check the commit messages
+        if: always()
+        env:
+          RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: node --no-warnings ci-bin/breaking-change-marker.ts check-commits "$RANGE"
