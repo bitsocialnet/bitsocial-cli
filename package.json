@@ -1,6 +1,6 @@
 {
     "name": "@bitsocial/bitsocial-cli",
-    "version": "0.19.137",
+    "version": "0.19.138",
     "description": "Command line interface to Bitsocial API",
     "types": "./dist/index.d.ts",
     "homepage": "https://github.com/bitsocialnet/bitsocial-cli",

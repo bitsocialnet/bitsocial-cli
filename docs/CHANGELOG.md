@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.138 (2026-11-15)</small>
+
+* fix(webui): remove a web UI's doctype whatever its case ([508a6d4](https://github.com/bitsocialnet/bitsocial-cli/commit/508a6d4))
+
 ## <small>0.19.137 (2026-11-15)</small>
 
 * fix(daemon-state): pin locale and timezone of the ps start-time token [skip github-alerts] ([345c979](https://github.com/bitsocialnet/bitsocial-cli/commit/345c979))
