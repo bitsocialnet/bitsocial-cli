@@ -83,7 +83,14 @@ const releases = JSON.parse(fs.readFileSync(process.env.FAKE_RELEASES, "utf-8"))
 globalThis.fetch = async (url) => {
     const href = String(url);
     fs.appendFileSync(process.env.FAKE_FETCH_LOG, href + "\\n");
+    const latest = href.match(/^https:\\/\\/api\\.github\\.com\\/repos\\/(.+)\\/releases\\/latest$/);
     const api = href.match(/^https:\\/\\/api\\.github\\.com\\/repos\\/(.+)\\/releases\\/tags\\/(.+)$/);
+    if (latest) {
+        const key = Object.keys(releases).find((key) => key.startsWith(latest[1] + "@") && releases[key].latest);
+        if (!key) return new Response("unavailable", { status: 404 });
+        const assets = [{ name: releases[key].name, browser_download_url: "https://downloads.test/" + releases[key].name }];
+        return new Response(JSON.stringify({ tag_name: key.split("@")[1], assets }));
+    }
     if (api) {
         const release = releases[api[1] + "@" + api[2]];
         if (!release || release.status) return new Response("unavailable", { status: release ? release.status : 404 });
@@ -107,6 +114,8 @@ interface FakeRelease {
     manifestTag?: string | null;
     /** Serve the release API with this HTTP status instead. */
     status?: number;
+    /** The repo's latest release: served, but not pinned in package.json. */
+    latest?: boolean;
 }
 
 async function setupPackage() {
@@ -115,6 +124,7 @@ async function setupPackage() {
     await fs.mkdir(path.join(root, "bin"), { recursive: true });
     await fs.mkdir(path.join(root, "dist"), { recursive: true });
     await fs.copyFile(path.join(REPO_ROOT, "bin", "postinstall.js"), path.join(root, "bin", "postinstall.js"));
+    await fs.copyFile(path.join(REPO_ROOT, "bin", "update-webuis.js"), path.join(root, "bin", "update-webuis.js"));
     // Resolve `decompress` from the repo's dependencies
     await fs.symlink(await fs.realpath(path.join(REPO_ROOT, "node_modules")), path.join(root, "node_modules"), "junction");
     const stubPath = path.join(work, "fetch-stub.mjs");
@@ -123,7 +133,7 @@ async function setupPackage() {
 
     /** Write package.json pins and the matching fake releases. */
     const publish = async (releases: FakeRelease[]) => {
-        const served: Record<string, { name?: string; zip?: string; status?: number }> = {};
+        const served: Record<string, { name?: string; zip?: string; status?: number; latest?: boolean }> = {};
         const webuis = [];
         for (const release of releases) {
             const app = release.repo.split("/")[1];
@@ -139,7 +149,8 @@ async function setupPackage() {
             await fs.writeFile(zipPath, zip);
             served[`${release.repo}@${release.tag}`] = release.status
                 ? { status: release.status }
-                : { name: `${release.dir}.zip`, zip: zipPath };
+                : { name: `${release.dir}.zip`, zip: zipPath, latest: release.latest };
+            if (release.latest) continue;
             webuis.push({
                 url: `https://github.com/${release.repo}/releases/tag/${release.tag}`,
                 sha256OfHtmlZip: createHash("sha256").update(zip).digest("hex")
@@ -149,9 +160,9 @@ async function setupPackage() {
         await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ name: "fake", version: "0.0.0", webuis }, null, 4));
     };
 
-    const run = async (extraEnv: Record<string, string> = {}, expectedStatus = 0) => {
+    const run = async (extraEnv: Record<string, string> = {}, expectedStatus = 0, script = "postinstall.js") => {
         await fs.rm(fetchLog, { force: true });
-        const result = spawnSync(process.execPath, ["--import", pathToFileURL(stubPath).href, path.join(root, "bin", "postinstall.js")], {
+        const result = spawnSync(process.execPath, ["--import", pathToFileURL(stubPath).href, path.join(root, "bin", script.split(" ")[0]), ...script.split(" ").slice(1)], {
             env: { ...process.env, FAKE_RELEASES: path.join(work, "releases.json"), FAKE_FETCH_LOG: fetchLog, ...extraEnv },
             encoding: "utf-8"
         });
@@ -166,7 +177,9 @@ async function setupPackage() {
             .filter((e) => e.isDirectory())
             .map((e) => e.name)
             .sort();
-    return { publish, run, webuisDir, installedDirs };
+    const pinnedUrls = async () =>
+        (JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf-8")).webuis as { url: string }[]).map((webui) => webui.url);
+    return { publish, run, webuisDir, installedDirs, pinnedUrls };
 }
 
 const SEEDIT_OLD: FakeRelease = { repo: "bitsocialnet/seedit", tag: "v0.5.10", dir: "seedit-html-0.5.10" };
@@ -368,5 +381,55 @@ describe("bin/postinstall.js web UI download", () => {
 
         expect(await pkg.installedDirs(), output).toEqual(["seedit-html-0.6.0"]);
         expect(fetched, output).toEqual([]);
+    });
+});
+
+// `npm run update-webuis` rewrites the pins to each repo's latest release. A release whose build has no
+// release manifest, or one naming another tag, could be pinned, and postinstall then rejected it on every
+// install, so no install got that web UI.
+describe("bin/update-webuis.js", () => {
+    const seeditUrl = (tag: string) => `https://github.com/bitsocialnet/seedit/releases/tag/${tag}`;
+    const updatePins = (pkg: Awaited<ReturnType<typeof setupPackage>>) => pkg.run({}, 0, "update-webuis.js");
+
+    it("pins the latest release when its build has a release manifest naming its tag", { timeout: 60000 }, async () => {
+        const pkg = await setupPackage();
+        await pkg.publish([SEEDIT_OLD, { ...SEEDIT, latest: true }]);
+
+        const { output } = await updatePins(pkg);
+
+        expect(await pkg.pinnedUrls(), output).toEqual([seeditUrl("v0.6.0")]);
+        // The new pin installs
+        await pkg.run();
+        expect(await pkg.installedDirs()).toEqual(["seedit-html-0.6.0"]);
+    });
+
+    it("leaves the pin when the latest release has no release manifest", { timeout: 60000 }, async () => {
+        const pkg = await setupPackage();
+        await pkg.publish([SEEDIT_OLD, { ...SEEDIT, latest: true, manifestTag: null }]);
+
+        const { output } = await updatePins(pkg);
+
+        expect(await pkg.pinnedUrls(), output).toEqual([seeditUrl("v0.5.10")]);
+        expect(output).toContain("release manifest");
+    });
+
+    it("leaves the pin when the release manifest of the latest release names another tag", { timeout: 60000 }, async () => {
+        const pkg = await setupPackage();
+        await pkg.publish([SEEDIT_OLD, { ...SEEDIT, latest: true, manifestTag: "v0.5.10" }]);
+
+        const { output } = await updatePins(pkg);
+
+        expect(await pkg.pinnedUrls(), output).toEqual([seeditUrl("v0.5.10")]);
+        expect(output).toContain("v0.5.10");
+    });
+
+    it("reports a release without a release manifest in a dry run too", { timeout: 60000 }, async () => {
+        const pkg = await setupPackage();
+        await pkg.publish([SEEDIT_OLD, { ...SEEDIT, latest: true, manifestTag: null }]);
+
+        const result = await pkg.run({}, 0, "update-webuis.js --dry-run");
+
+        expect(result.output).toContain("release manifest");
+        expect(result.output).not.toContain("would update");
     });
 });

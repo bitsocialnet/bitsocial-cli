@@ -34,4 +34,4 @@ A SHA-256 mismatch on a downloaded zip is different: postinstall exits 1 at once
 
 ## Changing a pin
 
-`npm run update-webuis` rewrites the pins to the latest releases. Check that the new release has the release manifest before committing the pin; postinstall rejects it otherwise.
+`npm run update-webuis` rewrites the pins to the latest releases (`bin/update-webuis.js`). It downloads each new build and leaves the pin as it is, with a warning, when the build has no release manifest or the manifest names another tag. `--dry-run` runs the same check without writing `package.json`.
