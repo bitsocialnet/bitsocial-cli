@@ -30,4 +30,13 @@ describe("release workflows", () => {
         expect(text).toMatch(/type=semver,pattern=\{\{major\}\},.*enable=\$\{\{ steps\.moving\.outputs\.major \}\}/);
         expect(text).toMatch(/type=raw,value=latest,enable=\$\{\{ steps\.moving\.outputs\.latest \}\}/);
     });
+
+    // Issue #265
+    it("pull requests are checked for accidental breaking-change markers, also when the title is edited", () => {
+        const text = workflow("commit-messages.yml");
+        expect(text).toMatch(/types: \[.*\bedited\b.*\]/);
+        expect(text).toContain("PR_TITLE: ${{ github.event.pull_request.title }}");
+        expect(text).toContain("ci-bin/breaking-change-marker.ts check-pr-title");
+        expect(text).toContain("ci-bin/breaking-change-marker.ts check-commits");
+    });
 });
