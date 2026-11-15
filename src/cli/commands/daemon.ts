@@ -581,7 +581,6 @@ export default class Daemon extends Command {
                 const remoteIpAddress = getLanIpV4Address() || localIpAddress;
                 const rpcPort = pkcRpcUrl.port;
                 const webuiDescriptions: Record<string, string> = {
-                    plebones: "A bare bones UI client",
                     seedit: "Similar to old reddit UI",
                     "5chan": "Imageboard-style UI"
                 };
