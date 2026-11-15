@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "fs/promises";
 import http from "http";
+import path from "path";
 import net from "net";
 import { directory as randomDirectory } from "tempy";
 import { startDaemonServer } from "../../dist/webui/daemon-server.js";
@@ -194,5 +196,78 @@ describe("local webui route Host handling", () => {
     it.each(["localhost", "127.0.0.1", "[::1]", "app.localhost"])("serves the page for a local request with Host %s", async (hostname) => {
         const { status } = await getWithHost("/seedit/", `${hostname}:${boundPort}`);
         expect(status).toBe(200);
+    });
+});
+
+// A web UI built for another bitsocial-cli may use other schemas than this one, so the daemon serves a
+// directory in dist/webuis only when its release manifest names the release tag pinned in package.json.
+// postinstall and the fast update never leave another version there; the daemon checks again because a
+// checkout whose pins changed (git pull, then build, without postinstall) still has the old directories,
+// and so does an install updated by an older bitsocial-cli.
+describe("web UIs that are not the pinned version", () => {
+    let boundPort: number;
+    let daemonServer: Awaited<ReturnType<typeof startDaemonServer>>;
+    let errors: string[];
+
+    const pin = (ownerRepo: string, tag: string) => ({ url: `https://github.com/${ownerRepo}/releases/tag/${tag}`, sha256OfHtmlZip: "unused" });
+
+    beforeEach(async () => {
+        const webuisDir = randomDirectory();
+        const addWebui = async (dirName: string, releaseTag?: string) => {
+            await fs.mkdir(path.join(webuisDir, dirName));
+            await fs.writeFile(path.join(webuisDir, dirName, "index_backup_no_rpc.html"), "<!DOCTYPE html><html></html>");
+            const app = dirName.split("-")[0];
+            if (releaseTag) await fs.writeFile(path.join(webuisDir, dirName, `${app}-release-manifest.json`), JSON.stringify({ releaseTag }));
+        };
+        await addWebui("seedit-html-0.6.3", "v0.6.3"); // the pinned version
+        await addWebui("5chan-0.10.3-html", "v0.10.3"); // another version than the pinned v0.10.4
+        await addWebui("bitbones-html-0.1.0"); // pinned, but the build has no release manifest
+        await addWebui("plebones-html-0.1.27", "v0.1.27"); // not pinned at all
+
+        errors = [];
+        vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void errors.push(args.join(" ")));
+        pkcWsServerFake.mockReset();
+        pkcWsServerFake.mockImplementation(async (options: { server: import("http").Server }) => {
+            boundPort = (options.server.address() as import("net").AddressInfo).port;
+            return { pkc: { communities: [] }, destroy: vi.fn(async () => {}) };
+        });
+        daemonServer = await startDaemonServer(
+            new URL("ws://127.0.0.1:0"),
+            new URL("http://127.0.0.1:6754"),
+            { dataPath: randomDirectory() },
+            undefined,
+            {
+                webuisDir,
+                pins: [pin("bitsocialnet/seedit", "v0.6.3"), pin("bitsocialnet/5chan", "v0.10.4"), pin("bitsocialnet/bitbones", "v0.1.0")]
+            }
+        );
+    });
+
+    afterEach(async () => {
+        await daemonServer.destroy();
+        vi.restoreAllMocks();
+    });
+
+    const getStatus = (urlPath: string) =>
+        new Promise<number>((resolve, reject) => {
+            const req = http.request({ host: "127.0.0.1", port: boundPort, path: urlPath, headers: { host: `localhost:${boundPort}` } }, (res) => {
+                res.resume();
+                resolve(res.statusCode!);
+            });
+            req.on("error", reject);
+            req.end();
+        });
+
+    it("serves only the web UI whose release manifest names the pinned release tag", async () => {
+        expect(daemonServer.webuis.map((webui) => webui.name)).toEqual(["seedit"]);
+        expect(await getStatus("/seedit/")).toBe(200);
+        for (const name of ["5chan", "bitbones", "plebones"]) expect(await getStatus(`/${name}/`), name).toBe(404);
+    });
+
+    it("reports each web UI it does not serve, with the reason", async () => {
+        expect(errors.find((line) => line.includes("5chan-0.10.3-html"))).toMatch(/v0\.10\.3.*v0\.10\.4/);
+        expect(errors.find((line) => line.includes("bitbones-html-0.1.0"))).toContain("release manifest");
+        expect(errors.find((line) => line.includes("plebones-html-0.1.27"))).toContain("pins no web UI");
+        expect(errors.some((line) => line.includes("seedit-html-0.6.3"))).toBe(false);
     });
 });

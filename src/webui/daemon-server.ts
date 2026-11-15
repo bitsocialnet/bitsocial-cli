@@ -10,6 +10,7 @@ import express from "express";
 import { loadChallengesIntoPKC, CHALLENGE_PACKAGE_KIND } from "../challenge-packages/challenge-utils.js";
 import { loadPageSortsIntoPKC, PAGE_SORT_PACKAGE_KIND } from "../page-sort-packages/page-sort-utils.js";
 import { formatPackageNameVersion, type InstalledPackage, type PackageKind } from "../common-utils/package-registry.js";
+import { whyWebuiDirDoesNotMatchPins, type WebuiPin } from "./release-manifest.js";
 
 const rootHashRedirectScriptPattern =
     /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?window\.location\.replace\(["']\/#["']\s*\+\s*window\.location\.pathname\s*\+\s*window\.location\.search\);(?:(?!<\/script>)[\s\S])*?<\/script>/;
@@ -63,7 +64,9 @@ export async function startDaemonServer(
     rpcUrl: URL,
     ipfsGatewayUrl: URL,
     pkcOptions: any,
-    rpcServerOptions?: { allowPrivateKeyExport?: boolean }
+    rpcServerOptions?: { allowPrivateKeyExport?: boolean },
+    /** Where the web UIs are and which versions package.json pins. Defaults to this install's; tests override it. */
+    webuiSource?: { webuisDir: string; pins: WebuiPin[] }
 ) {
     // Start pkc-js RPC
     const log = PKCLogger("bitsocial-cli:daemon:startDaemonServer");
@@ -112,7 +115,10 @@ export async function startDaemonServer(
         allowPrivateKeyExport: rpcServerOptions?.allowPrivateKeyExport
     });
 
-    const webuisDir = path.join(__dirname, "..", "..", "dist", "webuis");
+    const packageRoot = path.join(__dirname, "..", "..");
+    const webuisDir = webuiSource?.webuisDir ?? path.join(packageRoot, "dist", "webuis");
+    const webuiPins: WebuiPin[] =
+        webuiSource?.pins ?? JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf-8")).webuis ?? [];
 
     const webUiNames = (await fs.readdir(webuisDir, { withFileTypes: true })).filter((file) => file.isDirectory()).map((file) => file.name);
 
@@ -120,7 +126,14 @@ export async function startDaemonServer(
     log("Discovered webuis", webUiNames);
     for (const webuiNameWithVersion of webUiNames) {
         const webuiDirPath = path.join(webuisDir, webuiNameWithVersion);
-        const webuiName = webuiNameWithVersion.split("-")[0]; // should be "seedit", "plebones"
+        // A web UI of another version than the pinned one may use other schemas than this bitsocial-cli,
+        // so it is not served. The daemon keeps running: its communities do not depend on a web UI.
+        const mismatch = await whyWebuiDirDoesNotMatchPins(webuiDirPath, webuiPins);
+        if (mismatch) {
+            console.error(`Not serving the web UI in ${webuiDirPath}: ${mismatch}. Run \`bitsocial update install --force\` to reinstall the web UIs.`);
+            continue;
+        }
+        const webuiName = webuiNameWithVersion.split("-")[0]; // should be "seedit", "5chan"
 
         const modifiedIndexHtmlString = await _generateModifiedIndexHtmlWithRpcSettings(
             webuiDirPath,
