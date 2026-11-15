@@ -6,6 +6,9 @@ name: Commit messages
 
 on:
   pull_request:
+    # Releases are cut from master only, and a pull request into another branch may not have the script.
+    branches:
+      - master
     types: [opened, edited, reopened, synchronize]
 
 permissions:

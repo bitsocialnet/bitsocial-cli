@@ -120,10 +120,44 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  # A re-run for an older release must not move latest, <major> or <major>.<minor> back to it (issue #266).
+  moving-tags:
+    name: Decide which moving tags to push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      latest: ${{ steps.moving.outputs.latest }}
+      major: ${{ steps.moving.outputs.major }}
+      minor: ${{ steps.moving.outputs.minor }}
+
+    steps:
+      # The commit the workflow runs from, not the release tag: an older release being republished may
+      # predate ci-bin/docker-moving-tags.ts. fetch-depth: 0 fetches every tag.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Node 22.18 or newer runs the TypeScript file below directly, without npm ci.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Decide which moving tags to push
+        id: moving
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+        # bash is named so that the step runs with pipefail and fails when the script does.
+        shell: bash
+        run: |
+          git tag --list | node --no-warnings ci-bin/docker-moving-tags.ts | tee -a "$GITHUB_OUTPUT"
+
   docker-push:
     name: Push Docker image
     needs:
       - docker-test
+      - moving-tags
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -145,22 +179,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.ref.outputs.tag }}
 
-      # Node 22.18 or newer runs the TypeScript file below directly, without npm ci.
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      # A re-run for an older release must not move latest, <major> or <major>.<minor> back to it (issue #266).
-      # The checkout above fetches every tag (fetch-depth: 0).
-      - name: Decide which moving tags to push
-        id: moving
-        env:
-          RELEASE_TAG: ${{ steps.ref.outputs.tag }}
-        # bash is named so that the step runs with pipefail and fails when the script does.
-        shell: bash
-        run: |
-          git tag --list | node --no-warnings ci-bin/docker-moving-tags.ts | tee -a "$GITHUB_OUTPUT"
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
@@ -171,9 +189,9 @@ jobs:
             latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ steps.ref.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ref.outputs.tag }},enable=${{ steps.moving.outputs.minor }}
-            type=semver,pattern={{major}},value=${{ steps.ref.outputs.tag }},enable=${{ steps.moving.outputs.major }}
-            type=raw,value=latest,enable=${{ steps.moving.outputs.latest }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ref.outputs.tag }},enable=${{ needs.moving-tags.outputs.minor }}
+            type=semver,pattern={{major}},value=${{ steps.ref.outputs.tag }},enable=${{ needs.moving-tags.outputs.major }}
+            type=raw,value=latest,enable=${{ needs.moving-tags.outputs.latest }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4

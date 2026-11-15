@@ -23,12 +23,19 @@ describe("release workflows", () => {
     // Issue #266
     it("Docker Publish pushes each moving tag only when ci-bin/docker-moving-tags.ts allows it", () => {
         const text = workflow("docker-publish.yml");
-        expect(text).toContain("node --no-warnings ci-bin/docker-moving-tags.ts");
+        // A re-run checks out the old release, which may predate the script, so the decision is made in a job
+        // of its own that checks out the commit the workflow runs from.
+        const start = text.indexOf("\n  moving-tags:");
+        const decide = text.slice(start, text.indexOf("\n  docker-push:"));
+        expect(start).toBeGreaterThan(-1);
+        expect(decide).toContain("node --no-warnings ci-bin/docker-moving-tags.ts");
+        expect(decide).toContain("fetch-depth: 0");
+        expect(decide).not.toMatch(/^\s+ref:/m);
         // Without this, metadata-action adds `latest` on its own for every semver tag.
         expect(text).toMatch(/flavor: \|\s+latest=false/);
-        expect(text).toMatch(/type=semver,pattern=\{\{major\}\}\.\{\{minor\}\},.*enable=\$\{\{ steps\.moving\.outputs\.minor \}\}/);
-        expect(text).toMatch(/type=semver,pattern=\{\{major\}\},.*enable=\$\{\{ steps\.moving\.outputs\.major \}\}/);
-        expect(text).toMatch(/type=raw,value=latest,enable=\$\{\{ steps\.moving\.outputs\.latest \}\}/);
+        expect(text).toMatch(/type=semver,pattern=\{\{major\}\}\.\{\{minor\}\},.*enable=\$\{\{ needs\.moving-tags\.outputs\.minor \}\}/);
+        expect(text).toMatch(/type=semver,pattern=\{\{major\}\},.*enable=\$\{\{ needs\.moving-tags\.outputs\.major \}\}/);
+        expect(text).toMatch(/type=raw,value=latest,enable=\$\{\{ needs\.moving-tags\.outputs\.latest \}\}/);
     });
 
     // Issue #265
