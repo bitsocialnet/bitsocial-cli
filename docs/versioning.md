@@ -21,21 +21,29 @@ release-it picks the bump from the conventional commits since the last tag. The 
 - PRs are merged with merge commits (for example #223), so every commit on a PR branch enters the release range, not just one squashed commit. A marker in any of them counts, and so does one in the merge commit, whose body is the PR title. A PR titled "Breaking change handling for X" bumps the minor.
 - When a release upgrades pkc-js, [`ci-bin/pkc-js-changelog.ts`](../ci-bin/pkc-js-changelog.ts) copies the pkc-js changelog entries into the release notes. It runs after the version is chosen, so pkc-js breaking notes do not bump the CLI. Pasting those notes into an upgrade commit's body would.
 
+Two checks reject a marker that is not paired with `!` in the commit header, both built on [`ci-bin/breaking-change-marker.ts`](../ci-bin/breaking-change-marker.ts):
+
+- The commitlint hook ([`commitlint.config.mjs`](../commitlint.config.mjs)) refuses a commit whose body has such a line.
+- The [Commit messages](../.github/workflows/commit-messages.yml) workflow fails a pull request when its title or one of its commits has one. It runs again when the title is edited.
+
+Neither sees a merge commit message edited by hand in the merge dialog, so leave GitHub's default there.
+
 ## When a release happens
 
 1. A push to `master` that touches `src/`, `test/`, `config/`, `ci-bin/`, `.github/`, `package.json`, `package-lock.json` or `Dockerfile` runs [CI](../.github/workflows/CI.yml) on Ubuntu, Windows and macOS.
-2. When CI succeeds on `master`, **CI build** runs `npm run release -- --ci`. If there are commits since the last tag, release-it:
+2. When that CI run succeeds, **CI build** runs `npm run release -- --ci`. If there are commits since the last tag, release-it:
     - prepends the notes to [`docs/CHANGELOG.md`](CHANGELOG.md) and adds pkc-js entries when the release upgrades pkc-js. That step only warns on failure; it never fails the release.
     - regenerates the README's Commands section. It also builds the oclif manifest, but only for the npm package; the manifest is not committed.
     - commits `chore(release): <version> [skip ci]` as the release bot, tags `v<version>` and creates the GitHub release, using the new changelog section as its body.
 
     The job then publishes `@bitsocial/bitsocial-cli` to npm with provenance.
-3. The published GitHub release triggers **Docker Publish**, which builds and tests the image and pushes `ghcr.io/bitsocialnet/bitsocial-cli` with the tags `<version>`, `<major>.<minor>`, `<major>` and `latest` (for 0.19.124: `0.19.124`, `0.19`, `0`, `latest`). It can be re-run for an existing tag with `workflow_dispatch`, but every run also pushes `latest`, `<major>` and `<major>.<minor>`. Re-running it for anything but the newest release moves those tags back and downgrades operators on `latest`.
+3. The published GitHub release triggers **Docker Publish**, which builds and tests the image and pushes `ghcr.io/bitsocialnet/bitsocial-cli` with the tags `<version>`, `<major>.<minor>`, `<major>` and `latest` (for 0.19.124: `0.19.124`, `0.19`, `0`, `latest`). It can be re-run for an existing tag with `workflow_dispatch`. A run always pushes `<version>`, and pushes each of the other three only when the release is the newest one that tag stands for: `latest` for the newest release overall, `<major>` for the newest with that major, `<major>.<minor>` for the newest with that major and minor ([`ci-bin/docker-moving-tags.ts`](../ci-bin/docker-moving-tags.ts)). Re-running it for an older release therefore rebuilds that version without moving the tags operators follow. A pre-release tag only ever gets its `<version>` tag.
 
 Consequences:
 
 - Any merged change in those paths publishes a version, including test-only or CI-only changes.
 - Pushes that only touch other files, such as `docs/`, `README.md` or `AGENTS.md`, do not run CI or release. Their commits are included in the next release.
+- Only a CI run for a push to `master` can release. A pull request's CI run never does, whatever its branch is called.
 - A cancelled or failed CI run on `master` skips the release (see issue #136). The next successful run releases everything accumulated since the last tag.
 - Do not edit `version` in `package.json`, `docs/CHANGELOG.md` or the README's Commands section by hand. The release job regenerates them; change the command definitions in `src/cli/commands/` instead.
 
