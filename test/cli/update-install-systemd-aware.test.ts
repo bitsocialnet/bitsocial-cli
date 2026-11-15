@@ -5,9 +5,10 @@
 // systemd into a restart loop. After the fix, a daemon whose state file records a `supervisor` is left
 // running across the update and restarted via that supervisor (`systemctl restart`) instead.
 //
-// This test pins the safety property end-to-end without a real daemon or npm: a dummy long-lived
-// process stands in for the daemon, its state file (seeded in an isolated state dir) marks it
+// This test pins the safety property end-to-end without a real daemon or a real install: a dummy
+// long-lived process stands in for the daemon, its state file (seeded in an isolated state dir) marks it
 // systemd-managed, and we assert update install leaves it alive. The buggy code would SIGINT it.
+// `--force` with npm offline runs the stop phase, then fails the install without installing anything.
 //
 // Isolation: HOME/XDG_DATA_HOME are overridden for both the state-seeding helper and update install so
 // the command sees ONLY this dummy daemon and never touches real daemons on the machine.
@@ -34,7 +35,7 @@ const isPidAlive = (pid: number): boolean => {
 
 const runUpdateInstall = (env: Record<string, string>): Promise<{ exitCode: number | null; stdout: string; stderr: string }> =>
     new Promise((resolve, reject) => {
-        const proc = spawn("node", ["./bin/run", "update", "install", CLI_VERSION], {
+        const proc = spawn("node", ["./bin/run", "update", "install", CLI_VERSION, "--force"], {
             stdio: ["ignore", "pipe", "pipe"],
             env: { ...process.env, ...env }
         });
@@ -65,6 +66,7 @@ describe("bitsocial update install — supervised daemons (issue #82)", () => {
         { timeout: 60000 },
         async () => {
             const isolatedHome = randomDirectory();
+            const npmDir = randomDirectory();
             const env = {
                 HOME: isolatedHome,
                 XDG_DATA_HOME: path.join(isolatedHome, ".local", "share")
@@ -119,13 +121,19 @@ describe("bitsocial update install — supervised daemons (issue #82)", () => {
             });
             expect(seedResult.status, `seed stderr: ${seedResult.stderr}`).toBe(0);
 
-            // Same-version install: skips npm, but runs the full daemon stop/restart routing.
+            // Forced install with npm offline: runs the daemon stop routing, then the install fails.
             const result = await runUpdateInstall({
                 ...env,
-                PATH: `${tmpBin}:${process.env.PATH}`
+                PATH: `${tmpBin}:${process.env.PATH}`,
+                // Every registry call fails fast and nothing can be installed for real.
+                npm_config_offline: "true",
+                npm_config_cache: path.join(npmDir, "cache"),
+                npm_config_prefix: path.join(npmDir, "prefix"),
+                npm_config_update_notifier: "false"
             });
 
-            expect(result.exitCode, `update install output:\n${result.stdout}\n${result.stderr}`).toBe(0);
+            expect(result.exitCode, `update install output:\n${result.stdout}\n${result.stderr}`).toBe(1);
+            expect(result.stderr).toContain("Update failed");
 
             // The core fix: the supervised daemon was NOT stopped — it's still the same running process.
             expect(isPidAlive(dummyPid), `update install output:\n${result.stdout}\n${result.stderr}`).toBe(true);
@@ -137,7 +145,7 @@ describe("bitsocial update install — supervised daemons (issue #82)", () => {
             // root cause — that process escapes the supervisor and competes for the RPC port).
             expect(existsSync(bitsocialMarker), `update install output:\n${result.stdout}\n${result.stderr}`).toBe(false);
 
-            // Same-version is a no-op install, so no service bounce should have been triggered.
+            // The install failed, so the binary did not change: no service bounce should have been triggered.
             expect(existsSync(systemctlMarker)).toBe(false);
         }
     );

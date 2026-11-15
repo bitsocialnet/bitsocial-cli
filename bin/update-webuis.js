@@ -6,12 +6,29 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { finished as streamFinished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import decompress from "decompress";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageRoot = path.join(__dirname, "..");
 
 const dryRun = process.argv.includes("--dry-run");
+
+/**
+ * The release tag the web UI build in `webuiDir` was built from, read from its `<app>-release-manifest.json`.
+ * Undefined when the build has no readable release manifest. Mirrors readWebuiReleaseTag in bin/postinstall.js.
+ */
+async function readWebuiReleaseTag(webuiDir) {
+    const names = await fs.readdir(webuiDir).catch(() => []);
+    const manifestName = names.find((name) => name.endsWith("-release-manifest.json"));
+    if (!manifestName) return undefined;
+    try {
+        const { releaseTag } = JSON.parse(await fs.readFile(path.join(webuiDir, manifestName), "utf-8"));
+        return typeof releaseTag === "string" ? releaseTag : undefined;
+    } catch {
+        return undefined;
+    }
+}
 
 async function main() {
     const pkgPath = path.join(packageRoot, "package.json");
@@ -66,30 +83,46 @@ async function main() {
             continue;
         }
 
+        // Download the zip to a temp dir
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "update-webuis-"));
+        let newHash;
+        let releaseTag;
+        try {
+            const tmpPath = path.join(tmpDir, htmlZipAsset.name);
+            const downloadRes = await fetch(htmlZipAsset["browser_download_url"], { headers });
+            if (!downloadRes.ok || !downloadRes.body) {
+                console.warn(`Warning: Failed to download ${htmlZipAsset.name}, status ${downloadRes.status}. Skipping.`);
+                continue;
+            }
+
+            const writer = createWriteStream(tmpPath);
+            await streamFinished(Readable.fromWeb(downloadRes.body).pipe(writer));
+            writer.close();
+
+            // Compute SHA256
+            newHash = createHash("sha256").update(await fs.readFile(tmpPath)).digest("hex");
+
+            // postinstall, the fast update and the daemon only accept a build whose release manifest names
+            // the pinned tag, so a release without one must not be pinned (see docs/web-uis.md)
+            await decompress(tmpPath, tmpDir);
+            releaseTag = await readWebuiReleaseTag(path.join(tmpDir, htmlZipAsset.name.replace(".zip", "")));
+        } finally {
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+        if (releaseTag !== latestTag) {
+            const problem =
+                releaseTag === undefined
+                    ? "its build has no release manifest (<app>-release-manifest.json with a releaseTag)"
+                    : `the release manifest of its build names ${releaseTag}`;
+            console.warn(`Warning: ${repoName}: ${latestTag} cannot be pinned, because ${problem}. Keeping ${currentTag}.`);
+            continue;
+        }
+
         if (dryRun) {
             console.log(`${repoName}: ${currentTag} -> ${latestTag} (would update)`);
             updatedCount++;
             continue;
         }
-
-        // Download zip to temp dir
-        const tmpPath = path.join(os.tmpdir(), htmlZipAsset.name);
-        const downloadRes = await fetch(htmlZipAsset["browser_download_url"], { headers });
-        if (!downloadRes.ok || !downloadRes.body) {
-            console.warn(`Warning: Failed to download ${htmlZipAsset.name}, status ${downloadRes.status}. Skipping.`);
-            continue;
-        }
-
-        const writer = createWriteStream(tmpPath);
-        await streamFinished(Readable.fromWeb(downloadRes.body).pipe(writer));
-        writer.close();
-
-        // Compute SHA256
-        const fileBuffer = await fs.readFile(tmpPath);
-        const newHash = createHash("sha256").update(fileBuffer).digest("hex");
-
-        // Clean up temp file
-        await fs.rm(tmpPath);
 
         // Update entry
         entry.url = `https://github.com/${ownerRepo}/releases/tag/${latestTag}`;

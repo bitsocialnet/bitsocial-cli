@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 
 // Mock external dependencies before importing the module under test
 vi.mock("../../src/common-utils/npm.js", () => ({
@@ -19,13 +20,16 @@ import { fastInstallGlobal } from "../../src/update/fast-update.js";
 import { runNpmPack } from "../../src/common-utils/npm.js";
 import decompress from "decompress";
 
+const FAKE_ZIP_BYTES = Buffer.from("fake-webui-zip");
+const FAKE_ZIP_SHA256 = createHash("sha256").update(FAKE_ZIP_BYTES).digest("hex");
+
 const MOCK_OLD_PKG = {
     name: "@bitsocial/bitsocial-cli",
     version: "0.19.45",
     dependencies: { "dep-a": "1.0.0", "dep-b": "2.0.0" },
     webuis: [
         { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.10", sha256OfHtmlZip: "aaa" },
-        { url: "https://github.com/plebbit/plebones/releases/tag/v0.1.27", sha256OfHtmlZip: "bbb" }
+        { url: "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.2", sha256OfHtmlZip: "bbb" }
     ]
 };
 
@@ -45,11 +49,22 @@ const MOCK_NEW_PKG_CHANGED_WEBUI = {
     version: "0.19.46",
     webuis: [
         { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.11", sha256OfHtmlZip: "ccc" },
-        { url: "https://github.com/plebbit/plebones/releases/tag/v0.1.27", sha256OfHtmlZip: "bbb" }
+        { url: "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.2", sha256OfHtmlZip: "bbb" }
     ]
 };
 
+/** Write the release manifest every web UI build ships: `<app>-release-manifest.json`, naming its release tag. */
+async function writeReleaseManifest(webuiDir: string, releaseTag: string) {
+    const app = path.basename(webuiDir).split("-")[0];
+    await fs.writeFile(
+        path.join(webuiDir, `${app}-release-manifest.json`),
+        JSON.stringify({ schema: "bitsocial.release-manifest.v1", appName: app, releaseTag })
+    );
+}
+
 describe("fastInstallGlobal", () => {
+    /** `releaseTag` of the release manifest in a downloaded build, by directory name; `null` ships none. */
+    let releaseTagOfBuild: (dirName: string) => string | null;
     let tmpDir: string;
     let installRoot: string;
     let logOutput: string[];
@@ -65,11 +80,15 @@ describe("fastInstallGlobal", () => {
         await fs.mkdir(path.join(installRoot, "node_modules", "dep-a"), { recursive: true });
         await fs.writeFile(path.join(installRoot, "node_modules", "dep-a", "index.js"), "module.exports = {}");
         await fs.mkdir(path.join(installRoot, "dist", "webuis", "seedit-html-0.5.10"), { recursive: true });
-        await fs.mkdir(path.join(installRoot, "dist", "webuis", "plebones-html-0.1.27"), { recursive: true });
+        await fs.mkdir(path.join(installRoot, "dist", "webuis", "5chan-html-0.10.2"), { recursive: true });
         await fs.writeFile(
             path.join(installRoot, "dist", "webuis", "seedit-html-0.5.10", "index_backup_no_rpc.html"),
             "<html></html>"
         );
+        await fs.writeFile(path.join(installRoot, "dist", "webuis", "5chan-html-0.10.2", "index_backup_no_rpc.html"), "<html></html>");
+        await writeReleaseManifest(path.join(installRoot, "dist", "webuis", "seedit-html-0.5.10"), "v0.5.10");
+        await writeReleaseManifest(path.join(installRoot, "dist", "webuis", "5chan-html-0.10.2"), "v0.10.2");
+        releaseTagOfBuild = (dirName) => `v${dirName.split("-html-")[1]}`;
         await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify(MOCK_OLD_PKG));
         await fs.mkdir(path.join(installRoot, "bin"), { recursive: true });
         await fs.writeFile(path.join(installRoot, "bin", "run"), "#!/usr/bin/env node");
@@ -77,8 +96,29 @@ describe("fastInstallGlobal", () => {
 
     afterEach(async () => {
         vi.restoreAllMocks();
+        vi.unstubAllGlobals();
         await fs.rm(tmpDir, { recursive: true, force: true });
     });
+
+    /**
+     * Serve GitHub's release API and asset downloads: each release has one `<repo>-html-<version>.zip`
+     * asset whose bytes are FAKE_ZIP_BYTES (the decompress mock turns it into `<repo>-html-<version>/`).
+     */
+    function stubGithubReleases() {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (url: string | URL) => {
+                const href = String(url);
+                const release = href.match(/^https:\/\/api\.github\.com\/repos\/[^/]+\/([^/]+)\/releases\/tags\/v(.+)$/);
+                if (release) {
+                    const name = `${release[1]}-html-${release[2]}.zip`;
+                    return new Response(JSON.stringify({ assets: [{ name, browser_download_url: `https://downloads.test/${name}` }] }));
+                }
+                if (href.startsWith("https://downloads.test/")) return new Response(FAKE_ZIP_BYTES);
+                return new Response("not found", { status: 404 });
+            })
+        );
+    }
 
     /** Helper: set up runNpmPack and decompress mocks to extract a new package.json */
     function setupMocks(newPkg: Record<string, unknown>) {
@@ -88,7 +128,16 @@ describe("fastInstallGlobal", () => {
             return tgzPath;
         });
 
-        (vi.mocked(decompress) as any).mockImplementation(async (_input: any, output: any) => {
+        (vi.mocked(decompress) as any).mockImplementation(async (input: any, output: any) => {
+            if (String(input).endsWith(".zip")) {
+                // Simulate extracting a web UI zip into <name-without-.zip>/
+                const dir = path.join(output, path.basename(String(input), ".zip"));
+                await fs.mkdir(dir, { recursive: true });
+                await fs.writeFile(path.join(dir, "index.html"), "<html></html>");
+                const releaseTag = releaseTagOfBuild(path.basename(dir));
+                if (releaseTag !== null) await writeReleaseManifest(dir, releaseTag);
+                return [];
+            }
             // Simulate extracting the tarball — write package.json, bin/, dist/
             await fs.mkdir(path.join(output, "bin"), { recursive: true });
             await fs.mkdir(path.join(output, "dist"), { recursive: true });
@@ -139,30 +188,143 @@ describe("fastInstallGlobal", () => {
         await expect(fs.access(path.join(installRoot, "node_modules", "dep-a"))).resolves.toBeUndefined();
     });
 
-    it("preserves unchanged webuis and marks changed ones for download when only some webuis changed", async () => {
+    // A changed web UI used to be deleted before its replacement was downloaded, and a failed download
+    // was only logged: the update reported success with that web UI gone, and since later fast updates
+    // compare package.json entries only, nothing downloaded it again.
+    it("falls back to a full install and leaves the current install untouched when a changed web UI cannot be downloaded", async () => {
         setupMocks(MOCK_NEW_PKG_CHANGED_WEBUI);
+        vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network disabled in test")));
 
-        // Mock fetch for the changed webui download — just let it fail gracefully
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = vi.fn().mockRejectedValue(new Error("network disabled in test"));
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
 
-        try {
-            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+        expect(result).toBe(false);
+        expect(logOutput.some((m) => m.includes("network disabled in test"))).toBe(true);
+        // The old install, including the web UI that was about to be replaced, is still in place
+        const pkg = JSON.parse(await fs.readFile(path.join(installRoot, "package.json"), "utf-8"));
+        expect(pkg.version).toBe("0.19.45");
+        await expect(
+            fs.access(path.join(installRoot, "dist", "webuis", "seedit-html-0.5.10", "index_backup_no_rpc.html"))
+        ).resolves.toBeUndefined();
+        await expect(fs.access(path.join(installRoot, "dist", "webuis", "5chan-html-0.10.2"))).resolves.toBeUndefined();
+        await expect(fs.access(path.join(installRoot, "node_modules", "dep-a"))).resolves.toBeUndefined();
+        await expect(fs.access(installRoot + ".__fast_update_staging")).rejects.toThrow();
+    });
 
-            expect(result).toBe(true);
-            // Unchanged webui (plebones) should still be present
-            await expect(
-                fs.access(path.join(installRoot, "dist", "webuis", "plebones-html-0.1.27"))
-            ).resolves.toBeUndefined();
-            // Changed webui (seedit) directory should have been removed (old version)
-            await expect(
-                fs.access(path.join(installRoot, "dist", "webuis", "seedit-html-0.5.10"))
-            ).rejects.toThrow();
-            // Download warning should be logged (we mocked fetch to fail)
-            expect(logOutput.some((m) => m.includes("Downloading 1 changed web UI"))).toBe(true);
-        } finally {
-            globalThis.fetch = originalFetch;
-        }
+    it("downloads a changed web UI before the swap and replaces the old version", async () => {
+        const changedSeedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.11", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis: [changedSeedit, MOCK_OLD_PKG.webuis[1]] });
+        stubGithubReleases();
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        const webuisDir = path.join(installRoot, "dist", "webuis");
+        expect((await fs.readdir(webuisDir)).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.11"]);
+        await expect(fs.access(path.join(webuisDir, "seedit-html-0.5.11", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+        await expect(fs.access(path.join(webuisDir, "seedit-html-0.5.11", "index.html"))).rejects.toThrow();
+    });
+
+    it("downloads an unchanged web UI whose directory is missing from the current install", async () => {
+        // Same 5chan pin in the old and new package.json: only the disk says it is missing
+        const fivechan = { url: "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.2", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        const webuis = [MOCK_OLD_PKG.webuis[0], fivechan];
+        await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify({ ...MOCK_OLD_PKG, webuis }));
+        await fs.rm(path.join(installRoot, "dist", "webuis", "5chan-html-0.10.2"), { recursive: true });
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis });
+        stubGithubReleases();
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        expect((await fs.readdir(path.join(installRoot, "dist", "webuis"))).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.10"]);
+    });
+
+    // Older postinstalls extracted straight into dist/webuis, so an interrupted run could leave a directory
+    // without index_backup_no_rpc.html. The daemon reads that file from every web UI directory and fails to
+    // start without it, so such a directory must be downloaded again, not carried into the new install.
+    it("downloads an unchanged web UI whose directory is incomplete", async () => {
+        const fivechan = { url: "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.2", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        const webuis = [MOCK_OLD_PKG.webuis[0], fivechan];
+        await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify({ ...MOCK_OLD_PKG, webuis }));
+        await fs.rm(path.join(installRoot, "dist", "webuis", "5chan-html-0.10.2", "index_backup_no_rpc.html"));
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis });
+        stubGithubReleases();
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        const webuisDir = path.join(installRoot, "dist", "webuis");
+        expect((await fs.readdir(webuisDir)).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.10"]);
+        await expect(fs.access(path.join(webuisDir, "5chan-html-0.10.2", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+    });
+
+    // A web UI of another version than the pinned one may use other schemas than this bitsocial-cli. The
+    // release manifest every web UI build ships says which version a directory holds; the pins in the old
+    // and new package.json do not.
+    it("downloads a web UI whose installed directory is another version than its unchanged pin", async () => {
+        const seedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.10", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        const webuis = [seedit, MOCK_OLD_PKG.webuis[1]];
+        await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify({ ...MOCK_OLD_PKG, webuis }));
+        const webuisDir = path.join(installRoot, "dist", "webuis");
+        await fs.rename(path.join(webuisDir, "seedit-html-0.5.10"), path.join(webuisDir, "seedit-html-0.5.9"));
+        await writeReleaseManifest(path.join(webuisDir, "seedit-html-0.5.9"), "v0.5.9");
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis });
+        stubGithubReleases();
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        expect((await fs.readdir(webuisDir)).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.10"]);
+    });
+
+    it("downloads a web UI whose installed directory has no release manifest", async () => {
+        const seedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.10", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        const webuis = [seedit, MOCK_OLD_PKG.webuis[1]];
+        await fs.writeFile(path.join(installRoot, "package.json"), JSON.stringify({ ...MOCK_OLD_PKG, webuis }));
+        const webuisDir = path.join(installRoot, "dist", "webuis");
+        await fs.rm(path.join(webuisDir, "seedit-html-0.5.10", "seedit-release-manifest.json"));
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis });
+        stubGithubReleases();
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        await expect(fs.access(path.join(webuisDir, "seedit-html-0.5.10", "seedit-release-manifest.json"))).resolves.toBeUndefined();
+    });
+
+    it("falls back to a full install when a downloaded web UI has no release manifest", async () => {
+        const changedSeedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.11", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis: [changedSeedit, MOCK_OLD_PKG.webuis[1]] });
+        stubGithubReleases();
+        releaseTagOfBuild = () => null;
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(false);
+        expect(logOutput.some((m) => m.includes("release manifest"))).toBe(true);
+        expect((await fs.readdir(path.join(installRoot, "dist", "webuis"))).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.10"]);
+    });
+
+    it("falls back to a full install when a downloaded web UI is another version than its pin", async () => {
+        const changedSeedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.11", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis: [changedSeedit, MOCK_OLD_PKG.webuis[1]] });
+        stubGithubReleases();
+        releaseTagOfBuild = () => "v0.5.10";
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(false);
+        expect(logOutput.some((m) => m.includes("v0.5.10"))).toBe(true);
+        expect((await fs.readdir(path.join(installRoot, "dist", "webuis"))).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.10"]);
+    });
+
+    it("removes the web UI of an entry dropped from package.json", async () => {
+        setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis: [MOCK_OLD_PKG.webuis[0]] });
+
+        const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+        expect(result).toBe(true);
+        expect(await fs.readdir(path.join(installRoot, "dist", "webuis"))).toEqual(["seedit-html-0.5.10"]);
     });
 
     it("cleans up leftover staging dir from interrupted previous update", async () => {
@@ -220,6 +382,80 @@ describe("fastInstallGlobal", () => {
         await expect(
             fs.access(path.join(installRoot, "node_modules", "dep-a"))
         ).resolves.toBeUndefined();
+    });
+
+    // After dist/webuis is moved into staging, a failed step used to leave the live install without it:
+    // the rollback deleted staging, web UIs included. When the npm fallback of `update install` then also
+    // fails, the stopped daemons are re-spawned on that install and cannot start without dist/webuis.
+    describe("rollback after the web UIs were moved into staging", () => {
+        const changedSeedit = { url: "https://github.com/plebbit/seedit/releases/tag/v0.5.11", sha256OfHtmlZip: FAKE_ZIP_SHA256 };
+
+        /** Make the first fs.rename call that matches `shouldFail` throw EPERM, as Windows can */
+        function failRename(shouldFail: (oldPath: string, newPath: string) => boolean) {
+            const originalRename = fs.rename;
+            let failed = false;
+            vi.spyOn(fs, "rename").mockImplementation(async (oldPath, newPath) => {
+                if (!failed && shouldFail(String(oldPath), String(newPath))) {
+                    failed = true;
+                    throw Object.assign(new Error("EPERM: simulated rename failure"), { code: "EPERM" });
+                }
+                return originalRename(oldPath, newPath);
+            });
+        }
+
+        async function expectOldInstallIntact() {
+            const pkg = JSON.parse(await fs.readFile(path.join(installRoot, "package.json"), "utf-8"));
+            expect(pkg.version).toBe("0.19.45");
+            await expect(fs.access(path.join(installRoot, "node_modules", "dep-a", "index.js"))).resolves.toBeUndefined();
+            const webuisDir = path.join(installRoot, "dist", "webuis");
+            expect((await fs.readdir(webuisDir)).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.10"]);
+            await expect(fs.access(path.join(webuisDir, "seedit-html-0.5.10", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+            await expect(fs.access(path.join(webuisDir, "5chan-html-0.10.2", "index_backup_no_rpc.html"))).resolves.toBeUndefined();
+            for (const suffix of [".__fast_update_staging", ".__fast_update_backup", ".__fast_update_dropped_webuis"]) {
+                await expect(fs.access(installRoot + suffix)).rejects.toThrow();
+            }
+        }
+
+        beforeEach(() => {
+            setupMocks({ ...MOCK_OLD_PKG, version: "0.19.46", webuis: [changedSeedit, MOCK_OLD_PKG.webuis[1]] });
+            stubGithubReleases();
+        });
+
+        it("puts the installed web UIs back when a downloaded web UI cannot be moved into place", async () => {
+            failRename((oldPath) => path.basename(path.dirname(oldPath)) === ".webuis-download");
+
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(false);
+            await expectOldInstallIntact();
+        });
+
+        it("puts the installed web UIs back when the current install cannot be moved aside", async () => {
+            failRename((oldPath, newPath) => oldPath === installRoot && newPath === installRoot + ".__fast_update_backup");
+
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(false);
+            await expectOldInstallIntact();
+        });
+
+        it("restores the whole install when the staged install cannot be moved into place", async () => {
+            failRename((oldPath, newPath) => oldPath === installRoot + ".__fast_update_staging" && newPath === installRoot);
+
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(false);
+            await expectOldInstallIntact();
+        });
+
+        it("leaves no holding directory behind after a successful update", async () => {
+            const result = await fastInstallGlobal("0.19.46", installRoot, log);
+
+            expect(result).toBe(true);
+            const webuisDir = path.join(installRoot, "dist", "webuis");
+            expect((await fs.readdir(webuisDir)).sort()).toEqual(["5chan-html-0.10.2", "seedit-html-0.5.11"]);
+            await expect(fs.access(installRoot + ".__fast_update_dropped_webuis")).rejects.toThrow();
+        });
     });
 
     it("returns false when runNpmPack fails", async () => {
