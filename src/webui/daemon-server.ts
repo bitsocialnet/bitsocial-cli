@@ -15,7 +15,11 @@ import { whyWebuiDirDoesNotMatchPins, type WebuiPin } from "./release-manifest.j
 const rootHashRedirectScriptPattern =
     /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?window\.location\.replace\(["']\/#["']\s*\+\s*window\.location\.pathname\s*\+\s*window\.location\.search\);(?:(?!<\/script>)[\s\S])*?<\/script>/;
 
-async function _generateModifiedIndexHtmlWithRpcSettings(webuiPath: string, webuiName: string, ipfsGatewayPort: number) {
+// A web UI may spell its doctype in any case (`<!doctype html>` is what Vite scaffolds), so match it
+// case-insensitively. Otherwise the original doctype would stay in the page after the injected script.
+const doctypePattern = /<!doctype html>/i;
+
+export async function _generateModifiedIndexHtmlWithRpcSettings(webuiPath: string, webuiName: string, ipfsGatewayPort: number) {
     const indexHtmlString = (await fs.readFile(path.join(webuiPath, "index_backup_no_rpc.html")))
         .toString()
         .replace(rootHashRedirectScriptPattern, "");
@@ -24,7 +28,7 @@ async function _generateModifiedIndexHtmlWithRpcSettings(webuiPath: string, webu
     const defaultIpfsMedia = `if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname === "0.0.0.0")window.defaultMediaIpfsGatewayUrl = 'http://' + window.location.hostname + ':' + ${ipfsGatewayPort}`;
     const defaultOptionsString = `<script>window.defaultPkcOptions = {pkcRpcClientsOptions: ${defaultRpcOptionString}};${defaultIpfsMedia};console.log(window.defaultPkcOptions, window.defaultMediaIpfsGatewayUrl)</script>`;
 
-    const modifiedIndexHtmlContent = "<!DOCTYPE html>" + defaultOptionsString + indexHtmlString.replace("<!DOCTYPE html>", "");
+    const modifiedIndexHtmlContent = "<!DOCTYPE html>" + defaultOptionsString + indexHtmlString.replace(doctypePattern, "");
 
     return modifiedIndexHtmlContent;
 }

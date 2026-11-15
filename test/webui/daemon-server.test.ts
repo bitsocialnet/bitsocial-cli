@@ -4,7 +4,7 @@ import http from "http";
 import path from "path";
 import net from "net";
 import { directory as randomDirectory } from "tempy";
-import { startDaemonServer } from "../../dist/webui/daemon-server.js";
+import { startDaemonServer, _generateModifiedIndexHtmlWithRpcSettings } from "../../dist/webui/daemon-server.js";
 
 // Intercept the PKCWsServer constructor so the plumbing tests below can assert the exact
 // options startDaemonServer passes to it, without booting a real pkc instance.
@@ -196,6 +196,22 @@ describe("local webui route Host handling", () => {
     it.each(["localhost", "127.0.0.1", "[::1]", "app.localhost"])("serves the page for a local request with Host %s", async (hostname) => {
         const { status } = await getWithHost("/seedit/", `${hostname}:${boundPort}`);
         expect(status).toBe(200);
+    });
+});
+
+// The RPC settings script is injected right after the doctype. The original doctype used to be removed
+// with an exact, uppercase-only match, so a web UI shipping `<!doctype html>` kept a second doctype
+// after the injected script.
+describe("RPC settings injection into a web UI's index.html", () => {
+    it.each(["<!DOCTYPE html>", "<!doctype html>", "<!DocType HTML>"])("leaves a single doctype when the web UI ships %s", async (doctype) => {
+        const webuiPath = randomDirectory();
+        await fs.writeFile(path.join(webuiPath, "index_backup_no_rpc.html"), `${doctype}\n<html><head></head><body></body></html>`);
+
+        const html = await _generateModifiedIndexHtmlWithRpcSettings(webuiPath, "bitbones", 6473);
+
+        expect(html.startsWith("<!DOCTYPE html><script>window.defaultPkcOptions")).toBe(true);
+        expect(html.match(/<!doctype/gi)).toHaveLength(1);
+        expect(html.endsWith("<html><head></head><body></body></html>")).toBe(true);
     });
 });
 
