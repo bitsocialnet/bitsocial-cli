@@ -32,7 +32,7 @@ bitsocial page-sort install ./my-local-page-sort
 Two names matter:
 
 - **Package name** (`@pkcprotocol/active-page-sort`): the key in `PKC.pageSorts`, and what `settings.pages.posts[i].name` refers to.
-- **`sortName`** (e.g. `active`): declared by the package itself. It is the key the community publishes pages under in `pageCids`, so it is what clients and frontends ask for.
+- **`sortName`** (e.g. `active`): declared by the package itself. It is the key the community publishes pages under in `pageCids`, so it is what clients and frontends ask for. A `settings.pages` entry can replace it with its own `sortName` (pkc-js 0.0.143 and later); see [Using a page sort in a community](#using-a-page-sort-in-a-community).
 
 They need not match. `list` shows both:
 
@@ -52,7 +52,7 @@ Warning: @scope/my-sort changed its sortName from "active" to "activity". Commun
 these pages under "activity", and clients asking for "active" will not find them.
 ```
 
-pkc-js accepts the new name, but every community using the package switches the `pageCids` key on its next update, so frontends hard-coded to the old key stop finding the pages. Pin the previous version (`install <name>@<old version>`) if that is not intended. A previous install that no longer loads is not compared and does not block the upgrade.
+pkc-js accepts the new name, but every community using the package switches the `pageCids` key on its next update, so frontends hard-coded to the old key stop finding the pages. An entry that sets its own `sortName` keeps its key. The warning does not check for that. Pin the previous version (`install <name>@<old version>`) if that is not intended. A previous install that no longer loads is not compared and does not block the upgrade.
 
 ## What install validates
 
@@ -87,6 +87,7 @@ Fields of each entry:
 | --- | --- |
 | `name` | Key in `PKC.pageSorts`: a built-in or an installed package name |
 | `path` | Alternative to `name`: path to a page sort JS file |
+| `sortName` | Key to publish the pages under, instead of the sort's own `sortName`. Must be unique within the scope, so one sort can be listed twice with different options under two keys. Changing it drops the old key |
 | `options` | Passed to the sort. `maxAge` (`"7d"`, `"2w"`), `pinnedFirst` and the `exclude*` flags are reserved options every sort accepts |
 | `preloaded` | Embed the first page in the record. The first preloaded entry is the client's default sort |
 | `privateOptions` | Option names withheld from the public `community.pageSorts`. Reserved options cannot be private |
