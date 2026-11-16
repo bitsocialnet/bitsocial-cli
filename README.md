@@ -11,7 +11,6 @@
 -   [What is Bitsocial?](#what-is-bitsocial)
 -   [What is bitsocial-cli?](#what-is-bitsocial-cli)
 -   [Install](#install)
--   [Use 5chan in your normal browser](#use-5chan-in-your-normal-browser)
 -   [Docker](#docker)
 -   [Usage](#usage)
 -   [Commands](#commands)
@@ -66,16 +65,6 @@ npm run ci:download-web-uis
 ```
 
 After running the last command you should be able to run commands directly against `./bin/run`, for example `./bin/run daemon`
-
-## Use 5chan in your normal browser
-
-`bitsocial-cli` includes the 5chan Web UI. If you want to run the full P2P Bitsocial/IPFS node but open 5chan in your normal browser, start the daemon:
-
-```sh-session
-bitsocial daemon
-```
-
-The daemon prints a `WebUI (5chan - Imageboard-style UI)` URL. Open that URL in your browser to use 5chan through your local node. You do not need the separate 5chan desktop app or a local checkout of the 5chan repository.
 
 ## Docker
 
@@ -255,7 +244,7 @@ WebUI (seedit - Similar to old reddit UI): http://192.168.1.60:9138/MHA1tm2QWG19
 
 ```
 
-Once `bitsocial daemon` is running, you can create and manage your communities through the web interfaces, either seedit or 5chan. All the interfaces are interoperable. If you're a power user and prefer CLI, then you can take a look at the commands below.
+Once `bitsocial daemon` is running, open one of the printed WebUI URLs in your normal browser to browse the network and to create and manage your communities, through either seedit or 5chan. You don't need the separate 5chan or Seedit desktop apps: the daemon runs the full P2P node and serves the web UIs itself. All the interfaces are interoperable. If you're a power user and prefer CLI, then you can take a look at the commands below.
 
 If you need to view detailed protocol or IPFS logs for debugging, you can use `bitsocial logs`. For example, `bitsocial logs --tail 50` shows the last 50 lines, or `bitsocial logs --since 1h` shows logs from the past hour.
 
