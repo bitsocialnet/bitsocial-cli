@@ -28,7 +28,7 @@ Bitsocial is p2p and decentralized social media protocol built completely with I
 -   Runs an IPFS and Bitsocial node
 -   Command Line interface to manage Bitsocial communities
 -   WebSocket RPC to access and control your communities and publications
--   Includes Web UIs like Seedit where you can browse the network and manage your community
+-   Includes Web UIs like 5chan and Seedit where you can browse the network and manage your community
 
 ## Install
 
@@ -108,10 +108,11 @@ The output will include lines like:
 
 ```
 pkc rpc: listening on ws://localhost:9138/<auth-key> (secret auth key for remote connections)
+WebUI (5chan - Imageboard-style UI): http://<your-ip>:9138/<auth-key>/5chan (secret auth key for remote connections)
 WebUI (seedit - Similar to old reddit UI): http://<your-ip>:9138/<auth-key>/seedit (secret auth key for remote connections)
 ```
 
-Open the WebUI URL in your browser to start using Bitsocial.
+Open the 5chan or Seedit WebUI URL in your browser to start using Bitsocial.
 
 #### Viewing logs
 
@@ -243,7 +244,7 @@ WebUI (seedit - Similar to old reddit UI): http://192.168.1.60:9138/MHA1tm2QWG19
 
 ```
 
-Once `bitsocial daemon` is running, you can create and manage your communities through the web interfaces, either seedit or 5chan. All the interfaces are interoperable. If you're a power user and prefer CLI, then you can take a look at the commands below.
+Once `bitsocial daemon` is running, open one of the printed WebUI URLs in your normal browser to browse the network and to create and manage your communities, through either seedit or 5chan. You don't need the separate 5chan or Seedit desktop apps: the daemon runs the full P2P node and serves the web UIs itself. All the interfaces are interoperable. If you're a power user and prefer CLI, then you can take a look at the commands below.
 
 If you need to view detailed protocol or IPFS logs for debugging, you can use `bitsocial logs`. For example, `bitsocial logs --tail 50` shows the last 50 lines, or `bitsocial logs --since 1h` shows logs from the past hour.
 
