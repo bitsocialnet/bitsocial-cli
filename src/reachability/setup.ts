@@ -391,8 +391,10 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     const servedByUs = previous?.enabled && previous.announce.length > (previous.externalAnnounce?.length ?? 0) ? previous : undefined;
     // --announce names an address something else terminates, so it needs no certificate of ours and none of what one
     // takes: the Caddy download, TCP 443 and a Let's Encrypt order (#260). A node already serving its own addresses
-    // still goes through the attempt, which is how they stay announced.
-    const skipsOwnCertificates = options.announce !== undefined && options.domain === undefined && !servedByUs;
+    // still goes through the attempt, which is how they stay announced. So does one holding a name of its own that
+    // the daemon dropped: the daemon announces it again on recovery, and skipping would remove its site.
+    const holdsDroppedOwnName = (previous?.droppedAnnounce ?? []).some((address) => !previous?.externalAnnounce?.includes(address));
+    const skipsOwnCertificates = options.announce !== undefined && options.domain === undefined && !servedByUs && !holdsDroppedOwnName;
 
     const { publicIps, refused, sawCgnat } = await discoverPublicIps(options, deps, previous?.announce);
     if (publicIps.length > 0) deps.log(`Public addresses: ${publicIps.join(", ")}`);
@@ -589,6 +591,17 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         if (!deps.confirm) throw new NeedsAnswerError(`Set up the reverse proxy above, then rerun setup with --announce. kubo is listening on 127.0.0.1:${wsPort}.`);
         return config;
     }
+    // Before the branches on what was found: a forced domain is tried with no public address too.
+    if (bindDenied) {
+        deps.warn(noWssStatement(BIND_DENIED_REASON));
+        // The permission is the direct fix, so it comes first. The config is already written, so the ws port in
+        // the steps below is the one a later --announce finds (#260).
+        deps.warn(bindDenied.guidance);
+        deps.log("If you cannot grant that permission, the following needs none:");
+        deps.log(tailscaleFunnelGuidance(wsPort, deps.inContainer));
+        if (!bindDenied.declined) throw new NeedsAnswerError("Caddy may not bind TCP 443, so this node has no WSS address yet. Follow one of the two routes printed above.");
+        return config;
+    }
     if (publicIps.length === 0) {
         const reason = sawCgnat ? "this network is behind carrier-grade NAT and has no global IPv6" : "no public IPv4 or global IPv6 address was found";
         deps.warn(unreachableStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
@@ -603,13 +616,6 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     }
     const reason = failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443";
     deps.warn(noWssStatement(refused.length > 0 ? `${reason}; the router refused ${refused.join(", ")}` : reason));
-    if (bindDenied) {
-        // The permission is the direct fix on a machine with a public address, so it comes first. The config is
-        // already written, so the ws port in the steps below is the one a later --announce finds (#260).
-        deps.warn(bindDenied.guidance);
-        deps.log("If you cannot grant that permission, the following needs none:");
-    }
     deps.log(tailscaleFunnelGuidance(wsPort, deps.inContainer));
-    if (bindDenied && !bindDenied.declined) throw new NeedsAnswerError("Caddy may not bind TCP 443, so this node has no WSS address yet. Follow one of the two routes printed above.");
     return config;
 }

@@ -56,9 +56,10 @@ An `--announce` address is served by something else, so it does not depend on th
 
 | Node when `setup --announce` runs | Step 4 |
 | --- | --- |
-| Serves no WSS address of its own, and no `--domain` on this run | Skipped. Caddy is not downloaded or started, nothing is ordered from Let's Encrypt, and the requirement lines about TCP 443, TCP 80 and a firewall closing TCP 443 are left out. Only the `--announce` address is announced. `setup` names the public addresses it found and says a plain `setup` can add them later |
+| Serves no WSS address of its own, holds no name of its own that the daemon dropped, and no `--domain` on this run | Skipped. Caddy is not downloaded or started, nothing is ordered from Let's Encrypt, and the requirement lines about TCP 443, TCP 80 and a firewall closing TCP 443 are left out. Only the `--announce` address is announced. `setup` names the public addresses it found and says a plain `setup` can add them later |
 | `--domain` passed on this run | Runs. If Caddy may not bind TCP 443, `setup` warns with the fix, does not ask for `sudo`, and goes on to the handshake |
 | Already serves a WSS address of its own | Runs, which is what keeps that address announced. If it gets no certificate, bind permission included, the run is refused and nothing changes. To give up the node's own address for the proxied one, run `disable --purge`, then `setup --announce ...` |
+| Holds a name of its own that the daemon dropped (see [Stale names](#what-the-daemon-does)) | Runs, so the name keeps its Caddy site for when the daemon announces it again. A bind denial is a warning, as with `--domain` |
 
 ## Choosing a path
 

@@ -628,6 +628,47 @@ describe("a setup run that cannot issue any certificate", () => {
             expect(warnings.join("\n")).toContain("setcap");
         });
 
+        it("with a forced domain and no public address: still gives the bind fix and needs an answer", async () => {
+            const { options, deps, logs, warnings, caddy } = await prepareDenied();
+            const error = await runReachabilitySetup(options({ domain: "node.example", force: true, overrides: { publicIps: [], wsPort: 4002 } }), deps).catch((caught) => caught);
+            expect(await caddy.started()).toBe(true);
+            expect(error).toBeInstanceOf(NeedsAnswerError);
+            expect(warnings.join("\n")).toContain("Caddy has no permission to bind TCP 443");
+            expect(warnings.join("\n")).toContain("setcap");
+            expect(warnings.join("\n")).not.toContain("no public IPv4");
+            expect(logs.join("\n")).toContain(FUNNEL);
+        });
+
+        // The daemon announces a dropped name again when its DNS recovers, without touching the Caddyfile, so the
+        // name's site has to survive an --announce run.
+        it("--announce on a node whose own domain the daemon dropped: does not skip the certificate step that keeps its site", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const dropped = "/dns4/node.example/tcp/443/tls/ws";
+                const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+                const { options, deps, caddyRequested } = await prepareDenied(
+                    servingNode({ mode: "reverse-proxy", publicIps: [], announce: [proxied], externalAnnounce: [proxied], domain: "node.example", droppedAnnounce: [dropped] })
+                );
+                const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
+                await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, resolveDomain });
+                expect(caddyRequested()).toBe(true);
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("--announce on a node that dropped only a proxied name: still skips the certificate step", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+                const { options, deps, caddyRequested } = await prepareDenied(servingNode({ mode: "webtransport-only", publicIps: [], announce: [], externalAnnounce: [proxied], droppedAnnounce: [proxied] }));
+                await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), deps);
+                expect(caddyRequested()).toBe(false);
+            } finally {
+                await rpc.close();
+            }
+        });
+
         it("in a container: gives the compose fix, never sudo", async () => {
             const { options, deps, logs, warnings } = await prepareDenied();
             await expect(runReachabilitySetup(options(WITH_PUBLIC_IP), { ...deps, inContainer: true })).rejects.toBeInstanceOf(NeedsAnswerError);
