@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.142 (2026-11-16)</small>
+
+* test(logs): read the debug namespace from a command's stderr, not the daemon log ([06df245](https://github.com/bitsocialnet/bitsocial-cli/commit/06df245))
+* fix(logs): keep a _PKC_DEBUG that is already set when DEBUG is set too ([5645643](https://github.com/bitsocialnet/bitsocial-cli/commit/5645643))
+* fix(logs): pass DEBUG on to the CLI under the name it reads ([749d470](https://github.com/bitsocialnet/bitsocial-cli/commit/749d470))
+
 ## <small>0.19.141 (2026-11-16)</small>
 
 * docs: add daemon, kubo, logs, update and data path docs ([b0899af](https://github.com/bitsocialnet/bitsocial-cli/commit/b0899af))
