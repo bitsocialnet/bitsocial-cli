@@ -143,15 +143,17 @@ describe("setupDebugLogger", () => {
 // bin/run strips DEBUG before oclif loads (so the debug module does not print to stderr on its own) and hands
 // it to the CLI under another name. That name has to be the one the CLI reads (issue #271).
 describe("DEBUG passed through bin/run", () => {
-    it("reaches the daemon as its debug namespace", { timeout: 60000 }, async () => {
-        // An occupied RPC port makes the daemon exit right after it logged its namespace, before it touches kubo.
+    // An occupied RPC port makes the daemon exit right after it logged its namespace, before it touches kubo.
+    const daemonLogWithEnv = async (debugEnv: { DEBUG?: string; _PKC_DEBUG?: string }): Promise<string> => {
         const occupied = createServer();
         await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
         const port = (occupied.address() as AddressInfo).port;
         const logPath = await fsPromise.mkdtemp(path.join(os.tmpdir(), "bitsocial-debug-env-"));
         try {
-            const env: NodeJS.ProcessEnv = { ...process.env, DEBUG: "bitsocial-cli:daemon" };
+            const env: NodeJS.ProcessEnv = { ...process.env };
+            delete env["DEBUG"];
             delete env["_PKC_DEBUG"];
+            Object.assign(env, debugEnv);
             await new Promise<void>((resolve, reject) => {
                 const proc = spawn("node", ["./bin/run", "daemon", "--pkcRpcUrl", `ws://127.0.0.1:${port}`, "--logPath", logPath], {
                     env,
@@ -162,11 +164,20 @@ describe("DEBUG passed through bin/run", () => {
             });
             const logFiles = await fsPromise.readdir(logPath);
             expect(logFiles).toHaveLength(1);
-            const log = await fsPromise.readFile(path.join(logPath, logFiles[0]), "utf-8");
-            expect(log).toContain('Debug logs is on with namespace "bitsocial-cli:daemon"');
+            return await fsPromise.readFile(path.join(logPath, logFiles[0]), "utf-8");
         } finally {
             await new Promise<void>((resolve) => occupied.close(() => resolve()));
             await fsPromise.rm(logPath, { recursive: true, force: true });
         }
+    };
+
+    it("reaches the daemon as its debug namespace", { timeout: 60000 }, async () => {
+        const log = await daemonLogWithEnv({ DEBUG: "bitsocial-cli:daemon" });
+        expect(log).toContain('Debug logs is on with namespace "bitsocial-cli:daemon"');
+    });
+
+    it("does not replace a _PKC_DEBUG that is already set", { timeout: 60000 }, async () => {
+        const log = await daemonLogWithEnv({ DEBUG: "pkc*", _PKC_DEBUG: "bitsocial-cli:daemon" });
+        expect(log).toContain('Debug logs is on with namespace "bitsocial-cli:daemon"');
     });
 });
