@@ -1,5 +1,36 @@
 # Changelog
 
+## <small>0.19.141 (2026-11-16)</small>
+
+* docs: add daemon, kubo, logs, update and data path docs ([b0899af](https://github.com/bitsocialnet/bitsocial-cli/commit/b0899af))
+* docs(docker): use the PKC env var names in the compose examples ([925b11c](https://github.com/bitsocialnet/bitsocial-cli/commit/925b11c))
+* docs(page-sorts): describe the per-entry sortName that pkc-js 0.0.143 added ([dbc247d](https://github.com/bitsocialnet/bitsocial-cli/commit/dbc247d))
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.148 ([8e59150](https://github.com/bitsocialnet/bitsocial-cli/commit/8e59150))
+  * pkc-js [0.0.148](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.148) (2026-11-16)
+    * fix(community): ignore forged challenge messages, rate-limit per community, unpin raced approvals ([#523](https://github.com/pkcprotocol/pkc-js/issues/523)) ([8ef97a1](https://github.com/pkcprotocol/pkc-js/commit/8ef97a15ef4937024c158de68645b75d7df3fb16))
+  * pkc-js [0.0.147](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.147) (2026-11-16)
+    * fix(community): stop on a lost start lock, atomic table migration, no deferred delete of a live DB ([#521](https://github.com/pkcprotocol/pkc-js/issues/521)) ([3b01e27](https://github.com/pkcprotocol/pkc-js/commit/3b01e27640cb9444913d72fd1ff50a6b291cb9d8))
+    * fix: retry failed CommentUpdate lookups, undo failed renames, fix flaky state and modqueue tests ([#544](https://github.com/pkcprotocol/pkc-js/issues/544)) ([2cc042c](https://github.com/pkcprotocol/pkc-js/commit/2cc042cb7b3a9c0a61a7800299bf172a888e0e02)), closes [#515](https://github.com/pkcprotocol/pkc-js/issues/515) [#514](https://github.com/pkcprotocol/pkc-js/issues/514) [#513](https://github.com/pkcprotocol/pkc-js/issues/513) [#497](https://github.com/pkcprotocol/pkc-js/issues/497) [#540](https://github.com/pkcprotocol/pkc-js/issues/540) [#540](https://github.com/pkcprotocol/pkc-js/issues/540) [#514](https://github.com/pkcprotocol/pkc-js/issues/514) [#514](https://github.com/pkcprotocol/pkc-js/issues/514) [#543](https://github.com/pkcprotocol/pkc-js/issues/543) [#540](https://github.com/pkcprotocol/pkc-js/issues/540) [#543](https://github.com/pkcprotocol/pkc-js/issues/543) [#543](https://github.com/pkcprotocol/pkc-js/issues/543)
+  * pkc-js [0.0.146](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.146) (2026-11-15)
+    * fix(community): order overlapping start(), stop() and update() calls, store edits at once ([#527](https://github.com/pkcprotocol/pkc-js/issues/527)) ([7971c56](https://github.com/pkcprotocol/pkc-js/commit/7971c56109ac9f474634eb4c3176c8bb8b34bd39)), closes [#516](https://github.com/pkcprotocol/pkc-js/issues/516)
+    * fix(publication): report a silent challenge deadline as a missing response, not provider errors ([#552](https://github.com/pkcprotocol/pkc-js/issues/552)) ([7b090d3](https://github.com/pkcprotocol/pkc-js/commit/7b090d321be9287f802779546e29e58b56ca3646)), closes [#362](https://github.com/pkcprotocol/pkc-js/issues/362)
+  * pkc-js [0.0.145](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.145) (2026-11-15)
+  * pkc-js [0.0.144](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.144) (2026-11-13)
+    * fix(pkc): deliver shared resolves and fetches to every caller, start gateway timeouts per request ([#536](https://github.com/pkcprotocol/pkc-js/issues/536)) ([b9405ff](https://github.com/pkcprotocol/pkc-js/commit/b9405ff1c79bd25c5bd754e22a898dee5e450b07)), closes [#353](https://github.com/pkcprotocol/pkc-js/issues/353)
+  * pkc-js [0.0.143](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.143) (2026-11-13)
+    * feat(community): let a settings.pages entry choose its wire key ([#483](https://github.com/pkcprotocol/pkc-js/issues/483)) ([#538](https://github.com/pkcprotocol/pkc-js/issues/538)) ([6a1c5ff](https://github.com/pkcprotocol/pkc-js/commit/6a1c5ffe7ade88ac544695ab822eed34b0491940))
+    * perf(community): make the author cascade cheap on one-author boards ([#471](https://github.com/pkcprotocol/pkc-js/issues/471)) ([#494](https://github.com/pkcprotocol/pkc-js/issues/494)) ([4a916e8](https://github.com/pkcprotocol/pkc-js/commit/4a916e881c8f21b98558bf3e72ab6845519a0cab))
+  * pkc-js [0.0.142](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.142) (2026-11-10)
+    * fix: stop leaking publications, RPC communities and SQLite statements; add leak suite and soak ([#503](https://github.com/pkcprotocol/pkc-js/issues/503)) ([bb1a124](https://github.com/pkcprotocol/pkc-js/commit/bb1a124d3e7e0fa75c85c13c5bbc364733e02df2)), closes [#488](https://github.com/pkcprotocol/pkc-js/issues/488) [#490](https://github.com/pkcprotocol/pkc-js/issues/490) [#496](https://github.com/pkcprotocol/pkc-js/issues/496) [#488](https://github.com/pkcprotocol/pkc-js/issues/488) [#490](https://github.com/pkcprotocol/pkc-js/issues/490) [#488](https://github.com/pkcprotocol/pkc-js/issues/488) [#490](https://github.com/pkcprotocol/pkc-js/issues/490) [#488](https://github.com/pkcprotocol/pkc-js/issues/488) [#496](https://github.com/pkcprotocol/pkc-js/issues/496) [#496](https://github.com/pkcprotocol/pkc-js/issues/496) [#490](https://github.com/pkcprotocol/pkc-js/issues/490) [#502](https://github.com/pkcprotocol/pkc-js/issues/502) [#502](https://github.com/pkcprotocol/pkc-js/issues/502)
+  * pkc-js [0.0.141](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.141) (2026-11-10)
+  * pkc-js [0.0.140](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.140) (2026-11-10)
+    * fix(community): measure a page's DAG size as one file when chunking, not per entry ([#504](https://github.com/pkcprotocol/pkc-js/issues/504)) ([#510](https://github.com/pkcprotocol/pkc-js/issues/510)) ([54ad72e](https://github.com/pkcprotocol/pkc-js/commit/54ad72e415490294ac0475db52aa82ae2b61bc77))
+  * pkc-js [0.0.139](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.139) (2026-11-10)
+    * feat(helia): dial seeders over WebTransport from browsers, private-only providers last ([#492](https://github.com/pkcprotocol/pkc-js/issues/492)) ([de66d90](https://github.com/pkcprotocol/pkc-js/commit/de66d90bfbc61fafc6e0e97027c2fb65623542e8)), closes [#166](https://github.com/pkcprotocol/pkc-js/issues/166) [#475](https://github.com/pkcprotocol/pkc-js/issues/475) [#495](https://github.com/pkcprotocol/pkc-js/issues/495) [#475](https://github.com/pkcprotocol/pkc-js/issues/475)
+  * pkc-js [0.0.138](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.138) (2026-11-09)
+    * fix(ci): release only after a push to master, not a fork PR's CI run ([#501](https://github.com/pkcprotocol/pkc-js/issues/501)) ([f8baf41](https://github.com/pkcprotocol/pkc-js/commit/f8baf41645579494427af1776f3a76e46f4e7464))
+  * pkc-js [0.0.137](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.137) (2026-11-09)
+
 ## <small>0.19.140 (2026-11-16)</small>
 
 * fix(reachability): don't let Caddy's bind permission block --announce or hide the Funnel steps ([4e1c82e](https://github.com/bitsocialnet/bitsocial-cli/commit/4e1c82e))
