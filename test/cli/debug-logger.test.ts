@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { spawn } from "node:child_process";
+import { createServer, type AddressInfo } from "node:net";
 import { PKCLogger, setupDebugLogger, type PKCLoggerType } from "../../dist/util.js";
 
 describe("setupDebugLogger", () => {
@@ -132,5 +134,48 @@ describe("setupDebugLogger", () => {
 
         expect(result.debugNamespace).toBeUndefined();
         expect(Logger.enabled("bitsocial-cli")).toBe(false);
+    });
+});
+
+// bin/run strips DEBUG before oclif loads (so the debug module does not print to stderr on its own) and hands
+// it to the CLI under another name. That name has to be the one the CLI reads (issue #271).
+describe("DEBUG passed through bin/run", () => {
+    const namespace = "bitsocial-cli:commands:community:list";
+
+    // `community list` logs its flags under that namespace before it connects, straight to stderr. Nothing listens
+    // on the port, so the command would only fail after its connection timeout: stop it once the line is there.
+    const stderrOfCommunityList = async (debugEnv: { DEBUG?: string; _PKC_DEBUG?: string }): Promise<string> => {
+        const unused = createServer();
+        await new Promise<void>((resolve) => unused.listen(0, "127.0.0.1", resolve));
+        const port = (unused.address() as AddressInfo).port;
+        await new Promise<void>((resolve) => unused.close(() => resolve()));
+
+        const env: NodeJS.ProcessEnv = { ...process.env };
+        delete env["DEBUG"];
+        delete env["_PKC_DEBUG"];
+        Object.assign(env, debugEnv);
+        const proc = spawn("node", ["./bin/run", "community", "list", "--pkcRpcUrl", `ws://127.0.0.1:${port}`], {
+            env,
+            stdio: ["ignore", "ignore", "pipe"]
+        });
+        let stderr = "";
+        await new Promise<void>((resolve, reject) => {
+            proc.once("error", reject);
+            proc.once("exit", () => resolve());
+            proc.stderr.on("data", (data: Buffer) => {
+                stderr += data.toString();
+                if (stderr.includes(namespace)) resolve();
+            });
+        });
+        proc.kill("SIGKILL");
+        return stderr;
+    };
+
+    it("reaches the CLI as its debug namespace", { timeout: 60000 }, async () => {
+        expect(await stderrOfCommunityList({ DEBUG: namespace })).toContain(namespace);
+    });
+
+    it("does not replace a _PKC_DEBUG that is already set", { timeout: 60000 }, async () => {
+        expect(await stderrOfCommunityList({ DEBUG: "some-other-namespace", _PKC_DEBUG: namespace })).toContain(namespace);
     });
 });
