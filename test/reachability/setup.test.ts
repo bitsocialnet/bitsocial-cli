@@ -18,6 +18,7 @@ import {
     domainAnnounceAddress,
     domainPointsHere,
     existingLoopbackWsPort,
+    NeedsAnswerError,
     runReachabilitySetup,
     SetupRefusedError,
     type SetupDependencies,
@@ -305,6 +306,18 @@ describe("a setup run that cannot issue any certificate", () => {
         return { options, deps, warnings, logs, dialed, snapshot };
     };
 
+    const kuboRpc = async () => {
+        // Stops answering for a moment after a shutdown request, as a kubo being restarted does, so setup does not wait for it.
+        let downUntil = 0;
+        const server = http.createServer((request, response) => {
+            if (request.url?.includes("/shutdown")) downUntil = Date.now() + 300;
+            else if (Date.now() < downUntil) return void response.writeHead(503).end();
+            response.end(JSON.stringify({ ID: "peer", Addresses: [], Strings: [] }));
+        });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        return { url: new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v0`), close: () => new Promise((resolve) => server.close(resolve)) };
+    };
+
     it("leaves a node serving WSS as it was when its address moved", async () => {
         const { options, deps, warnings, snapshot } = await prepare(servingNode());
         const before = await snapshot();
@@ -401,17 +414,6 @@ describe("a setup run that cannot issue any certificate", () => {
     // #226: only a node the internet cannot reach on TCP 443 is pointed at Tailscale Funnel.
     describe("Tailscale Funnel guidance (#226)", () => {
         const FUNNEL = "tailscale funnel --bg 4002";
-        const kuboRpc = async () => {
-            // Stops answering for a moment after a shutdown request, as a kubo being restarted does, so setup does not wait for it.
-            let downUntil = 0;
-            const server = http.createServer((request, response) => {
-                if (request.url?.includes("/shutdown")) downUntil = Date.now() + 300;
-                else if (Date.now() < downUntil) return void response.writeHead(503).end();
-                response.end(JSON.stringify({ ID: "peer", Addresses: [], Strings: [] }));
-            });
-            await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-            return { url: new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v0`), close: () => new Promise((resolve) => server.close(resolve)) };
-        };
 
         it("is printed with the node's ws port when no public address was found", async () => {
             const { options, deps, logs } = await prepare();
@@ -501,6 +503,234 @@ describe("a setup run that cannot issue any certificate", () => {
         it("builds the outside test from any proxied address, and none from one without a host and port", () => {
             expect(proxiedAddressTestHint("/ip4/93.184.216.34/tcp/8443/tls/ws")).toContain("https://93.184.216.34:8443/");
             expect(proxiedAddressTestHint("/dnsaddr/node.example/tls/ws")).toBeUndefined();
+        });
+    });
+
+    // #260: our own Caddy not being allowed to bind TCP 443 must not stop an address something else serves, and
+    // must not hide the way to get one.
+    describe.skipIf(process.platform === "win32")("when Caddy may not bind TCP 443 (#260)", () => {
+        const FUNNEL = "tailscale funnel --bg 4002";
+        const ADDRESS = "/dns4/node.tailnet.ts.net/tcp/443/tls/ws";
+        const WITH_PUBLIC_IP = { overrides: { publicIps: [NEW_IP], wsPort: 4002 } };
+        // Exits as Caddy does without the permission, and leaves a file behind when it was started at all.
+        const deniedCaddy = async (dataPath: string) => {
+            const binary = path.join(dataPath, "caddy-denied");
+            await fs.writeFile(binary, `#!/bin/sh\ntouch "$0.started"\necho "Error: loading initial config: listen tcp :443: bind: permission denied" >&2\nexit 1\n`, { mode: 0o755 });
+            return { binary, started: () => fs.access(`${binary}.started`).then(() => true, () => false) };
+        };
+        const prepareDenied = async (previous?: ReachabilityConfig) => {
+            const prepared = await prepare(previous);
+            const caddy = await deniedCaddy(prepared.options().dataPath);
+            let caddyRequested = false;
+            const questions: string[] = [];
+            const deps: SetupDependencies = { ...prepared.deps, platform: "linux", ensureCaddy: async () => ((caddyRequested = true), caddy.binary) };
+            const answering = (answer: boolean): Partial<SetupDependencies> => ({
+                confirm: async (question) => (questions.push(question), answer),
+                runSudoSetcap: async () => false
+            });
+            return { ...prepared, deps, caddy, questions, answering, caddyRequested: () => caddyRequested };
+        };
+
+        it("announces an --announce address without touching Caddy on a node that serves nothing itself", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const { options, deps, logs, dialed, caddy, caddyRequested, questions, answering } = await prepareDenied();
+                const result = await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, ...answering(false) });
+                expect(dialed).toEqual([`${ADDRESS}/p2p/peer`]);
+                expect(result).toMatchObject({ mode: "reverse-proxy", announce: [ADDRESS], externalAnnounce: [ADDRESS], publicIps: [], wsPort: 4002 });
+                expect(caddyRequested()).toBe(false);
+                expect(await caddy.started()).toBe(false);
+                expect(questions).toEqual([]);
+                expect(logs.join("\n")).not.toContain("Let's Encrypt");
+                expect(logs.some((line) => line.includes(NEW_IP) && line.includes("bitsocial reachability setup"))).toBe(true);
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("leaves out the requirement lines about a certificate it is not going to ask for", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const { options, deps, warnings } = await prepareDenied();
+                const checkRequirements = async () => [
+                    { id: "tcp-443", status: "fail" as const, detail: "Caddy has no permission to bind TCP 443" },
+                    { id: "tcp-80", status: "warn" as const, detail: "Caddy has no permission to bind TCP 80" },
+                    { id: "firewall", status: "warn" as const, detail: "ufw is active and does not appear to allow TCP 443" },
+                    { id: "udp-443", status: "fail" as const, detail: "kubo has no permission to bind UDP 443" }
+                ];
+                await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, checkRequirements });
+                expect(warnings.join("\n")).toContain("UDP 443");
+                expect(warnings.join("\n")).not.toContain("TCP 443");
+                expect(warnings.join("\n")).not.toContain("TCP 80");
+
+                const plain = await prepareDenied();
+                await runReachabilitySetup(plain.options(WITH_PUBLIC_IP), { ...plain.deps, checkRequirements }).catch(() => {});
+                expect(plain.warnings.join("\n")).toContain("Caddy has no permission to bind TCP 80");
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("keeps a firewall line that is about UDP 443, which WebTransport needs", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const { options, deps, warnings } = await prepareDenied();
+                const checkRequirements = async () => [{ id: "firewall", status: "warn" as const, detail: "ufw is active and does not appear to allow TCP 443 or UDP 443" }];
+                await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, checkRequirements });
+                expect(warnings.join("\n")).toContain("UDP 443");
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("with --domain still tries for the certificate, and goes on to the handshake without asking for sudo", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const { options, deps, warnings, dialed, caddy, questions, answering } = await prepareDenied();
+                const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
+                const result = await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, domain: "node.example", announce: ADDRESS }), { ...deps, ...answering(true), resolveDomain });
+                expect(await caddy.started()).toBe(true);
+                expect(questions).toEqual([]);
+                expect(dialed).toEqual([`${ADDRESS}/p2p/peer`]);
+                expect(result).toMatchObject({ mode: "reverse-proxy", announce: [ADDRESS] });
+                expect(warnings.join("\n")).toContain("setcap");
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("plain setup that cannot ask: records the ws port, prints the bind fix before the Funnel steps, and still needs an answer", async () => {
+            const { options, deps, logs, warnings, snapshot } = await prepareDenied();
+            const output: string[] = [];
+            const error = await runReachabilitySetup(options(WITH_PUBLIC_IP), { ...deps, log: (message) => (logs.push(message), output.push(message)), warn: (message) => (warnings.push(message), output.push(message)) }).catch((caught) => caught);
+            expect(error).toBeInstanceOf(NeedsAnswerError);
+            expect((await snapshot()).config).toMatchObject({ enabled: true, serveWss: false, wsPort: 4002, announce: [], publicIps: [] });
+            const text = output.join("\n");
+            expect(text).toContain("Browsers cannot reach this node over WSS yet");
+            expect(text).toContain("setcap");
+            expect(text).toContain(FUNNEL);
+            expect(text.indexOf("setcap")).toBeLessThan(text.indexOf(FUNNEL));
+        });
+
+        it("plain setup after the operator says no to sudo: the same output, and nothing left to answer", async () => {
+            const { options, deps, logs, warnings, questions, answering } = await prepareDenied();
+            const result = await runReachabilitySetup(options(WITH_PUBLIC_IP), { ...deps, ...answering(false) });
+            expect(questions).toHaveLength(1);
+            expect(result).toMatchObject({ enabled: true, serveWss: false, wsPort: 4002, announce: [] });
+            expect(warnings.join("\n")).toContain("setcap");
+            expect(logs.join("\n")).toContain(FUNNEL);
+        });
+
+        it("plain setup on a node its proxy already serves: keeps that address, and says why it has none of its own", async () => {
+            const { options, deps, warnings } = await prepareDenied(servingNode({ mode: "reverse-proxy", publicIps: [], announce: [ADDRESS], externalAnnounce: [ADDRESS] }));
+            const result = await runReachabilitySetup(options(WITH_PUBLIC_IP), deps);
+            expect(result).toMatchObject({ mode: "reverse-proxy", announce: [ADDRESS], publicIps: [] });
+            expect(warnings.join("\n")).toContain("setcap");
+        });
+
+        it("with a forced domain and no public address: still gives the bind fix and needs an answer", async () => {
+            const { options, deps, logs, warnings, caddy } = await prepareDenied();
+            const error = await runReachabilitySetup(options({ domain: "node.example", force: true, overrides: { publicIps: [], wsPort: 4002 } }), deps).catch((caught) => caught);
+            expect(await caddy.started()).toBe(true);
+            expect(error).toBeInstanceOf(NeedsAnswerError);
+            expect(warnings.join("\n")).toContain("Caddy has no permission to bind TCP 443");
+            expect(warnings.join("\n")).toContain("setcap");
+            expect(warnings.join("\n")).not.toContain("no public IPv4");
+            expect(logs.join("\n")).toContain(FUNNEL);
+        });
+
+        // The daemon announces a dropped name again when its DNS recovers, without touching the Caddyfile, so the
+        // name's site has to survive an --announce run.
+        it("--announce on a node whose own domain the daemon dropped: keeps the name's site and kubo's listener when no certificate comes", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const dropped = "/dns4/node.example/tcp/443/tls/ws";
+                const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+                const { options, deps, caddyRequested, snapshot } = await prepareDenied(
+                    servingNode({ mode: "reverse-proxy", publicIps: [], announce: [proxied], externalAnnounce: [proxied], domain: "node.example", droppedAnnounce: [dropped] })
+                );
+                const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
+                const result = await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, resolveDomain });
+                expect(caddyRequested()).toBe(true);
+                // Still waiting to be announced again, so what the daemon needs for that has to be there.
+                expect(result.droppedAnnounce).toEqual([dropped]);
+                expect(result.announce).toEqual([proxied, ADDRESS]);
+                const after = await snapshot();
+                expect(after.caddyfile).toMatch(/^https:\/\/node\.example \{/m);
+                expect(after.caddyfile).not.toContain(NEW_IP);
+                expect(JSON.parse(after.kubo).Addresses.Swarm).toContain("/ip4/127.0.0.1/tcp/4002/ws");
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        // The daemon drops a failing name from announce and leaves it in externalAnnounce, so the two lists can be
+        // the same length on a node that still serves an address of its own.
+        it("--announce on a node serving its own address next to a dropped proxied name: refuses rather than dropping the own address", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+                const { options, deps, dialed, snapshot } = await prepareDenied(servingNode({ externalAnnounce: [proxied], droppedAnnounce: [proxied] }));
+                const before = await snapshot();
+                await expect(runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), deps)).rejects.toBeInstanceOf(SetupRefusedError);
+                expect(dialed).toEqual([]);
+                expect(await snapshot()).toEqual(before);
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("plain setup on a node whose own domain the daemon dropped: keeps the name's site when no certificate comes", async () => {
+            const dropped = "/dns4/node.example/tcp/443/tls/ws";
+            const { options, deps, snapshot } = await prepareDenied(servingNode({ mode: "webtransport-only", publicIps: [], announce: [], domain: "node.example", droppedAnnounce: [dropped] }));
+            const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
+            await runReachabilitySetup(options(WITH_PUBLIC_IP), { ...deps, resolveDomain }).catch(() => {});
+            const after = await snapshot();
+            expect(after.config?.droppedAnnounce).toEqual([dropped]);
+            expect(after.caddyfile).toMatch(/^https:\/\/node\.example \{/m);
+        });
+
+        it("--announce on a node that dropped only a proxied name: still skips the certificate step", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+                const { options, deps, caddyRequested } = await prepareDenied(servingNode({ mode: "webtransport-only", publicIps: [], announce: [], externalAnnounce: [proxied], droppedAnnounce: [proxied] }));
+                await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), deps);
+                expect(caddyRequested()).toBe(false);
+            } finally {
+                await rpc.close();
+            }
+        });
+
+        it("in a container: gives the compose fix, never sudo", async () => {
+            const { options, deps, logs, warnings } = await prepareDenied();
+            await expect(runReachabilitySetup(options(WITH_PUBLIC_IP), { ...deps, inContainer: true })).rejects.toBeInstanceOf(NeedsAnswerError);
+            expect(warnings.join("\n")).toContain("NET_BIND_SERVICE");
+            expect([...warnings, ...logs].join("\n")).not.toContain("sudo");
+            expect(logs.join("\n")).toContain("docker-compose.example.yml");
+        });
+
+        it("a node already serving WSS still stops for an answer, and is left exactly as it was", async () => {
+            const { options, deps, snapshot } = await prepareDenied(servingNode());
+            const before = await snapshot();
+            const error = await runReachabilitySetup(options(WITH_PUBLIC_IP), deps).catch((caught) => caught);
+            expect(error).toBeInstanceOf(NeedsAnswerError);
+            expect(error.message).toContain("setcap");
+            expect(await snapshot()).toEqual(before);
+        });
+
+        it("a node already serving WSS refuses --announce as before, without asking for sudo", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const { options, deps, dialed, questions, answering, snapshot } = await prepareDenied(servingNode());
+                const before = await snapshot();
+                await expect(runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, ...answering(true) })).rejects.toBeInstanceOf(SetupRefusedError);
+                expect(questions).toEqual([]);
+                expect(dialed).toEqual([]);
+                expect(await snapshot()).toEqual(before);
+            } finally {
+                await rpc.close();
+            }
         });
     });
 

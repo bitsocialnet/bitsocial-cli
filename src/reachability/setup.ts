@@ -235,6 +235,10 @@ export async function discoverPublicIps(
     return { publicIps: [...ips], ...(router ? { router } : {}), refused, sawCgnat };
 }
 
+const BIND_DENIED_REASON = "Caddy has no permission to bind TCP 443";
+// Requirements that only matter to a certificate of our own.
+const isOwnCertificateCheck = (check: ReachabilityCheck) => check.id === "tcp-443" || check.id === "tcp-80" || (check.id === "firewall" && !check.detail.includes("UDP 443"));
+
 // Starts Caddy (or reloads the one the daemon already runs) until the names are issued.
 async function issueCertificates(
     spec: CaddyfileSpec,
@@ -242,7 +246,7 @@ async function issueCertificates(
     caChanged: boolean,
     options: SetupOptions,
     deps: SetupDependencies
-): Promise<{ issued: string[]; failure?: string }> {
+): Promise<{ issued: string[]; failure?: string; bindDenied?: { guidance: string; declined: boolean } }> {
     const binaryPath = await deps.ensureCaddy(options.dataPath);
     const caddyfile = generateCaddyfile(spec);
     await fs.mkdir(reachabilityDir(options.dataPath), { recursive: true });
@@ -290,9 +294,11 @@ async function issueCertificates(
 
         if (!isBindDenied(output) || attempt > 1) return { issued: [], failure: output.trim().split("\n").at(-1) ?? "Caddy exited" };
         const guidance = bindDeniedGuidance({ inContainer: deps.inContainer, caddyPath: binaryPath, platform: deps.platform });
-        if (deps.inContainer || !deps.confirm || !deps.runSudoSetcap || deps.platform !== "linux") throw new NeedsAnswerError(guidance);
-        if (!(await deps.confirm(`Caddy needs permission to bind port 443. Run: ${setcapCommand(binaryPath)} ?`))) throw new NeedsAnswerError(guidance);
-        if (!(await deps.runSudoSetcap(binaryPath))) throw new NeedsAnswerError(guidance);
+        // The caller decides what a denial costs: nothing for an --announce address, which something else serves (#260).
+        const denied = (declined: boolean) => ({ issued: [], failure: BIND_DENIED_REASON, bindDenied: { guidance, declined } });
+        if (options.announce || deps.inContainer || !deps.confirm || !deps.runSudoSetcap || deps.platform !== "linux") return denied(false);
+        if (!(await deps.confirm(`Caddy needs permission to bind port 443. Run: ${setcapCommand(binaryPath)} ?`))) return denied(true);
+        if (!(await deps.runSudoSetcap(binaryPath))) return denied(false);
     }
 }
 
@@ -380,12 +386,23 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     let domain = options.domain ?? previous?.domain;
     if (domain && !isValidDomain(domain)) throw new SetupRefusedError(`Not a valid domain name: ${domain}`);
 
+    // Reruns only add or repair, so a failed attempt must not cost a node the WSS it already serves. The daemon's
+    // checks follow an address that moved. A proxy's addresses survive below without this.
+    // By membership, not by count: the daemon drops a failing proxied name from announce and keeps it in externalAnnounce.
+    const servedByUs = previous?.enabled && previous.announce.some((address) => !previous.externalAnnounce?.includes(address)) ? previous : undefined;
+    // --announce names an address something else terminates, so it needs no certificate of ours and none of what one
+    // takes: the Caddy download, TCP 443 and a Let's Encrypt order (#260). A node already serving its own addresses
+    // still goes through the attempt, which is how they stay announced. So does one holding a name of its own that
+    // the daemon dropped: the daemon announces it again on recovery, and skipping would remove its site.
+    const holdsDroppedOwnName = (previous?.droppedAnnounce ?? []).some((address) => !previous?.externalAnnounce?.includes(address));
+    const skipsOwnCertificates = options.announce !== undefined && options.domain === undefined && !servedByUs && !holdsDroppedOwnName;
+
     const { publicIps, refused, sawCgnat } = await discoverPublicIps(options, deps, previous?.announce);
     if (publicIps.length > 0) deps.log(`Public addresses: ${publicIps.join(", ")}`);
 
     // Reported, not enforced: setup goes on to do what it can, and each path below says what it managed.
     for (const check of (await deps.checkRequirements?.({ publicIps, httpsPort, caddyAdminPort, wsPort, ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}) })) ?? []) {
-        if (check.status === "fail" || check.status === "warn") deps.warn(formatCheck(check));
+        if ((check.status === "fail" || check.status === "warn") && !(skipsOwnCertificates && isOwnCertificateCheck(check))) deps.warn(formatCheck(check));
     }
 
     const ourCaddyRunning = await isOurCaddyRunning(caddyAdminPort, options.dataPath);
@@ -430,10 +447,15 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     const staleWasAnnounced = staleOwnAddresses.filter((address) => previous?.announce.includes(address));
     const keepsStaleSite = !portBusy && (staleWasAnnounced.length > 0 || staleOwnAddresses.some((address) => previous?.droppedAnnounce?.includes(address)));
     const servedDomains = domain && (domainUsable || keepsStaleSite) ? [domain] : [];
+    // A dropped name whose DNS points here again is in the same position when this run gets it no certificate: it
+    // stays dropped, the daemon announces it again, and it needs its site and kubo's listener then.
+    const ownDomainAddress = (address: string) => address.match(/^\/dns[46]?\/([^/]+)\//)?.[1] === domain && !previous?.externalAnnounce?.includes(address);
+    const holdsRecoveredName = !portBusy && domain !== undefined && domainUsable && (previous?.droppedAnnounce ?? []).some(ownDomainAddress);
 
-    const certificateNames = portBusy ? [] : [...publicIps, ...(domain && domainUsable ? [domain] : [])];
+    const certificateNames = portBusy || skipsOwnCertificates ? [] : [...publicIps, ...(domain && domainUsable ? [domain] : [])];
     let issued: string[] = [];
     let failure: string | undefined;
+    let bindDenied: { guidance: string; declined: boolean } | undefined;
     const spec: CaddyfileSpec = {
         ips: publicIps,
         domains: servedDomains,
@@ -445,9 +467,6 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         ...(options.overrides?.httpPort ? { httpPort: options.overrides.httpPort } : {}),
         ...(options.overrides?.acmeTrustedRootsPath ? { acmeTrustedRootsPath: options.overrides.acmeTrustedRootsPath } : {})
     };
-    // Reruns only add or repair, so a failed attempt must not cost a node the WSS it already serves. The daemon's
-    // checks follow an address that moved. A proxy's addresses survive below without this.
-    const servedByUs = previous?.enabled && previous.announce.length > (previous.externalAnnounce?.length ?? 0) ? previous : undefined;
     const keepServing = (served: ReachabilityConfig, reason: string): ReachabilityConfig => {
         const message = `${reason}, so nothing changed and this node still announces ${served.announce.join(", ")}.`;
         if (options.announce) throw new SetupRefusedError(message);
@@ -462,14 +481,18 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         const result = await issueCertificates(spec, certificateNames, previous !== undefined && previous.acmeDirectory !== acmeDirectory, options, deps);
         issued = result.issued;
         failure = result.failure;
+        bindDenied = result.bindDenied;
+        // With --announce nobody was asked, and the handshake below does not need the permission.
+        if (bindDenied && options.announce) deps.warn(bindDenied.guidance);
         if (servedByUs && issued.length === 0) {
             if (previousCaddyfile !== undefined) await fs.writeFile(caddyfilePath(options.dataPath), previousCaddyfile);
+            if (bindDenied && !options.announce) throw new NeedsAnswerError(bindDenied.guidance);
             return keepServing(servedByUs, `No certificate could be issued (${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443"})`);
         }
         // Keep only what worked, so the daemon's Caddy does not retry a name forever.
         await fs.writeFile(
             caddyfilePath(options.dataPath),
-            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && (issued.includes(domain) || keepsStaleSite) ? [domain] : [] })
+            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && (issued.includes(domain) || keepsStaleSite || holdsRecoveredName) ? [domain] : [] })
         );
     } else {
         // Nothing for our Caddy to serve now, so the daemon must not keep starting it for old sites.
@@ -478,7 +501,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     }
     const issuedIps = publicIps.filter((ip) => issued.includes(ip));
     const domainIssued = domain !== undefined && issued.includes(domain);
-    if (domain && domainUsable && !portBusy && !domainIssued) deps.warn(`No certificate was issued for ${domain}. ${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443 through that name."}`);
+    if (domain && domainUsable && !portBusy && !skipsOwnCertificates && !domainIssued) deps.warn(`No certificate was issued for ${domain}. ${failure ?? "Let's Encrypt could not reach this machine on TCP 80 or 443 through that name."}`);
 
     if (issuedIps.length > 0 && issuedIps.every((ip) => net.isIPv6(ip))) deps.warn(IPV6_ONLY_CAVEAT);
     if (issuedIps.length > 0 && !publicIps.some((ip) => net.isIPv6(ip))) deps.log(NO_IPV6_HINT);
@@ -486,7 +509,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     // WSS needs kubo's loopback listener, the filter removal and AutoTLS off. Without something to terminate it,
     // or an operator who said they are setting that up, those edits would cost something and buy nothing.
-    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || keepsStaleSite || (portBusy && domain !== undefined && domainUsable);
+    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || keepsStaleSite || holdsRecoveredName || (portBusy && domain !== undefined && domainUsable);
 
     const buildConfig = (externalAnnounce: string[], serveWss: boolean): ReachabilityConfig => {
         const announce = [
@@ -560,6 +583,10 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         if (testHost) deps.log(testCommandHint(testHost, httpsPort));
         const proxiedHint = options.announce ? proxiedAddressTestHint(options.announce) : undefined;
         if (proxiedHint) deps.log(proxiedHint);
+        // A node its proxy already serves has an address without the permission, so nothing is left to answer.
+        if (bindDenied && !options.announce) deps.warn(`This node got no certificate of its own: ${failure}.\n${bindDenied.guidance}`);
+        if (skipsOwnCertificates && publicIps.length > 0 && !portBusy)
+            deps.log(`This run only announced the address you passed. To also serve WSS on this machine's own ${publicIps.join(", ")}, run: bitsocial reachability setup`);
         return config;
     }
 
@@ -567,6 +594,17 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         deps.warn(noWssStatement("no reverse proxy has been verified yet"));
         deps.log(reverseProxySnippet(holder, domain, wsPort));
         if (!deps.confirm) throw new NeedsAnswerError(`Set up the reverse proxy above, then rerun setup with --announce. kubo is listening on 127.0.0.1:${wsPort}.`);
+        return config;
+    }
+    // Before the branches on what was found: a forced domain is tried with no public address too.
+    if (bindDenied) {
+        deps.warn(noWssStatement(BIND_DENIED_REASON));
+        // The permission is the direct fix, so it comes first. The config is already written, so the ws port in
+        // the steps below is the one a later --announce finds (#260).
+        deps.warn(bindDenied.guidance);
+        deps.log("If you cannot grant that permission, the following needs none:");
+        deps.log(tailscaleFunnelGuidance(wsPort, deps.inContainer));
+        if (!bindDenied.declined) throw new NeedsAnswerError("Caddy may not bind TCP 443, so this node has no WSS address yet. Follow one of the two routes printed above.");
         return config;
     }
     if (publicIps.length === 0) {
