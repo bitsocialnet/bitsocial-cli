@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
-      - "9138:9138"      # Plebbit RPC + Web UI
+      - "9138:9138"      # PKC RPC + Web UI
       - "50019:50019"    # Kubo IPFS API
       - "6473:6473"      # IPFS Gateway
       - "4001:4001"      # Kubo Swarm (TCP)
@@ -34,8 +34,8 @@ services:
       - net.core.wmem_max=7500000
     # Optional environment variables:
     # environment:
-    #   DEBUG: bitsocial*, plebbit*, -plebbit*trace
-    #   PLEBBIT_RPC_AUTH_KEY: your-custom-auth-key-here
+    #   DEBUG: bitsocial*, pkc*, -pkc*trace
+    #   PKC_RPC_AUTH_KEY: your-custom-auth-key-here
 
     # # Uncomment to build from source instead of pulling the image:
     # build:
