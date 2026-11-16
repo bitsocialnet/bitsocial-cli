@@ -1,5 +1,15 @@
 # Changelog
 
+## <small>0.19.140 (2026-11-16)</small>
+
+* fix(reachability): don't let Caddy's bind permission block --announce or hide the Funnel steps ([4e1c82e](https://github.com/bitsocialnet/bitsocial-cli/commit/4e1c82e))
+* fix(reachability): keep a dropped own name's site and report bind denial without a public IP ([e044ac6](https://github.com/bitsocialnet/bitsocial-cli/commit/e044ac6))
+* fix(reachability): keep a recovered dropped name's site when setup gets it no certificate ([36929bc](https://github.com/bitsocialnet/bitsocial-cli/commit/36929bc))
+* fix(reachability): tell a node's own addresses from proxied ones by membership ([e1078ee](https://github.com/bitsocialnet/bitsocial-cli/commit/e1078ee))
+* docs(reachability): describe --announce without bind permission and the bind-denied Funnel path ([96b68ec](https://github.com/bitsocialnet/bitsocial-cli/commit/96b68ec))
+* docs(readme): fold the 5chan browser note into the Running Daemon section ([72dd080](https://github.com/bitsocialnet/bitsocial-cli/commit/72dd080))
+* docs(readme): surface 5chan browser daemon ([1cba653](https://github.com/bitsocialnet/bitsocial-cli/commit/1cba653))
+
 ## <small>0.19.139 (2026-11-15)</small>
 
 * ci: reject accidental breaking-change markers in commits and PR titles ([118adb6](https://github.com/bitsocialnet/bitsocial-cli/commit/118adb6)), closes [#265](https://github.com/bitsocialnet/bitsocial-cli/issues/265)
