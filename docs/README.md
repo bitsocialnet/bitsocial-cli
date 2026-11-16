@@ -6,6 +6,11 @@ When you add a topic doc under `docs/`, add a row here.
 
 | Doc | Covers |
 | --- | --- |
+| [daemon.md](daemon.md) | `bitsocial daemon`: flags, startup order, the RPC URL and auth key, web UI paths, ports, environment variables, the state file, shutdown, running a second daemon |
+| [kubo.md](kubo.md) | The kubo node the daemon manages: where the repo lives, what the daemon writes to its config, how the API and gateway endpoints are chosen, an already running or external kubo, supervision, garbage collection |
+| [logs.md](logs.md) | Daemon log files: where they are, rotation and trimming, what reaches the terminal, `bitsocial logs`, choosing debug namespaces |
+| [update.md](update.md) | `bitsocial update check/versions/install`: the fast update and its fallback, how running daemons are stopped and restarted (by hand or through systemd), which install gets updated |
+| [data-paths.md](data-paths.md) | The data directory and what each entry is, what ignores `--pkcOptions.dataPath`, migration from plebbit-cli, backups, and the Docker image's paths, env vars, ports and caveats |
 | [challenges.md](challenges.md) | Challenge packages: `bitsocial challenge install/list/remove`, where they are installed, how the daemon loads and hot-reloads them, shadowing a pkc-js built-in, configuring them with `community edit` |
 | [page-sorts.md](page-sorts.md) | Page sort packages: `bitsocial page-sort install/list/remove`, `sortName` vs package name and the upgrade warning, the in-use refusal on remove, configuring `settings.pages` with `community edit` |
 | [reachability.md](reachability.md) | Making a node dialable from browsers: `bitsocial reachability setup/status/enable/disable`, choosing a path, what changes in the kubo config, what the daemon keeps doing, troubleshooting |

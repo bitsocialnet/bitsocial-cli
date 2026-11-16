@@ -108,8 +108,8 @@ The output will include lines like:
 
 ```
 pkc rpc: listening on ws://localhost:9138/<auth-key> (secret auth key for remote connections)
-WebUI (5chan - Imageboard-style UI): http://<your-ip>:9138/<auth-key>/5chan (secret auth key for remote connections)
-WebUI (seedit - Similar to old reddit UI): http://<your-ip>:9138/<auth-key>/seedit (secret auth key for remote connections)
+WebUI (5chan - Imageboard-style UI): http://<your-ip>:9138/<auth-key>/5chan
+WebUI (seedit - Similar to old reddit UI): http://<your-ip>:9138/<auth-key>/seedit
 ```
 
 Open the 5chan or Seedit WebUI URL in your browser to start using Bitsocial.
@@ -214,12 +214,14 @@ docker run -p 9138:9138 -p 50019:50019 -p 6473:6473 bitsocial-cli
 This is the default directory where bitsocial-cli will keep its config, as well as data for local communities:
 
 -   macOS: ~/Library/Application Support/bitsocial
--   Windows: %LOCALAPPDATA%\bitsocial
+-   Windows: %LOCALAPPDATA%\bitsocial\Data
+
+See [docs/data-paths.md](docs/data-paths.md) for what each entry in it is.
 -   Linux: ~/.local/share/bitsocial
 
 ### The logs directory of Bitsocial
 
-bitsocial-cli will keep logs in this directory, with a cap of 10M per log file.
+bitsocial-cli will keep logs in this directory: one file per daemon start, the 5 newest kept, each trimmed to its last 15 MB once it reaches 20 MB. See [docs/logs.md](docs/logs.md).
 
 -   macOS: ~/Library/Logs/bitsocial
 -   Windows: %LOCALAPPDATA%\bitsocial\Log
@@ -231,22 +233,24 @@ In Bash (or powershell if you're on Windows), run `bitsocial daemon` to able to 
 
 ```sh-session
 $ bitsocial daemon
-IPFS API listening on: http://localhost:5001/api/v0
-IPFS Gateway listening on: http://localhost:6473
-pkc rpc: listening on ws://localhost:9138 (local connections only)
+Kubo IPFS API listening on: http://127.0.0.1:50019/api/v0
+Kubo IPFS Gateway listening on: http://127.0.0.1:6473/
+pkc rpc: listening on ws://localhost:9138/ (local connections only)
 pkc rpc: listening on ws://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL (secret auth key for remote connections)
 Bitsocial data path: /root/.local/share/bitsocial
 Communities in data path:  [ 'anime-and-manga.bso' ]
-WebUI (5chan - Imageboard-style UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/5chan (local connections only)
-WebUI (5chan - Imageboard-style UI): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/5chan (secret auth key for remote connections)
-WebUI (seedit - Similar to old reddit UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit (local connections only)
-WebUI (seedit - Similar to old reddit UI): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit (secret auth key for remote connections)
+WebUI (5chan - Imageboard-style UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/5chan
+WebUI (5chan - Imageboard-style UI): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/5chan
+WebUI (seedit - Similar to old reddit UI): http://localhost:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit
+WebUI (seedit - Similar to old reddit UI): http://192.168.1.60:9138/MHA1tm2QWG19z0bnkRarDNWIajDobl7iN2eM2PmL/seedit
 
 ```
 
 Once `bitsocial daemon` is running, open one of the printed WebUI URLs in your normal browser to browse the network and to create and manage your communities, through either seedit or 5chan. You don't need the separate 5chan or Seedit desktop apps: the daemon runs the full P2P node and serves the web UIs itself. All the interfaces are interoperable. If you're a power user and prefer CLI, then you can take a look at the commands below.
 
-If you need to view detailed protocol or IPFS logs for debugging, you can use `bitsocial logs`. For example, `bitsocial logs --tail 50` shows the last 50 lines, or `bitsocial logs --since 1h` shows logs from the past hour.
+If you need to view detailed protocol or IPFS logs for debugging, you can use `bitsocial logs`. For example, `bitsocial logs --tail 50` shows the last 50 entries, or `bitsocial logs --since 1h` shows logs from the past hour.
+
+For how the daemon starts and stops, the RPC auth key, ports, the kubo node it manages and updating, see the topic docs in [docs/](docs/README.md).
 
 #### Making your node reachable from browsers
 

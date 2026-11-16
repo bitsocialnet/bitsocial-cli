@@ -78,6 +78,11 @@ Topic docs live flat under `docs/`; [docs/README.md](docs/README.md) is the inde
 | `src/common-utils/package-registry.ts`, package reload endpoints in `src/webui/daemon-server.ts` | both of the above |
 | `settings.challenges` / `settings.pages` examples in `src/cli/commands/community/edit.ts` | the matching doc above |
 | `src/reachability/`, `src/cli/commands/reachability/`                    | [docs/reachability.md](docs/reachability.md) |
+| `src/cli/commands/daemon.ts`, `src/webui/daemon-server.ts` (RPC server, auth key, web UI routes), `src/common-utils/daemon-state.ts`, `src/common-utils/defaults.ts` | [docs/daemon.md](docs/daemon.md) |
+| `src/ipfs/`, kubo endpoint and repo helpers in `src/util.ts`                                                                  | [docs/kubo.md](docs/kubo.md)               |
+| `src/cli/commands/logs.ts`, `src/common-utils/daemon-file-logger.ts`, log piping in `src/cli/commands/daemon.ts`, `DEBUG` handling in `bin/run` and `src/util.ts` | [docs/logs.md](docs/logs.md) |
+| `src/cli/commands/update/`, `src/update/` (other than `fast-update.ts`'s web UI step), `src/common-utils/npm.ts`              | [docs/update.md](docs/update.md)           |
+| `src/common-utils/data-migration.ts`, anything that adds a file or directory under the data path, `Dockerfile`, `docker-compose.example.yml` | [docs/data-paths.md](docs/data-paths.md) |
 | `bin/postinstall.js`, `bin/update-webuis.js`, `src/update/fast-update.ts`, `src/webui/`, `webuis` in `package.json` | [docs/web-uis.md](docs/web-uis.md) |
 | `tailscaleFunnelGuidance` / `tailscaleFunnelFix` in `src/reachability/guidance.ts`, the `--announce` dial in `src/reachability/setup.ts`, the Tailscale block in `docker-compose.example.yml` | [docs/tailscale-funnel.md](docs/tailscale-funnel.md) |
 | `config/.release-it.json`, `.github/workflows/CI.yml` (path filters), `.github/workflows/CI-build.yml`, `.github/workflows/docker-publish.yml`, `.github/workflows/commit-messages.yml`, `ci-bin/pkc-js-changelog.ts`, `ci-bin/breaking-change-marker.ts`, `ci-bin/docker-moving-tags.ts`, `commitlint.config.mjs`, the package version, breaking changes | [docs/versioning.md](docs/versioning.md) |
