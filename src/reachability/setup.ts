@@ -447,6 +447,10 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     const staleWasAnnounced = staleOwnAddresses.filter((address) => previous?.announce.includes(address));
     const keepsStaleSite = !portBusy && (staleWasAnnounced.length > 0 || staleOwnAddresses.some((address) => previous?.droppedAnnounce?.includes(address)));
     const servedDomains = domain && (domainUsable || keepsStaleSite) ? [domain] : [];
+    // A dropped name whose DNS points here again is in the same position when this run gets it no certificate: it
+    // stays dropped, the daemon announces it again, and it needs its site and kubo's listener then.
+    const ownDomainAddress = (address: string) => address.match(/^\/dns[46]?\/([^/]+)\//)?.[1] === domain && !previous?.externalAnnounce?.includes(address);
+    const holdsRecoveredName = !portBusy && domain !== undefined && domainUsable && (previous?.droppedAnnounce ?? []).some(ownDomainAddress);
 
     const certificateNames = portBusy || skipsOwnCertificates ? [] : [...publicIps, ...(domain && domainUsable ? [domain] : [])];
     let issued: string[] = [];
@@ -488,7 +492,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
         // Keep only what worked, so the daemon's Caddy does not retry a name forever.
         await fs.writeFile(
             caddyfilePath(options.dataPath),
-            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && (issued.includes(domain) || keepsStaleSite) ? [domain] : [] })
+            generateCaddyfile({ ...spec, ips: publicIps.filter((ip) => issued.includes(ip)), domains: domain && (issued.includes(domain) || keepsStaleSite || holdsRecoveredName) ? [domain] : [] })
         );
     } else {
         // Nothing for our Caddy to serve now, so the daemon must not keep starting it for old sites.
@@ -505,7 +509,7 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     // WSS needs kubo's loopback listener, the filter removal and AutoTLS off. Without something to terminate it,
     // or an operator who said they are setting that up, those edits would cost something and buy nothing.
-    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || keepsStaleSite || (portBusy && domain !== undefined && domainUsable);
+    const wantsWss = (externalAnnounce: string[]) => issued.length > 0 || externalAnnounce.length > 0 || keepsStaleSite || holdsRecoveredName || (portBusy && domain !== undefined && domainUsable);
 
     const buildConfig = (externalAnnounce: string[], serveWss: boolean): ReachabilityConfig => {
         const announce = [

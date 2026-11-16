@@ -641,17 +641,24 @@ describe("a setup run that cannot issue any certificate", () => {
 
         // The daemon announces a dropped name again when its DNS recovers, without touching the Caddyfile, so the
         // name's site has to survive an --announce run.
-        it("--announce on a node whose own domain the daemon dropped: does not skip the certificate step that keeps its site", async () => {
+        it("--announce on a node whose own domain the daemon dropped: keeps the name's site and kubo's listener when no certificate comes", async () => {
             const rpc = await kuboRpc();
             try {
                 const dropped = "/dns4/node.example/tcp/443/tls/ws";
                 const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
-                const { options, deps, caddyRequested } = await prepareDenied(
+                const { options, deps, caddyRequested, snapshot } = await prepareDenied(
                     servingNode({ mode: "reverse-proxy", publicIps: [], announce: [proxied], externalAnnounce: [proxied], domain: "node.example", droppedAnnounce: [dropped] })
                 );
                 const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
-                await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, resolveDomain });
+                const result = await runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), { ...deps, resolveDomain });
                 expect(caddyRequested()).toBe(true);
+                // Still waiting to be announced again, so what the daemon needs for that has to be there.
+                expect(result.droppedAnnounce).toEqual([dropped]);
+                expect(result.announce).toEqual([proxied, ADDRESS]);
+                const after = await snapshot();
+                expect(after.caddyfile).toMatch(/^https:\/\/node\.example \{/m);
+                expect(after.caddyfile).not.toContain(NEW_IP);
+                expect(JSON.parse(after.kubo).Addresses.Swarm).toContain("/ip4/127.0.0.1/tcp/4002/ws");
             } finally {
                 await rpc.close();
             }
@@ -671,6 +678,16 @@ describe("a setup run that cannot issue any certificate", () => {
             } finally {
                 await rpc.close();
             }
+        });
+
+        it("plain setup on a node whose own domain the daemon dropped: keeps the name's site when no certificate comes", async () => {
+            const dropped = "/dns4/node.example/tcp/443/tls/ws";
+            const { options, deps, snapshot } = await prepareDenied(servingNode({ mode: "webtransport-only", publicIps: [], announce: [], domain: "node.example", droppedAnnounce: [dropped] }));
+            const resolveDomain = async () => ({ v4: [NEW_IP], v6: [] });
+            await runReachabilitySetup(options(WITH_PUBLIC_IP), { ...deps, resolveDomain }).catch(() => {});
+            const after = await snapshot();
+            expect(after.config?.droppedAnnounce).toEqual([dropped]);
+            expect(after.caddyfile).toMatch(/^https:\/\/node\.example \{/m);
         });
 
         it("--announce on a node that dropped only a proxied name: still skips the certificate step", async () => {
