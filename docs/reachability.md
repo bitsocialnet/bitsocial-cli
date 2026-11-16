@@ -19,12 +19,12 @@ All take `--pkcOptions.dataPath`. `setup` also takes:
 | Flag | Meaning |
 | --- | --- |
 | `--domain <name>` | A domain pointing at this machine, to get a certificate for or to forward through your own server |
-| `--announce <multiaddr>` | An address your own server serves. Announced only after a real libp2p handshake through it succeeds, tried three times, 15 seconds apart. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine |
+| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds, tried three times, 15 seconds apart. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
 | `--force` | Continue when the domain does not resolve to this machine, for a proxy in front of it. Remembered for later runs |
 | `--staging` | Use the Let's Encrypt staging CA, whose certificates browsers do not trust |
 | `--non-interactive` | Never ask. Prompts already only appear when stdin is a TTY |
 
-Exit codes: `0` done (read the output, since this can still mean no WSS, e.g. no public address was found), `1` refused (a domain that does not point here, a failed `--announce`), `2` you have to act first, and nobody could be asked.
+Exit codes: `0` done (read the output, since this can still mean no WSS, e.g. no public address was found), `1` refused (a domain that does not point here, a failed `--announce`), `2` you have to act first, and nobody could be asked. A `2` can come after `setup` has already written its config, as when Caddy may not bind TCP 443 (see [Troubleshooting](#troubleshooting)).
 
 ### Declining
 
@@ -49,6 +49,16 @@ browser ──WebTransport, UDP 443───────────────
 6. **Check what kubo really listens on**, because kubo keeps running and logs nothing when it cannot bind a port.
 
 Reruns keep the stored choices and only add or repair. A rerun that cannot get any certificate, or finds no public address, leaves a node already serving WSS exactly as it was, and with `--announce` it is refused. Everything that succeeded is announced together, and `mode` records the combination, e.g. `ip+domain`.
+
+### `--announce` and this node's own certificate
+
+An `--announce` address is served by something else, so it does not depend on this node's Caddy:
+
+| Node when `setup --announce` runs | Step 4 |
+| --- | --- |
+| Serves no WSS address of its own, and no `--domain` on this run | Skipped. Caddy is not downloaded or started, nothing is ordered from Let's Encrypt, and the requirement lines about TCP 443, TCP 80 and a firewall closing TCP 443 are left out. Only the `--announce` address is announced. `setup` names the public addresses it found and says a plain `setup` can add them later |
+| `--domain` passed on this run | Runs. If Caddy may not bind TCP 443, `setup` warns with the fix, does not ask for `sudo`, and goes on to the handshake |
+| Already serves a WSS address of its own | Runs, which is what keeps that address announced. If it gets no certificate, bind permission included, the run is refused and nothing changes. To give up the node's own address for the proxied one, run `disable --purge`, then `setup --announce ...` |
 
 ## Choosing a path
 
@@ -227,6 +237,8 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 ```bash
 sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443   # persist it in /etc/sysctl.d/
 ```
+
+Without the permission for Caddy, a plain `setup` on a Linux host offers to run `setcap` for you. If you answer no, or nobody can be asked, a node that serves no WSS yet still gets its config with `wsPort` and no WSS address, and `setup` prints the bind fix followed by the [Tailscale Funnel](tailscale-funnel.md) steps, which need no such permission. It exits `0` after a no and `2` when nobody could be asked. A node already serving WSS of its own is left as it was and `setup` exits `2`. A node that only announces a proxied address keeps it, gets the bind fix as a warning, and `setup` exits `0`.
 
 Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is lost whenever kubo updates, and for Caddy whenever an upgrade changes `CADDY_VERSION`, because each version is a new file. The daemon cannot grant the capability itself, so when Caddy may not bind the port it warns with the command for the new binary. `status` reports the same under `tcp-443`.
 

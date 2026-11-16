@@ -15,13 +15,14 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
 | A WSS address was announced, by IP, domain or your own proxy | No |
 | No public IPv4 or global IPv6 was found, carrier-grade NAT included | Yes |
 | A public address was found, but Let's Encrypt could not reach it on TCP 80 or 443 | Yes |
+| A public address was found, but Caddy may not bind TCP 443, and you declined `sudo setcap` or nobody could be asked | Yes, after the bind fix. `setup` exits `2` when nobody could be asked, with the config already written |
 | Another program holds TCP 443 on a reachable node | No, the reverse proxy guidance applies |
 
 `status` shows the same pointer in the `browser-address` check, in its `fix` field in `--json`, on a node where `setup` has run, no WSS address is announced, no WSS address that `setup` does not manage works, and no name is waiting for its DNS to be fixed. It leaves the pointer out when another program holds TCP 443 and the node has a public address, or a domain that was stored with `--force`, because the reverse proxy guidance applies there. For that it counts the machine's interfaces and the addresses running kubo reports, as `setup` does. It does not ask the router itself, so with the daemon stopped, on a node whose only public address is the router's and with another program on TCP 443, `status` shows the pointer while `setup` prints the reverse proxy guidance.
 
 ## Steps
 
-1. **Run `bitsocial reachability setup`** while the daemon runs. It prints the port to forward, e.g. `tailscale funnel --bg 4002`. The port is kubo's loopback WebSocket port, stored as `wsPort` in `<dataPath>/reachability/config.json`.
+1. **Run `bitsocial reachability setup`** while the daemon runs. It prints the port to forward, e.g. `tailscale funnel --bg 4002`. The port is kubo's loopback WebSocket port, stored as `wsPort` in `<dataPath>/reachability/config.json`. On a Linux machine with a public address and no permission to bind TCP 443, it first asks to run `sudo setcap`. Answer no to get the steps.
 2. **Install Tailscale** from <https://tailscale.com/download> and sign in. On Linux that is `sudo tailscale up`. On Windows and macOS, sign in through the app. On macOS the `tailscale` command is not on the `PATH` until you install it from the app's settings under CLI integration. With the App Store version, run `/Applications/Tailscale.app/Contents/MacOS/Tailscale` in its place. See [Tailscale's CLI page](https://tailscale.com/kb/1080/cli). Funnel needs MagicDNS enabled for the tailnet. It is on by default for new tailnets. Check it on the [DNS page](https://login.tailscale.com/admin/dns).
 3. **Rename the machine** in the [admin console](https://login.tailscale.com/admin/machines) unless its name may be public. The name defaults to the OS hostname, such as `johns-laptop`. It becomes part of the address every peer sees, and it is written to public Certificate Transparency logs when the certificate is issued. That cannot be undone. Renaming the tailnet is on the [DNS page](https://login.tailscale.com/admin/dns).
 4. **Turn Funnel on:**
@@ -44,7 +45,7 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
    bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws
    ```
 
-   This adds kubo's loopback listener, restarts kubo, and completes a real libp2p handshake through the address before announcing it. It tries the handshake three times, 15 seconds apart. If all three fail, it puts kubo back as it was and exits `1`, and you can run it again later. Nothing is listening on `<wsPort>` before this step, so until then the Funnel name answers `502`.
+   This adds kubo's loopback listener, restarts kubo, and completes a real libp2p handshake through the address before announcing it. It tries the handshake three times, 15 seconds apart. If all three fail, it puts kubo back as it was and exits `1`, and you can run it again later. It needs no permission to bind TCP 443 or 80: on a node that serves no WSS address of its own, it does not start Caddy or ask Let's Encrypt for anything, even when the machine has a public address. Nothing is listening on `<wsPort>` before this step, so until then the Funnel name answers `502`.
 7. **Test from another network.** `setup` prints a `curl` command. Run it from a phone hotspot or another machine and expect `101`. `curl` then appears to hang because the WebSocket stays open. The handshake in step 6 comes from the node's own machine, so it does not prove other networks can connect.
 
 `bitsocial reachability status` then shows `Mode: reverse-proxy`, the address under `Announced addresses`, and `Browsers: should be able to connect over WSS`.
