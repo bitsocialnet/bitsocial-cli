@@ -657,6 +657,22 @@ describe("a setup run that cannot issue any certificate", () => {
             }
         });
 
+        // The daemon drops a failing name from announce and leaves it in externalAnnounce, so the two lists can be
+        // the same length on a node that still serves an address of its own.
+        it("--announce on a node serving its own address next to a dropped proxied name: refuses rather than dropping the own address", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const proxied = "/dns4/proxy.example/tcp/443/tls/ws";
+                const { options, deps, dialed, snapshot } = await prepareDenied(servingNode({ externalAnnounce: [proxied], droppedAnnounce: [proxied] }));
+                const before = await snapshot();
+                await expect(runReachabilitySetup(options({ ...WITH_PUBLIC_IP, kuboRpcUrl: rpc.url, announce: ADDRESS }), deps)).rejects.toBeInstanceOf(SetupRefusedError);
+                expect(dialed).toEqual([]);
+                expect(await snapshot()).toEqual(before);
+            } finally {
+                await rpc.close();
+            }
+        });
+
         it("--announce on a node that dropped only a proxied name: still skips the certificate step", async () => {
             const rpc = await kuboRpc();
             try {

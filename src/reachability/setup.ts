@@ -388,7 +388,8 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
 
     // Reruns only add or repair, so a failed attempt must not cost a node the WSS it already serves. The daemon's
     // checks follow an address that moved. A proxy's addresses survive below without this.
-    const servedByUs = previous?.enabled && previous.announce.length > (previous.externalAnnounce?.length ?? 0) ? previous : undefined;
+    // By membership, not by count: the daemon drops a failing proxied name from announce and keeps it in externalAnnounce.
+    const servedByUs = previous?.enabled && previous.announce.some((address) => !previous.externalAnnounce?.includes(address)) ? previous : undefined;
     // --announce names an address something else terminates, so it needs no certificate of ours and none of what one
     // takes: the Caddy download, TCP 443 and a Let's Encrypt order (#260). A node already serving its own addresses
     // still goes through the attempt, which is how they stay announced. So does one holding a name of its own that
