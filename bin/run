@@ -12,7 +12,7 @@ enableCompileCache?.();
 // doesn't auto-enable stderr output. The daemon command will
 // re-enable namespaces programmatically and redirect to the log file.
 if (process.env.DEBUG) {
-    process.env._PLEBBIT_DEBUG = process.env.DEBUG;
+    process.env._PKC_DEBUG = process.env.DEBUG;
     delete process.env.DEBUG;
 }
 
