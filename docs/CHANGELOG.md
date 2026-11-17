@@ -1,5 +1,18 @@
 # Changelog
 
+## <small>0.19.143 (2026-11-17)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.152 ([4bfe73e](https://github.com/bitsocialnet/bitsocial-cli/commit/4bfe73e)), closes [pkc-js#567](https://github.com/pkc-js/issues/567)
+  * pkc-js [0.0.152](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.152) (2026-11-17)
+    * BREAKING CHANGE(challenges): carry challenge answers as per-index records, not arrays (#569)
+    * feat(challenges): carry challenge answers as per-index records, not arrays ([#569](https://github.com/pkcprotocol/pkc-js/issues/569)) ([c255031](https://github.com/pkcprotocol/pkc-js/commit/c255031b20854cf1af4b0c6a1953352e27c9f91a)), closes [#567](https://github.com/pkcprotocol/pkc-js/issues/567)
+  * pkc-js [0.0.151](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.151) (2026-11-17)
+    * fix(comment): look up community peers at once in getComment() and update() ([#563](https://github.com/pkcprotocol/pkc-js/issues/563)) ([d9acf5a](https://github.com/pkcprotocol/pkc-js/commit/d9acf5a6c2b42e0e30ef43d782152339d622f090)), closes [#562](https://github.com/pkcprotocol/pkc-js/issues/562) [#562](https://github.com/pkcprotocol/pkc-js/issues/562) [#562](https://github.com/pkcprotocol/pkc-js/issues/562)
+  * pkc-js [0.0.150](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.150) (2026-11-16)
+    * fix: write post updates by bucket swap only, end pubsub warmups on stop ([#555](https://github.com/pkcprotocol/pkc-js/issues/555)) ([3450989](https://github.com/pkcprotocol/pkc-js/commit/3450989ef22bf7efe231cb4ec3abff04549f4a35)), closes [#541](https://github.com/pkcprotocol/pkc-js/issues/541) [#551](https://github.com/pkcprotocol/pkc-js/issues/551) [#456](https://github.com/pkcprotocol/pkc-js/issues/456) [ipfs/kubo#11494](https://github.com/ipfs/kubo/issues/11494) [#556](https://github.com/pkcprotocol/pkc-js/issues/556) [#551](https://github.com/pkcprotocol/pkc-js/issues/551) [ipfs/kubo#11494](https://github.com/ipfs/kubo/issues/11494) [#556](https://github.com/pkcprotocol/pkc-js/issues/556)
+  * pkc-js [0.0.149](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.149) (2026-11-16)
+    * fix(community): drop the own-name IPNS resolve, publish with the stored sequence ([#548](https://github.com/pkcprotocol/pkc-js/issues/548)) ([3448445](https://github.com/pkcprotocol/pkc-js/commit/344844581a0f436db77d675277b55651f1c50d9c)), closes [#239](https://github.com/pkcprotocol/pkc-js/issues/239) [#553](https://github.com/pkcprotocol/pkc-js/issues/553) [#239](https://github.com/pkcprotocol/pkc-js/issues/239) [#553](https://github.com/pkcprotocol/pkc-js/issues/553)
+
 ## <small>0.19.142 (2026-11-16)</small>
 
 * test(logs): read the debug namespace from a command's stderr, not the daemon log ([06df245](https://github.com/bitsocialnet/bitsocial-cli/commit/06df245))
