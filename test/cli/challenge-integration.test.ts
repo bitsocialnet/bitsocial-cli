@@ -126,8 +126,10 @@ async function publishCommentWithChallenge(opts: {
 
         comment.on("challenge", async (challengeMsg: any) => {
             try {
-                challengeText = challengeMsg.challenges?.[0]?.challenge;
-                await comment.publishChallengeAnswers({ challengeAnswers: [challengeAnswer] });
+                // challenges and challengeAnswers are records keyed by challenge index
+                const [challengeIndex, challenge] = Object.entries(challengeMsg.challenges)[0] as [string, any];
+                challengeText = challenge.challenge;
+                await comment.publishChallengeAnswers({ challengeAnswers: { [challengeIndex]: challengeAnswer } });
             } catch (err) {
                 clearTimeout(timeout);
                 reject(err);
