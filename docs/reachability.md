@@ -41,7 +41,7 @@ browser ──WebTransport, UDP 443───────────────
 
 `setup` runs these steps in order:
 
-1. **Read the kubo config**, creating the repo the way the daemon does if it does not exist yet.
+1. **Read the kubo config**, creating the repo the way the daemon does if it does not exist yet, or finishing it if a first start stopped before applying the daemon's defaults.
 2. **Find public addresses:** from interfaces and kubo's addresses, excluding the addresses we told kubo to announce, so an old IP cannot confirm itself. With no public IPv4 on an interface, it also asks the router over UPnP for its external IP and to forward TCP 443, TCP 80 and UDP 443. No third-party "what is my IP" service is used.
 3. **Report requirements** (see [Troubleshooting](#troubleshooting)). It reports and carries on: each path below says what it managed.
 4. **Choose a path** and get certificates, waiting up to 90 s. Issuance succeeding is the proof that the internet reached this machine.

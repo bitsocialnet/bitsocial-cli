@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { directory as randomDirectory } from "tempy";
+import fs from "fs";
 import fsPromise from "fs/promises";
 import path from "path";
 import { createDaemonFileLogger } from "../../dist/common-utils/daemon-file-logger.js";
@@ -83,5 +84,50 @@ describe("daemon file logger", () => {
         expect(logger.writeTimestampedLine("first\n", "stderr")).toBe(true);
         await logger.close();
         expect(logger.writeTimestampedLine("after-close\n", "stderr")).toBe(false);
+    });
+});
+
+// The daemon falls back to the terminal only when writeTimestampedLine returns false, so a log stream
+// that died must say so instead of reporting every later line as written.
+describe("daemon file logger after a file system error", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("returns false once a write error has destroyed the stream", async () => {
+        const logFile = path.join(randomDirectory(), "test.log");
+        const realCreateWriteStream = fs.createWriteStream;
+        const streams: fs.WriteStream[] = [];
+        vi.spyOn(fs, "createWriteStream").mockImplementation(((...args: Parameters<typeof fs.createWriteStream>) => {
+            const stream = realCreateWriteStream(...args);
+            streams.push(stream);
+            return stream;
+        }) as typeof fs.createWriteStream);
+        const logger = createDaemonFileLogger({ logFilePath: logFile, maxBytes: 100_000, trimToBytes: 50_000 });
+        expect(logger.writeTimestampedLine("before the error\n", "stderr")).toBe(true);
+
+        // What a failed write (ENOSPC, EIO) does to an fs.WriteStream: it is destroyed with that error
+        streams.at(-1)!.destroy(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" }));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(logger.writeTimestampedLine("after the error\n", "stderr")).toBe(false);
+        await logger.close();
+    });
+
+    it("keeps writing to the file after a trim fails, including lines buffered during the trim", async () => {
+        const logFile = path.join(randomDirectory(), "test.log");
+        const logger = createDaemonFileLogger({ logFilePath: logFile, maxBytes: 100_000, trimToBytes: 50_000 });
+        writeNLines(logger, 150, (i) => `early-${i}`); // ~75 KB: over trimToBytes, so the trim reads the file back
+        vi.spyOn(fsPromise, "open").mockRejectedValueOnce(Object.assign(new Error("EMFILE: too many open files"), { code: "EMFILE" }));
+
+        const trim = logger._trimNow();
+        expect(logger.writeTimestampedLine("BUFFERED_DURING_FAILED_TRIM\n", "stderr")).toBe(true);
+        await trim;
+        expect(logger.writeTimestampedLine("WRITTEN_AFTER_FAILED_TRIM\n", "stderr")).toBe(true);
+        await logger.close();
+
+        const content = await fsPromise.readFile(logFile, "utf-8");
+        expect(content).toContain("BUFFERED_DURING_FAILED_TRIM");
+        expect(content).toContain("WRITTEN_AFTER_FAILED_TRIM");
     });
 });

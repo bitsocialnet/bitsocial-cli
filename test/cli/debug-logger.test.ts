@@ -164,7 +164,8 @@ describe("DEBUG passed through bin/run", () => {
             proc.once("exit", () => resolve());
             proc.stderr.on("data", (data: Buffer) => {
                 stderr += data.toString();
-                if (stderr.includes(namespace)) resolve();
+                // Match the whole prefix: stderr arrives in chunks, which can split the line after the namespace
+                if (stderr.includes(`${namespace} flags:`)) resolve();
             });
         });
         proc.kill("SIGKILL");

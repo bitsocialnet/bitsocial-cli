@@ -27,6 +27,8 @@ Every code path that spawns kubo or touches its config resolves the directory th
 | `AutoTLS.Enabled` | `true` |
 | `Gateway.PublicGateways` | Entries for the gateway host, `localhost`, `127.0.0.1` and `[::1]` with `UseSubdomains: false`, `InlineDNSLink: false` and paths `/ipfs/`, `/ipns/` |
 
+A first start can stop between those steps (a crash, Ctrl+C, a failed step). The daemon writes `<repo>/.bitsocial-cli-init-pending` before `ipfs init` and removes it after step 3. While that file exists the next start, or `bitsocial reachability setup`, applies steps 2 and 3 again, and the daemon ignores the addresses in the config, since they are still kubo's stock ones.
+
 **On every start**, including existing repos:
 
 | Field | Value | Why |

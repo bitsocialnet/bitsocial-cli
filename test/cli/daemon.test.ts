@@ -962,6 +962,8 @@ describe("bitsocial daemon DEBUG env var", () => {
             expect(logFile).toBeDefined();
             const logContent = await fsPromise.readFile(path.join(logPath, logFile!), "utf-8");
             expect(logContent.length).toBeGreaterThan(0);
+            // bin/run hands DEBUG to the daemon under _PKC_DEBUG; with the wrong name it fell back to its default namespaces
+            expect(logContent).toContain('Debug logs is on with namespace "*"');
         } finally {
             await stopPkcDaemon(daemonProcess);
         }

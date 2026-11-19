@@ -9,6 +9,7 @@
 // daemon talked to it.
 import { spawn, type ChildProcess } from "child_process";
 import dns from "node:dns";
+import fs from "fs/promises";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { directory as randomDirectory } from "tempy";
@@ -24,7 +25,7 @@ import {
     waitForKuboReady,
     withKuboBindRetry
 } from "../helpers/daemon-helpers.js";
-import { preInitKuboWithEphemeralSwarm } from "../helpers/kubo-helpers.js";
+import { preInitKuboWithEphemeralSwarm, seedInterruptedFirstInit } from "../helpers/kubo-helpers.js";
 
 dns.setDefaultResultOrder("ipv4first"); // to be able to resolve localhost
 
@@ -125,20 +126,32 @@ describe("kubo endpoint precedence (issue #200)", () => {
 
     // Pre-inits the repo under dataPath with Addresses.API / Addresses.Gateway on `bindHost`, then
     // starts the daemon with no KUBO_RPC_URL / IPFS_GATEWAY_URL / IPFS_PATH from the outer
-    // environment, plus `env` on top.
-    const startDaemon = async ({ bindHost = "127.0.0.1", env = {} }: { bindHost?: string; env?: Record<string, string> } = {}) => {
+    // environment, plus `env` on top. With `interruptedFirstInit` the repo is instead the one a first
+    // start leaves when it stops right after `ipfs init`, and the allocated ports go to the daemon in
+    // KUBO_RPC_URL / IPFS_GATEWAY_URL, as in Docker.
+    const startDaemon = async ({
+        bindHost = "127.0.0.1",
+        env = {},
+        interruptedFirstInit = false
+    }: { bindHost?: string; env?: Record<string, string>; interruptedFirstInit?: boolean } = {}) => {
         const { result } = await withKuboBindRetry(
             async (endpoints): Promise<DaemonHandle> => {
                 const dataPath = randomDirectory();
                 const configApiPort = endpoints.kuboPort;
                 const configGatewayPort = endpoints.gatewayPort;
-                await preInitKuboWithEphemeralSwarm(
-                    path.join(dataPath, ".bitsocial-cli.ipfs"),
-                    new URL(`http://${bindHost}:${configApiPort}/api/v0`),
-                    new URL(`http://${bindHost}:${configGatewayPort}`)
-                );
+                const repoPath = path.join(dataPath, ".bitsocial-cli.ipfs");
+                if (interruptedFirstInit) await seedInterruptedFirstInit(repoPath);
+                else
+                    await preInitKuboWithEphemeralSwarm(
+                        repoPath,
+                        new URL(`http://${bindHost}:${configApiPort}/api/v0`),
+                        new URL(`http://${bindHost}:${configGatewayPort}`)
+                    );
                 const configKuboApiUrl = `http://127.0.0.1:${configApiPort}/api/v0`;
                 kuboApiUrlsToStop.push(configKuboApiUrl);
+                const portEnv = interruptedFirstInit
+                    ? { KUBO_RPC_URL: configKuboApiUrl, IPFS_GATEWAY_URL: `http://127.0.0.1:${configGatewayPort}` }
+                    : {};
                 const { KUBO_RPC_URL: _kubo, IPFS_GATEWAY_URL: _gateway, IPFS_PATH: _repo, ...inheritedEnv } = process.env;
                 const child = spawn(
                     "node",
@@ -152,7 +165,7 @@ describe("kubo endpoint precedence (issue #200)", () => {
                         "--pkcRpcUrl",
                         endpoints.rpcWsUrl
                     ],
-                    { stdio: ["pipe", "pipe", "pipe"], env: { ...inheritedEnv, ...env } }
+                    { stdio: ["pipe", "pipe", "pipe"], env: { ...inheritedEnv, ...portEnv, ...env } }
                 );
                 daemon = child;
                 let output = "";
@@ -252,5 +265,24 @@ describe("kubo endpoint precedence (issue #200)", () => {
         expect(output).toContain(
             `IPFS_GATEWAY_URL is ${envGatewayUrl}/ but Addresses.Gateway in ${configPath} is /ip4/127.0.0.1/tcp/${handle.configGatewayPort}.`
         );
+    });
+
+    // A first start that stopped right after `ipfs init` leaves kubo's stock 5001/8080 in the config. Nobody chose
+    // those, so the daemon must not read them back: the next start writes its own ports with the rest of the
+    // first-init defaults, and has no mismatch to warn about.
+    it("does not read kubo's stock addresses back from an interrupted first init", { timeout: 180_000 }, async () => {
+        const handle = await startDaemon({ interruptedFirstInit: true });
+        const options = await handle.waitForReady();
+        expect(options).toContain(`Kubo IPFS API listening on: ${handle.configKuboApiUrl}`);
+        expect(handle.output()).not.toContain("Warning: KUBO_RPC_URL");
+        expect(handle.output()).not.toContain("Warning: IPFS_GATEWAY_URL");
+        expect(await isKuboListening(handle.configKuboApiUrl), "kubo is not on the port the daemon dials").toBe(true);
+
+        const repoPath = path.join(handle.dataPath, ".bitsocial-cli.ipfs");
+        const config = JSON.parse(await fs.readFile(path.join(repoPath, "config"), "utf-8"));
+        expect(config.Addresses.API).toBe(`/ip4/127.0.0.1/tcp/${handle.configApiPort}`);
+        expect(config.Addresses.Gateway).toBe(`/ip4/127.0.0.1/tcp/${handle.configGatewayPort}`);
+        expect(config.Swarm.DisableNatPortMap, "server profile").toBe(true);
+        expect(await fs.readdir(repoPath)).not.toContain(".bitsocial-cli-init-pending");
     });
 });
