@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.144 (2026-11-20)</small>
+
+* chore(ci): skip Claude reviews on draft PRs [skip ci] [skip github-alerts] ([ad7dd82](https://github.com/bitsocialnet/bitsocial-cli/commit/ad7dd82))
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.153 ([67b0881](https://github.com/bitsocialnet/bitsocial-cli/commit/67b0881))
+  * pkc-js [0.0.153](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.153) (2026-11-17)
+    * fix(comment-update): sign and store challenge commentUpdate extra keys ([#573](https://github.com/pkcprotocol/pkc-js/issues/573)) ([1c2a0c8](https://github.com/pkcprotocol/pkc-js/commit/1c2a0c8529f9a9874b2d2186b23a621b0ae7fadd)), closes [#572](https://github.com/pkcprotocol/pkc-js/issues/572)
+
 ## <small>0.19.143 (2026-11-17)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.152 ([4bfe73e](https://github.com/bitsocialnet/bitsocial-cli/commit/4bfe73e)), closes [pkc-js#567](https://github.com/pkc-js/issues/567)
