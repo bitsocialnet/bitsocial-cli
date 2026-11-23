@@ -1,5 +1,13 @@
 # Changelog
 
+## <small>0.19.146 (2026-11-23)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.159 ([5d42bdd](https://github.com/bitsocialnet/bitsocial-cli/commit/5d42bdd))
+  * pkc-js [0.0.159](https://github.com/pkcprotocol/pkc-js/releases/tag/v0.0.159) (2026-11-23)
+    * feat(comment-update): add community-issued pseudonymityAuthorTag ([#600](https://github.com/pkcprotocol/pkc-js/issues/600)) ([7264bba](https://github.com/pkcprotocol/pkc-js/commit/7264bba690e923cc3cfb71ba2a3f50cbe7b5a3c5)), closes [#381](https://github.com/pkcprotocol/pkc-js/issues/381)
+    * fix(helia): keep libp2p-js fetches working when an install has two multiformats copies ([#580](https://github.com/pkcprotocol/pkc-js/issues/580)) ([5e046b4](https://github.com/pkcprotocol/pkc-js/commit/5e046b4cd99f2d22049e18710935d5187d6fc8bb))
+    * fix: report failures of unawaited entry points as errors instead of ending the process ([#598](https://github.com/pkcprotocol/pkc-js/issues/598)) ([4b640ee](https://github.com/pkcprotocol/pkc-js/commit/4b640ee6bb4e4035a16fef479202f6cda7cfe67a))
+
 ## <small>0.19.145 (2026-11-23)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.158 ([6547fe7](https://github.com/bitsocialnet/bitsocial-cli/commit/6547fe7))
