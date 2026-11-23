@@ -724,7 +724,7 @@ export default class Daemon extends Command {
 
             // Persistent signal guard (issue #70): exit-hook registers its SIGINT/SIGTERM handlers
             // with process.once, so its listener vanishes from the listener list the moment a
-            // signal is dispatched. signal-exit (loaded by @pkcprotocol/proper-lock-file and other
+            // signal is dispatched. signal-exit (loaded by ink's restore-cursor and other
             // dependencies) re-raises the signal when every remaining listener is its own — which
             // would kill the process while the async exit hook above is still shutting kubo down.
             // A persistent non-signal-exit listener keeps that heuristic from ever firing.
@@ -747,8 +747,8 @@ export default class Daemon extends Command {
             }
 
             // Test hook (issue #70): simulates a dependency registering a signal-exit handler
-            // AFTER the asyncExitHook above — what @pkcprotocol/proper-lock-file (and the
-            // signal-exit copies under ink/restore-cursor) do at module load. signal-exit
+            // AFTER the asyncExitHook above — what the signal-exit copies under
+            // ink/restore-cursor do at module load. signal-exit
             // re-raises the signal when every remaining listener belongs to the signal-exit
             // family (`if (listeners.length === count) { ... process.kill(process.pid, s) }`),
             // which kills the daemon while the async exit hook is still cleaning up kubo —
