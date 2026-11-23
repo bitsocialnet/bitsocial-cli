@@ -248,8 +248,8 @@ describe("daemon shutdown with a late signal-exit registrant (issue #70)", () =>
         "kubo is killed on SIGTERM even when a signal-exit handler registered after the exit hook",
         { timeout: 120000 },
         async () => {
-            // Reproduces the CI failure mechanism: a dependency (e.g. @pkcprotocol/proper-lock-file,
-            // or the signal-exit copies under ink/restore-cursor) registers a signal-exit handler
+            // Reproduces the CI failure mechanism: a dependency (e.g. one of
+            // the signal-exit copies under ink/restore-cursor) registers a signal-exit handler
             // after the daemon's asyncExitHook. exit-hook uses process.once, so on SIGTERM its
             // listener disappears as soon as it is invoked; signal-exit then sees only its own
             // family left and re-raises the signal, killing the daemon while the async kubo
