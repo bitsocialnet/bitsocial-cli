@@ -6,7 +6,7 @@ import * as remeda from "remeda";
 import assert from "assert";
 import tcpPortUsed from "tcp-port-used";
 import { path as ipfsExePathFunc } from "kubo";
-import { PKCLogger, resolveKuboRepoPath, toConnectableHostname } from "../util.js";
+import { KUBO_INIT_PENDING_MARKER, PKCLogger, resolveKuboRepoPath, toConnectableHostname } from "../util.js";
 
 async function getKuboExePath(): Promise<string> {
     return ipfsExePathFunc();
@@ -275,21 +275,23 @@ export async function initKuboRepoIfNeeded(log: any, dataPath: string, apiUrl: U
     await fs.promises.mkdir(ipfsDataPath, { recursive: true });
     const kuboExePath = await getKuboExePath();
     const env = { IPFS_PATH: ipfsDataPath, DEBUG_COLORS: "1" };
-    let configJustInitialized = false;
+    const ipfsConfigPath = path.join(ipfsDataPath, "config");
+    const initPendingPath = path.join(ipfsDataPath, KUBO_INIT_PENDING_MARKER);
+    if (!fs.existsSync(ipfsConfigPath)) await fsPromises.writeFile(initPendingPath, "");
     try {
         await _spawnAsync(log, kuboExePath, ["init"], { env, hideWindows: true });
-        configJustInitialized = true;
     } catch (e) {
         const error = <Error>e;
         if (!error?.message?.includes("ipfs configuration file already exists!")) throw new Error("Failed to call ipfs init" + error);
     }
-    if (configJustInitialized) {
+    if (fs.existsSync(initPendingPath)) {
         await _spawnAsync(log, kuboExePath, ["config", "profile", "apply", `server`], {
             env,
             hideWindows: true
         });
         log("Called 'ipfs config profile apply server' successfully");
-        await mergeCliDefaultsIntoIpfsConfig(log, path.join(ipfsDataPath, "config"), apiUrl, gatewayUrl);
+        await mergeCliDefaultsIntoIpfsConfig(log, ipfsConfigPath, apiUrl, gatewayUrl);
+        await fsPromises.rm(initPendingPath, { force: true });
     } else {
         log("IPFS config already exists; skipping config overrides to preserve user changes.");
     }

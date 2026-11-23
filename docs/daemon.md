@@ -112,6 +112,8 @@ On the first `SIGINT` or `SIGTERM` (Ctrl+C, `systemctl stop`, `docker stop`) the
 3. stops Caddy and releases router port forwards,
 4. shuts down the RPC server, which stops the running communities.
 
+A signal that arrives while the daemon is still starting does the same: startup stops, what it already started (kubo, the RPC server) is shut down, and the daemon exits with the signal's code instead of reporting `Daemon failed to start`.
+
 It allows itself up to 120 seconds. A second signal force-quits at once (exit code 130 or 143) and kills kubo with `SIGKILL`. A supervisor that kills the daemon sooner than 120 seconds can cut a slow shutdown short.
 
 ## Running a second daemon
