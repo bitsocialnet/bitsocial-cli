@@ -71,6 +71,8 @@ An `--announce` address is served by something else, so it does not depend on th
 | nginx, Apache or IIS holds TCP 443 | `setup --domain node.example`, then add the printed snippet, then `setup --domain node.example --announce /dns4/node.example/tcp/443/tls/ws` | Your server terminates TLS. These cannot get an IP certificate by themselves |
 | No public address and no UPnP, or TCP 443 cannot be reached from the internet | `setup`, then follow the Tailscale Funnel steps it prints, see [tailscale-funnel.md](tailscale-funnel.md) | A `<machine>.<tailnet>.ts.net` address through Tailscale's relays, with nothing opened on the router. `setup` does not run Tailscale for you |
 
+**An address of the node's own comes first.** The first four rows give browsers an address on the node's own IP or domain: they connect straight to the node, with nobody else in the path and nothing between the browser and the node that can slow down. Use one of them whenever the internet can reach the machine on TCP 443. Tailscale Funnel, the last row, is the fallback for a node that cannot get such an address. It worked well in testing, but every connection passes through Tailscale's relays, and that path [can degrade](tailscale-funnel.md#a-funnel-path-can-degrade) while the node looks healthy. A node with an address of its own can add Funnel as a second one, and should not replace its own with it.
+
 `setup` never stops or edits a server it does not own. To replace one with bitsocial-cli's own Caddy, remove your hand-added address from `Addresses.AppendAnnounce` in the kubo config, stop the other server, then run `setup`. An existing `/ip4/127.0.0.1/tcp/<port>/ws` listener is reused.
 
 ### Addresses `setup` does not manage
