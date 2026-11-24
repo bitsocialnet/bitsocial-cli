@@ -50,6 +50,24 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
 
 `bitsocial reachability status` then shows `Mode: reverse-proxy`, the address under `Announced addresses`, and `Browsers: should be able to connect over WSS`.
 
+### Checking a Funnel address
+
+`bitsocial reachability status` checks a Funnel address in two steps and prints both under Diagnostics:
+
+```
+  [ok] The WSS handshake through /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws took 0.7 s
+  [ok] Tailscale's Funnel ingress reaches this node in 91 ms via DERP(par)
+```
+
+1. **The handshake**, cut off after the 6 seconds a browser allows. It warns when the handshake took 3 seconds or more, and fails when it did not finish. See [How long a handshake may take](reachability.md#how-long-a-handshake-may-take).
+2. **The hop from Tailscale's ingress to the node.** Funnel traffic goes from the browser to one of Tailscale's public ingress servers, and from there to the node over the tailnet. `status` reads `tailscale status --json`, picks the ingress servers that just carried the node's traffic (peers named `funnel-ingress-node` with the tag `tag:ingress`, `InEngine: true` and a `LastHandshake` in the last 5 minutes), and runs `tailscale ping` on up to three of them, three pings each, reporting the median. It warns from 500 ms, or when one does not answer.
+
+`via DERP(...)` means the hop is relayed, and that is normal: on a node whose Funnel worked well the hop was relayed too, at 91 to 95 ms. The warning goes by latency alone. The one degraded node that was measured took about 1.9 s. The 500 ms line is drawn from those two measurements only.
+
+The ping is best effort. `status` skips it with a one-line reason, and still runs the handshake, when the `tailscale` command is not found (on macOS it also tries `/Applications/Tailscale.app/Contents/MacOS/Tailscale`), when Tailscale is not running, stopped or logged out, or when no ingress server carried traffic in the last 5 minutes. In the Docker setup the command lives in the sidecar container, so the ping is always skipped there. To measure the hop by hand: `docker compose exec tailscale tailscale status --json`, then `docker compose exec tailscale tailscale ping <address of an ingress server>`. The peer names and JSON fields are Tailscale's own and not a documented interface, so a Tailscale update can turn the ping into a skip.
+
+`--json` carries the result under `funnelIngress`: `status` (`ok`, `warn` or `skipped`), `note` when skipped, and `hops`, each with the ingress server's tailnet `address`, its `relay` region, `latencyMs` and `via`, or `error`.
+
 ### Turning it off
 
 ```bash
@@ -109,6 +127,7 @@ This was tested with an image built from source, Docker Compose 5.5.1 and `tails
 - **Some connections through Funnel fail in bursts.** In testing, when 60 WebSocket upgrades were opened at once from one address on another network, 3 to 6 failed each time. Their TCP connection to Tailscale's relay needed retransmits and TLS then timed out, so they never reached the node. Upgrades made one at a time over IPv4 all succeeded. One `setup --announce` on a host also failed to connect for a reason that was not found. A browser retries, and `setup` tries its handshake three times.
 - **kubo sees every Funnel peer as `127.0.0.1`.** `tailscaled` proxies locally. kubo's per-IP connection limits exempt loopback, so they do not cap Funnel connections, and they also cannot tell one Funnel peer from another. One abusive client can open many connections, held back only by kubo's global resource manager limits and connection manager. An IP ban cannot single it out. kubo's gossipsub runs without peer scoring, so sharing an IP costs Funnel peers nothing there.
 - **A handshake from the node itself is weak proof.** `setup` and `status` dial the address from the node's own machine. With Tailscale's MagicDNS on, a machine may resolve its own `ts.net` name to its tailnet address, and the dial would then never leave the machine. This was not tested: the test machine had MagicDNS off, and its dial went out through Tailscale's relays. Only the test from another network proves the address.
+- **A Funnel path can degrade.** One node's Funnel address became too slow for browsers about two hours after `setup` verified it, while the node itself looked healthy. `status` now measures this, see [Checking a Funnel address](#checking-a-funnel-address).
 - **`curl` needs `--http1.1`.** Over HTTP/2 the WebSocket upgrade through Funnel returns `404`. The command `setup` prints already passes it. Browsers are not affected.
 
 ## Alternatives that were looked at

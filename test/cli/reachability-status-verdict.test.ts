@@ -141,6 +141,11 @@ describe("reachability status opens with who can connect", () => {
             expect(parsed.connectivity.browsers.status).toBe("warn");
             // Still only for nodes setup does not manage.
             expect(parsed.unmanagedAddresses).toEqual([]);
+            // Every WSS address that was dialed, setup's own included, with a reason a person can read (#282).
+            expect(parsed.wssHandshakes).toMatchObject([{ address: deadWss, status: "failed" }]);
+            expect(parsed.wssHandshakes[0].error).not.toMatch(/^\[object/);
+            // No ts.net address is announced, so Tailscale is not asked anything.
+            expect(parsed.funnelIngress).toBeUndefined();
         });
     });
 

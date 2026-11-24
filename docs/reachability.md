@@ -9,7 +9,7 @@
 
 ```bash
 bitsocial reachability setup     # discover, configure, get a certificate, verify; safe to rerun
-bitsocial reachability status    # who can connect, then mode, addresses, certificate expiry, last checks, requirements; --json for scripts
+bitsocial reachability status    # who can connect, then mode, addresses, certificate expiry, last checks, handshake times, requirements; --json for scripts
 bitsocial reachability enable    # repair and turn back on from the stored choices, never asks anything
 bitsocial reachability disable   # stop serving and restore the kubo config; --purge also moves the state to a backup
 ```
@@ -19,7 +19,7 @@ All take `--pkcOptions.dataPath`. `setup` also takes:
 | Flag | Meaning |
 | --- | --- |
 | `--domain <name>` | A domain pointing at this machine, to get a certificate for or to forward through your own server |
-| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds, tried three times, 15 seconds apart. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
+| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds within the 6 seconds a browser allows, tried three times, 15 seconds apart. `setup` prints how long the handshake took and warns from 3 seconds. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
 | `--force` | Continue when the domain does not resolve to this machine, for a proxy in front of it. Remembered for later runs |
 | `--staging` | Use the Let's Encrypt staging CA, whose certificates browsers do not trust |
 | `--non-interactive` | Never ask. Prompts already only appear when stdin is a TTY |
@@ -82,6 +82,22 @@ On a node without `config.json`, `status` tries a real libp2p handshake with eve
 A failed handshake is `failed` when every IP the address leads to is on one of the node's own interfaces, or the name resolves to nothing, because the node reaches its own IP directly. Any other IP goes through a router, which may not connect a machine to its own public address (no NAT hairpin), so that failure is `unconfirmed`: the `browser-address` check warns instead of failing.
 
 A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
+
+#### How long a handshake may take
+
+A browser's libp2p gives up on an address after 6 seconds (js-libp2p's per-address dial timeout), so every handshake `status`, `setup --announce` and the daemon make is cut off at 6 seconds too, and timed:
+
+| Handshake | Result |
+| --- | --- |
+| Under 3 s | `ok`, with the time |
+| 3 s or more | `ok` with `"slow": true`, and a warning: this machine is usually closer to the address than a browser is, so some browsers will run out of time. 3 s is a judgment call, half the limit |
+| Not finished in 6 s | `failed` with `"timedOut": true` |
+
+A failure through a `ts.net` name is always `failed`, never `unconfirmed`, because a Tailscale Funnel name leads to Tailscale's servers and not back through the node's own router.
+
+`status --json` lists every address that was dialed under `wssHandshakes`, `setup`'s own included, each with `status`, `handshakeMs`, and `slow`, `timedOut` or `error` where they apply. `unmanagedAddresses` keeps its meaning.
+
+For a `ts.net` address, `status` then measures the hop from Tailscale's Funnel ingress servers to the node, see [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address).
 
 When no WSS address works (none exists, or every handshake is `failed`), the `browser-address` check weighs AutoNAT's results. The lines `status` opens with are described in [Who can connect](#who-can-connect).
 
@@ -200,7 +216,8 @@ Browsers, first match wins. `status` tries a handshake from this machine with ev
 
 | Evidence | Line | Status |
 | --- | --- | --- |
-| A WSS handshake succeeded | should be able to connect over WSS; the firewall was not tested from other networks | `ok` |
+| A WSS handshake succeeded in under 3 s | should be able to connect over WSS, with the handshake time; the firewall was not tested from other networks. A slower address is named too | `ok` |
+| Every WSS handshake that succeeded took 3 s or more | may fail to connect over WSS, with the time and the 6 s limit (see [How long a handshake may take](#how-long-a-handshake-may-take)) | `warn` |
 | AutoNAT reached WebTransport | those that support WebTransport should be able to connect, unless their network blocks UDP; then why WSS is missing: `run setup to add WSS`, the failed handshake, an untestable WSS address, or reachability being disabled | `warn` |
 | A WSS handshake could not be tested from this machine (`unconfirmed`, usually no NAT hairpin) | may be able to connect over WSS | `unknown` |
 | AutoNAT has not tested WebTransport, or desktop nodes are not known yet | not known yet | `unknown` |
@@ -224,6 +241,8 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 | `public-address-announced` | Running kubo announces no public address: no public IPv4, no global IPv6 (`fec0::/10` and other private ranges don't count), no `/dns*` name and no relay address. No other node or browser can dial it, so it seeds nothing for anyone. Typical of a VM on NAT networking (`10.0.2.15` plus `fec0::`). Runs on every node, `setup` or not. `unknown` while kubo is down. The daemon warns once at start-up in the same case |
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
 | `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage). After `setup`: a `warn` pointing at [Tailscale Funnel](tailscale-funnel.md) when `setup` could not give the node a WSS address. It is absent when an address is announced, when another program holds TCP 443 on a node with a public address, when a WSS address `setup` does not manage works, or when a dropped name is waiting for its DNS |
+| `wss-handshake` | How long the handshake with each WSS address took. `warn` when one took 3 s or more, `fail` when one did not finish in the 6 s a browser allows. Absent when no handshake was timed. Other handshake failures are reported by `browser-address` and the `Browsers:` line |
+| `funnel-ingress` | Only with a `ts.net` address: the latency from Tailscale's Funnel ingress servers to this node, from `tailscale ping`. `warn` from 500 ms or when a server does not answer, `unknown` with the reason when it could not be measured. See [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address) |
 | `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, on any node, `setup`'s own addresses included, as the program is then serving it |
 | `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn`. "Reached" proves inbound UDP, not a browser handshake (see [WebTransport and AutoNAT](#webtransport-and-autonat)) |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
@@ -256,7 +275,7 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is l
 
 ## For maintainers
 
-**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages.
+**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages. `libp2p-dial.ts` is the handshake, `unmanaged.ts` the check of announced WSS addresses built on it (`checkWssAddresses`), and `tailscale.ts` the Funnel ingress ping.
 
 **Bumping Caddy.** Change `CADDY_VERSION` and all six entries of `CADDY_RELEASE_SHA256` in `src/reachability/caddy.ts`, in one commit. Compute the sha256 of each archive, and check the archives against the SHA-512 `checksums.txt` on the release first. Pinning in source matters because that file shares the download's origin.
 
@@ -284,4 +303,5 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is l
 
 - `setup` refuses the production Let's Encrypt directory when `CI` is set.
 - Node's global `WebSocket`, which libp2p uses, ignores TLS options. To trust Pebble, run the dial in a child process with `NODE_EXTRA_CA_CERTS`.
+- The `tailscale` command is run through an injectable `RunCommand` (`runTailscale` on `checkWssAddresses`, `run` on `pingFunnelIngress`), so tests fake it and never need Tailscale installed.
 - Other test files' kubos bind random ports, so a port chosen by a test can be taken before it is used (#87). Retry with a fresh port when that happens, and do not check "is this UDP port free" as a test assertion.

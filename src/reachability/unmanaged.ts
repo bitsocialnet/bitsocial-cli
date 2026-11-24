@@ -1,18 +1,26 @@
 import type { ReachabilityCheck } from "./checks.js";
 import { isPublicIp, localIpsFromInterfaces, type KuboAutonat } from "./discovery.js";
-import { dialWithLibp2p } from "./libp2p-dial.js";
+import { TAILSCALE_FUNNEL_DOC } from "./guidance.js";
+import { BROWSER_DIAL_TIMEOUT_MS, dialWithLibp2p, formatSeconds, HandshakeTimeoutError, SLOW_HANDSHAKE_MS } from "./libp2p-dial.js";
 import { resolveDomainRecords, type ResolvedDomain } from "./setup.js";
+import { isFunnelAddress, pingFunnelIngress, type FunnelIngressReport, type RunCommand } from "./tailscale.js";
 
 // Browser addresses kubo announces that `setup` did not put there: AutoTLS, or a reverse proxy set up by hand.
 export interface UnmanagedAddress {
     address: string;
     status: "ok" | "failed" | "unconfirmed" | "unverified";
     error?: string;
+    // How long a handshake that worked took.
+    handshakeMs?: number;
+    // It worked, but took so much of the time a browser allows that some browsers will not make it.
+    slow?: true;
+    // It did not finish in the time a browser allows.
+    timedOut?: true;
 }
 
-export type DialAddress = (address: string, options: { signal?: AbortSignal; timeoutMs?: number }) => Promise<{ peerId: string }>;
+export type DialAddress = (address: string, options: { signal?: AbortSignal; timeoutMs?: number }) => Promise<{ peerId: string; handshakeMs?: number }>;
 
-const DIAL_TIMEOUT_MS = 10_000;
+export { SLOW_HANDSHAKE_MS };
 const BROWSER_DIALABLE = /\/(tls\/ws|wss|tls\/sni\/[^/]+\/ws)$/;
 
 const withoutPeerId = (address: string) => address.replace(/\/p2p\/[^/]+$/, "");
@@ -53,15 +61,70 @@ export async function verifyUnmanagedAddresses(input: {
                     targets = [...records.v4, ...records.v6];
                     if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses` };
                 }
-                await dial(dialable, { timeoutMs: DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}) });
-                return { address, status: "ok" };
+                const { handshakeMs } = await dial(dialable, { timeoutMs: BROWSER_DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}) });
+                return { address, status: "ok", ...(handshakeMs !== undefined ? { handshakeMs } : {}), ...(handshakeMs !== undefined && handshakeMs >= SLOW_HANDSHAKE_MS ? { slow: true as const } : {}) };
             } catch (error) {
                 // A machine reaches its own IP directly, so that failure is real. Any other IP goes through a router, which may not send it back (no NAT hairpin).
-                const status = targets.every((ip) => localIps.includes(ip)) ? "failed" : "unconfirmed";
-                return { address, status, error: (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ") };
+                // A Funnel name leads to Tailscale's servers and never back through this machine's router, so its failure is real too.
+                const status = isFunnelAddress(address) || targets.every((ip) => localIps.includes(ip)) ? "failed" : "unconfirmed";
+                return {
+                    address,
+                    status,
+                    error: (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " "),
+                    ...(error instanceof HandshakeTimeoutError ? { timedOut: true as const } : {})
+                };
             }
         })
     );
+}
+
+export interface WssCheck {
+    addresses: UnmanagedAddress[];
+    // Present when a ts.net address was dialed.
+    funnelIngress?: FunnelIngressReport;
+}
+
+// The whole check of the WSS addresses kubo announces, shared by `status` and the daemon: a handshake with each,
+// held to a browser's time limit, and for a Tailscale Funnel address the latency of the hop from Tailscale's ingress
+// servers to this node. The ping comes second on purpose, because only an ingress server that just carried traffic answers.
+export async function checkWssAddresses(input: Parameters<typeof verifyUnmanagedAddresses>[0] & { runTailscale?: RunCommand; now?: () => number; platform?: string }): Promise<WssCheck> {
+    const { runTailscale, now, platform, ...verify } = input;
+    const addresses = await verifyUnmanagedAddresses(verify);
+    const dialedFunnel = addresses.some(({ address, status }) => isFunnelAddress(address) && status !== "unverified");
+    if (!dialedFunnel || input.signal?.aborted) return { addresses };
+    const funnelIngress = await pingFunnelIngress({
+        ...(runTailscale ? { run: runTailscale } : {}),
+        ...(now ? { now } : {}),
+        ...(platform ? { platform } : {}),
+        ...(input.signal ? { signal: input.signal } : {})
+    });
+    return { addresses, funnelIngress };
+}
+
+export const BROWSER_LIMIT = formatSeconds(BROWSER_DIAL_TIMEOUT_MS);
+export const slowHandshakeMessage = ({ address, handshakeMs }: UnmanagedAddress) =>
+    `the handshake through ${address} took ${formatSeconds(handshakeMs!)}, and browsers give up on an address after ${BROWSER_LIMIT}`;
+
+// How long each handshake took. Failures other than running out of time are reported by browser-address and the verdict.
+export function wssHandshakeCheck(addresses: UnmanagedAddress[]): ReachabilityCheck | undefined {
+    const id = "wss-handshake";
+    const timed = addresses.filter(({ handshakeMs }) => handshakeMs !== undefined);
+    // Only where the failure is real: behind a router without NAT hairpin, a machine's dial to its own public address
+    // times out too, and that says nothing about how long browsers wait.
+    const timedOut = addresses.filter((address) => address.timedOut && address.status === "failed");
+    if (timed.length === 0 && timedOut.length === 0) return undefined;
+    const slow = timed.filter((address) => address.slow);
+    const detail = [
+        ...timed.map(({ address, handshakeMs }) => `The WSS handshake through ${address} took ${formatSeconds(handshakeMs!)}`),
+        ...timedOut.map(({ address, error }) => `Through ${address}, ${error}`),
+        ...(slow.length > 0 ? [`Browsers give up on an address after ${BROWSER_LIMIT}, and are usually further from it than this machine, so some will fail to connect`] : [])
+    ].join(". ");
+    const troubled = [...slow, ...timedOut];
+    if (troubled.length === 0) return { id, status: "ok", detail };
+    const fix = troubled.some(({ address }) => isFunnelAddress(address))
+        ? `The Funnel path to this node is slow, which this node cannot repair. See "A Funnel path can degrade" in ${TAILSCALE_FUNNEL_DOC}`
+        : "Check the server in front of kubo and the network path to it: the handshake is too slow for browsers";
+    return { id, status: timedOut.length > 0 ? "fail" : "warn", detail, fix };
 }
 
 // Says what was tested, not "browsers can reach it": a machine dialing its own address never crosses a provider's firewall.

@@ -128,7 +128,7 @@ describe("Caddy, Pebble and kubo", { timeout: 240_000 }, () => {
 
     it("completes a js-libp2p handshake with kubo through Caddy", async () => {
         const result = await dialInChildProcess(`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws/p2p/${peerId}`, pebble.issuingRootPath);
-        expect(result, caddyOutput).toEqual({ peerId });
+        expect(result, caddyOutput).toMatchObject({ peerId, handshakeMs: expect.any(Number) });
     });
 
     it("refuses the dial when the certificate's CA is not trusted", async () => {
@@ -156,7 +156,7 @@ describe("Caddy, Pebble and kubo", { timeout: 240_000 }, () => {
         await reloadCaddy(adminPort, caddyfile);
         expect(await readIssuedCertificates(dataPath)).toEqual(before);
         const result = await dialInChildProcess(`/ip4/127.0.0.1/tcp/${httpsPort}/tls/ws/p2p/${peerId}`, pebble.issuingRootPath);
-        expect(result, caddyOutput).toEqual({ peerId });
+        expect(result, caddyOutput).toMatchObject({ peerId, handshakeMs: expect.any(Number) });
     });
 
     it("recognises itself through the admin API, and not another node's data path", async () => {

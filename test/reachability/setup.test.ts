@@ -458,6 +458,28 @@ describe("a setup run that cannot issue any certificate", () => {
             }
         });
 
+        // Issue #282: a handshake that passes but needs most of a browser's 6 seconds is worth knowing about at setup.
+        it("says how long the handshake took, and warns when it was slow", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const address = "/dns4/node.tailnet.ts.net/tcp/443/tls/ws";
+                const run = async (handshakeMs: number) => {
+                    const { options, deps, logs, warnings } = await prepare();
+                    const result = await runReachabilitySetup(options({ kuboRpcUrl: rpc.url, announce: address, overrides: { publicIps: [], wsPort: 4002 } }), { ...deps, dial: async () => ({ peerId: "peer", handshakeMs }) });
+                    return { result, logs: logs.join("\n"), warnings: warnings.join("\n") };
+                };
+                const fast = await run(640);
+                expect(fast.logs).toContain(`Verified ${address} with a libp2p handshake that took 0.6 s.`);
+                expect(fast.warnings).not.toContain("took");
+                const slow = await run(4_230);
+                expect(slow.result.announce).toEqual([address]);
+                expect(slow.warnings).toContain("took 4.2 s");
+                expect(slow.warnings).toContain("6 s");
+            } finally {
+                await rpc.close();
+            }
+        });
+
         it("dials a just-enabled proxy again before refusing it, and refuses one that never answers", async () => {
             const rpc = await kuboRpc();
             try {

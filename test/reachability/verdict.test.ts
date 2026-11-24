@@ -216,3 +216,36 @@ describe("formatConnectivity", () => {
         expect(lines).toEqual(["Nobody can connect: this node announces no public address, so it seeds nothing for anyone."]);
     });
 });
+
+// Issue #282: a handshake that works but needs most of the 6 seconds a browser allows is no clean pass.
+describe("connectivityVerdict: browsers, by how long the WSS handshake took", () => {
+    const funnel = "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws";
+
+    it("says how long a working handshake took", () => {
+        const { browsers } = verdict({ wss: [{ address: wss, status: "ok", handshakeMs: 640 }] });
+        expect(browsers.status).toBe("ok");
+        expect(browsers.detail).toContain(`${wss} in 0.6 s`);
+    });
+
+    it("warns when the only working address is slow", () => {
+        const { browsers } = verdict({ wss: [{ address: funnel, status: "ok", handshakeMs: 4_230, slow: true }] });
+        expect(browsers.status).toBe("warn");
+        expect(browsers.detail).toMatch(/^may fail to connect over WSS/);
+        expect(browsers.detail).toContain(`${funnel} took 4.2 s`);
+        expect(browsers.detail).toContain("6 s");
+    });
+
+    it("stays ok when another address is fast, and still names the slow one", () => {
+        const { browsers } = verdict({ wss: [{ address: wss, status: "ok", handshakeMs: 500 }, { address: funnel, status: "ok", handshakeMs: 5_100, slow: true }] });
+        expect(browsers.status).toBe("ok");
+        expect(browsers.detail).toContain(`${funnel} took 5.1 s`);
+    });
+
+    it("does not pass an address whose handshake outlasted the browsers' limit", () => {
+        const error = "the handshake did not finish within 6 s, which is when browsers give up on an address";
+        const { browsers } = verdict({ autonat: autonat({ reachable: [tcp] }), wss: [{ address: funnel, status: "failed", error, timedOut: true }], setupWss: "enabled" });
+        expect(browsers.status).toBe("warn");
+        expect(browsers.detail).toMatch(/^cannot connect directly/);
+        expect(browsers.detail).toContain("did not finish within 6 s");
+    });
+});

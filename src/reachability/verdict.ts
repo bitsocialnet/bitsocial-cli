@@ -1,6 +1,7 @@
 import type { ReachabilityCheck } from "./checks.js";
 import type { KuboAutonat } from "./discovery.js";
-import { autonatEvidence, type UnmanagedAddress } from "./unmanaged.js";
+import { formatSeconds } from "./libp2p-dial.js";
+import { autonatEvidence, slowHandshakeMessage, type UnmanagedAddress } from "./unmanaged.js";
 
 // The answer `reachability status` opens with: can desktop nodes (kubo/helia) and browsers connect to this node?
 // The checks below it say why; this says what that means, so a failing check about WSS does not read as "useless".
@@ -78,11 +79,18 @@ function browsersLine(input: ConnectivityInput, desktop: ConnectivityLine): Conn
     const failed = wss.filter(({ status }) => status === "failed");
     const failures = failed.length > 0 ? `; ${failedHandshakes(failed)}` : "";
 
-    if (ok.length > 0)
+    // A handshake that needed most of the time a browser allows is not a pass: browsers are usually further away.
+    const slow = ok.filter((address) => address.slow);
+    const fast = ok.filter((address) => !address.slow);
+    const slowNote = slow.map(slowHandshakeMessage).join("; ");
+    if (fast.length > 0) {
+        const timed = fast.map(({ address, handshakeMs }) => (handshakeMs === undefined ? address : `${address} in ${formatSeconds(handshakeMs)}`));
         return {
             status: "ok",
-            detail: `should be able to connect over WSS (a handshake from this machine succeeded through ${list(ok.map(({ address }) => address))}; whether a firewall lets other networks in was not tested)${failures}`
+            detail: `should be able to connect over WSS (a handshake from this machine succeeded through ${list(timed)}; whether a firewall lets other networks in was not tested)${slow.length > 0 ? `; ${slowNote}` : ""}${failures}`
         };
+    }
+    if (slow.length > 0) return { status: "warn", detail: `may fail to connect over WSS: ${slowNote}${failures}` };
 
     const SEE_REQUIREMENTS = "the WSS that setup configured is not working, see the requirements below";
     // How to get WSS: turn it back on, fix what setup configured, or add it.
