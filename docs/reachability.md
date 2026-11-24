@@ -19,7 +19,7 @@ All take `--pkcOptions.dataPath`. `setup` also takes:
 | Flag | Meaning |
 | --- | --- |
 | `--domain <name>` | A domain pointing at this machine, to get a certificate for or to forward through your own server |
-| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds within the 6 seconds a browser allows, tried three times, 15 seconds apart. `setup` prints how long the handshake took and warns from 3 seconds. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
+| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds within the 6 seconds a browser allows, tried three times, 15 seconds apart. `setup` prints how long the handshake took and warns from 3 seconds. A name in the address is resolved over public DNS first, see [Where a name is resolved](#where-a-name-is-resolved). `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
 | `--force` | Continue when the domain does not resolve to this machine, for a proxy in front of it. Remembered for later runs |
 | `--staging` | Use the Let's Encrypt staging CA, whose certificates browsers do not trust |
 | `--non-interactive` | Never ask. Prompts already only appear when stdin is a TTY |
@@ -77,7 +77,7 @@ An `--announce` address is served by something else, so it does not depend on th
 
 A node can already serve WSS without `setup`, through a reverse proxy set up by hand or an AutoTLS address. `configured` in `status --json` only means `setup` has run (`config.json` exists), so it stays `false` on these nodes and says nothing about whether browsers can connect.
 
-On a node without `config.json`, `status` tries a real libp2p handshake with every public `/tls/ws`, `/wss` and `/tls/sni/<name>/ws` address kubo announces, and lists the results in `unmanagedAddresses` (`--json`) and the `browser-address` check. Each is `ok`, `failed` or `unconfirmed` with the reason, or `unverified`. It skips relay addresses and private IPs, and a name that resolves only to private addresses counts as failed. While kubo is down, `status` lists the addresses in kubo's config as `unverified`.
+On a node without `config.json`, `status` tries a real libp2p handshake with every public `/tls/ws`, `/wss` and `/tls/sni/<name>/ws` address kubo announces, and lists the results in `unmanagedAddresses` (`--json`) and the `browser-address` check. Each is `ok`, `failed` or `unconfirmed` with the reason, or `unverified`. It skips relay addresses and private IPs, and a name that resolves only to private addresses counts as failed. Names are resolved over public DNS, see [Where a name is resolved](#where-a-name-is-resolved). While kubo is down, `status` lists the addresses in kubo's config as `unverified`.
 
 A failed handshake is `failed` when every IP the address leads to is on one of the node's own interfaces, or the name resolves to nothing, because the node reaches its own IP directly. Any other IP goes through a router, which may not connect a machine to its own public address (no NAT hairpin), so that failure is `unconfirmed`: the `browser-address` check warns instead of failing.
 
@@ -96,6 +96,17 @@ A browser's libp2p gives up on an address after 6 seconds (js-libp2p's per-addre
 A failure through a `ts.net` name is always `failed`, never `unconfirmed`, because a Tailscale Funnel name leads to Tailscale's servers and not back through the node's own router.
 
 `status --json` lists every address that was dialed under `wssHandshakes`, `setup`'s own included, each with `status`, `handshakeMs`, and `slow`, `timedOut` or `error` where they apply. `unmanagedAddresses` keeps its meaning.
+
+#### Where a name is resolved
+
+Before a handshake with a `/dns4`, `/dns6` or `/dns` address, the name is resolved through public resolvers (`1.1.1.1`, then `8.8.8.8`, then `9.9.9.9`) and the connection goes to the addresses they return. TLS still checks the certificate against the name. This holds for `setup --announce`, `status` and the daemon.
+
+The machine's own resolver is not used for this, because it can lead somewhere browsers never go. With Tailscale's MagicDNS on, a machine resolves its own `ts.net` name to its tailnet address, so the handshake landed on whatever listened on the machine's own TCP 443 and `setup --announce` failed although the address worked from the internet ([#281](https://github.com/bitsocialnet/bitsocial-cli/issues/281)). A hosts-file entry or a split-horizon DNS server has the same effect.
+
+- Addresses that share a name, such as a `/dns4` and a `/dns6` address for one domain, are dialed one after the other, so each goes to its own records.
+- Only the name is sent to those resolvers, and only for a handshake. The checks of whether a `--domain` points at this machine still ask the resolvers the machine is configured with.
+- A name public DNS has no record for fails with `<name> has no A record in public DNS, so browsers cannot resolve it`.
+- If none of the public resolvers answers, as on a network that blocks outside DNS, the machine's own resolver is used. The same is reported if the connection turns out not to have used the public answer. `setup` then warns, and `status` adds `"systemDns": true` to the address in `wssHandshakes` and a sentence to the `wss-handshake` diagnostic, because that handshake may not have taken the path browsers take.
 
 For a `ts.net` address, `status` then measures the hop from Tailscale's Funnel ingress servers to the node, see [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address).
 
@@ -275,7 +286,7 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is l
 
 ## For maintainers
 
-**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages. `libp2p-dial.ts` is the handshake, `unmanaged.ts` the check of announced WSS addresses built on it (`checkWssAddresses`), and `tailscale.ts` the Funnel ingress ping.
+**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages. `libp2p-dial.ts` is the handshake, `public-dns.ts` the name lookup it starts with, `unmanaged.ts` the check of announced WSS addresses built on it (`checkWssAddresses`), and `tailscale.ts` the Funnel ingress ping.
 
 **Bumping Caddy.** Change `CADDY_VERSION` and all six entries of `CADDY_RELEASE_SHA256` in `src/reachability/caddy.ts`, in one commit. Compute the sha256 of each archive, and check the archives against the SHA-512 `checksums.txt` on the release first. Pinning in source matters because that file shares the download's origin.
 
@@ -303,5 +314,6 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is l
 
 - `setup` refuses the production Let's Encrypt directory when `CI` is set.
 - Node's global `WebSocket`, which libp2p uses, ignores TLS options. To trust Pebble, run the dial in a child process with `NODE_EXTRA_CA_CERTS`.
+- The public DNS lookup is injectable too: `resolveName` on `dialWithLibp2p`, `resolve` on `verifyUnmanagedAddresses` and `checkWssAddresses`, `query` on `resolveOverPublicDns`. Node's global `WebSocket` takes no resolver, so `withPinnedLookup` answers `dns.lookup` for the one name while the dial runs. `test/reachability/public-dns.test.ts` dials a loopback listener through a name only the injected resolver knows, which fails if that pin stops taking effect, for example after a Node or libp2p upgrade.
 - The `tailscale` command is run through an injectable `RunCommand` (`runTailscale` on `checkWssAddresses`, `run` on `pingFunnelIngress`), so tests fake it and never need Tailscale installed.
 - Other test files' kubos bind random ports, so a port chosen by a test can be taken before it is used (#87). Retry with a fresh port when that happens, and do not check "is this UDP port free" as a test assertion.

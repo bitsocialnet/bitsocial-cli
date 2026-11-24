@@ -86,6 +86,43 @@ describe("verifyUnmanagedAddresses", () => {
         expect(result).toMatchObject({ address: funnel, status: "failed", timedOut: true });
     });
 
+    // Issue #281: with MagicDNS this machine resolves its own ts.net name to its tailnet address. The check goes by
+    // what public DNS says, and hands those records to the dial so it takes the path browsers take.
+    describe("where the name leads", () => {
+        const funnel = "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws";
+        const relay = { v4: ["93.184.216.40"], v6: [], source: "public" as const };
+
+        it("dials the addresses the name was resolved to, instead of letting the dial resolve it again", async () => {
+            const dial = vi.fn(async () => ({ peerId, handshakeMs: 700 }));
+            const results = await verifyUnmanagedAddresses({ running: [`${funnel}/p2p/${peerId}`], config: [], dial, resolve: async () => relay });
+            expect(results).toEqual([{ address: funnel, status: "ok", handshakeMs: 700 }]);
+            expect(dial).toHaveBeenCalledWith(`${funnel}/p2p/${peerId}`, expect.objectContaining({ records: relay }));
+        });
+
+        it("says so when public DNS could not be reached and this machine's resolver was used", async () => {
+            const system = { ...relay, source: "system" as const };
+            const dial = async () => ({ peerId, handshakeMs: 700 });
+            const results = await verifyUnmanagedAddresses({ running: [`${funnel}/p2p/${peerId}`], config: [], dial, resolve: async () => system });
+            expect(results).toEqual([{ address: funnel, status: "ok", handshakeMs: 700, systemDns: true }]);
+            expect(wssHandshakeCheck(results)!.detail).toMatch(/resolved by this machine's own resolver/);
+        });
+
+        it("says so when the dial reports that it ended up on this machine's resolver after all", async () => {
+            const dial = async () => ({ peerId, handshakeMs: 700, dns: { name: "machine.tailnet.ts.net", source: "system" as const, ips: [] } });
+            const results = await verifyUnmanagedAddresses({ running: [`${funnel}/p2p/${peerId}`], config: [], dial, resolve: async () => relay });
+            expect(results).toEqual([{ address: funnel, status: "ok", handshakeMs: 700, systemDns: true }]);
+        });
+
+        it("still fails a name that even this machine's resolver only leads to a private address, as MagicDNS does", async () => {
+            const dial = vi.fn(async () => ({ peerId }));
+            const tailnet = { v4: ["100.101.102.103"], v6: [], source: "system" as const };
+            const results = await verifyUnmanagedAddresses({ running: [`${funnel}/p2p/${peerId}`], config: [], dial, resolve: async () => tailnet });
+            expect(results).toMatchObject([{ address: funnel, status: "failed", systemDns: true }]);
+            expect(results[0]!.error).toMatch(/resolves only to private addresses/);
+            expect(dial).not.toHaveBeenCalled();
+        });
+    });
+
     it("reports why a dial failed, on one line", async () => {
         const dial = async () => {
             throw new Error("connection\n  refused");

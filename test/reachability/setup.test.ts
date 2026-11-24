@@ -480,6 +480,27 @@ describe("a setup run that cannot issue any certificate", () => {
             }
         });
 
+        // Issue #281: the handshake goes where public DNS says. When no public resolver answered, it went where this
+        // machine's resolver says, which with MagicDNS is the machine itself, so the result deserves a caveat.
+        it("warns when the name could only be resolved by this machine's own resolver", async () => {
+            const rpc = await kuboRpc();
+            try {
+                const address = "/dns4/node.tailnet.ts.net/tcp/443/tls/ws";
+                const run = async (source: "public" | "system") => {
+                    const { options, deps, warnings } = await prepare();
+                    const dial = async () => ({ peerId: "peer", handshakeMs: 640, dns: { name: "node.tailnet.ts.net", source, ips: ["93.184.216.40"] } });
+                    await runReachabilitySetup(options({ kuboRpcUrl: rpc.url, announce: address, overrides: { publicIps: [], wsPort: 4002 } }), { ...deps, dial });
+                    return warnings.join("\n");
+                };
+                expect(await run("public")).not.toContain("public DNS");
+                const warned = await run("system");
+                expect(warned).toContain("No public DNS resolver could be reached");
+                expect(warned).toContain("node.tailnet.ts.net");
+            } finally {
+                await rpc.close();
+            }
+        });
+
         it("dials a just-enabled proxy again before refusing it, and refuses one that never answers", async () => {
             const rpc = await kuboRpc();
             try {

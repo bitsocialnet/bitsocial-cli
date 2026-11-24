@@ -2,7 +2,8 @@ import type { ReachabilityCheck } from "./checks.js";
 import { isPublicIp, localIpsFromInterfaces, type KuboAutonat } from "./discovery.js";
 import { TAILSCALE_FUNNEL_DOC } from "./guidance.js";
 import { BROWSER_DIAL_TIMEOUT_MS, dialWithLibp2p, formatSeconds, HandshakeTimeoutError, SLOW_HANDSHAKE_MS } from "./libp2p-dial.js";
-import { resolveDomainRecords, type ResolvedDomain } from "./setup.js";
+import { resolveOverPublicDns, type PublicRecords } from "./public-dns.js";
+import type { ResolvedDomain } from "./setup.js";
 import { isFunnelAddress, pingFunnelIngress, type FunnelIngressReport, type RunCommand } from "./tailscale.js";
 
 // Browser addresses kubo announces that `setup` did not put there: AutoTLS, or a reverse proxy set up by hand.
@@ -16,9 +17,14 @@ export interface UnmanagedAddress {
     slow?: true;
     // It did not finish in the time a browser allows.
     timedOut?: true;
+    // No public DNS resolver could be reached, so the name was resolved by this machine's own, which may not lead where it leads browsers.
+    systemDns?: true;
 }
 
-export type DialAddress = (address: string, options: { signal?: AbortSignal; timeoutMs?: number }) => Promise<{ peerId: string; handshakeMs?: number }>;
+export type DialAddress = (
+    address: string,
+    options: { signal?: AbortSignal; timeoutMs?: number; records?: PublicRecords }
+) => Promise<{ peerId: string; handshakeMs?: number; dns?: { source: PublicRecords["source"] } }>;
 
 export { SLOW_HANDSHAKE_MS };
 const BROWSER_DIALABLE = /\/(tls\/ws|wss|tls\/sni\/[^/]+\/ws)$/;
@@ -45,24 +51,36 @@ export async function verifyUnmanagedAddresses(input: {
     config: string[] | undefined;
     treatAsPublic?: string[];
     dial?: DialAddress;
-    resolve?: (name: string) => Promise<ResolvedDomain>;
+    // Over public DNS unless a test says otherwise. Records without a source count as public ones.
+    resolve?: (name: string) => Promise<ResolvedDomain & { source?: PublicRecords["source"] }>;
     signal?: AbortSignal;
     localIps?: string[];
 }): Promise<UnmanagedAddress[]> {
-    const { treatAsPublic = [], dial = dialWithLibp2p, resolve = resolveDomainRecords, signal, localIps = localIpsFromInterfaces() } = input;
+    const { treatAsPublic = [], dial = dialWithLibp2p, resolve = resolveOverPublicDns, signal, localIps = localIpsFromInterfaces() } = input;
     if (input.running === undefined) return uniqueBrowserAddresses(input.config ?? [], treatAsPublic).map(([address]) => ({ address, status: "unverified" }));
     return Promise.all(
         uniqueBrowserAddresses(input.running, treatAsPublic).map(async ([address, dialable]): Promise<UnmanagedAddress> => {
             let targets = [address.match(/^\/ip[46]\/([^/]+)\//)?.[1]].filter((ip) => ip !== undefined);
+            let records: PublicRecords | undefined;
+            const systemDns = () => (records?.source === "system" ? { systemDns: true as const } : {});
             try {
                 const name = address.match(/^\/dns[46]?\/([^/]+)\//)?.[1];
                 if (name) {
-                    const records = await resolve(name);
+                    const resolved = await resolve(name);
+                    records = { v4: resolved.v4, v6: resolved.v6, source: resolved.source ?? "public" };
                     targets = [...records.v4, ...records.v6];
-                    if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses` };
+                    if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses`, ...systemDns() };
                 }
-                const { handshakeMs } = await dial(dialable, { timeoutMs: BROWSER_DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}) });
-                return { address, status: "ok", ...(handshakeMs !== undefined ? { handshakeMs } : {}), ...(handshakeMs !== undefined && handshakeMs >= SLOW_HANDSHAKE_MS ? { slow: true as const } : {}) };
+                // The dial goes to the addresses found here, so it takes the same path whatever this machine's own resolver says.
+                const { handshakeMs, dns: dialed } = await dial(dialable, { timeoutMs: BROWSER_DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}), ...(records ? { records } : {}) });
+                return {
+                    address,
+                    status: "ok",
+                    ...(handshakeMs !== undefined ? { handshakeMs } : {}),
+                    ...(handshakeMs !== undefined && handshakeMs >= SLOW_HANDSHAKE_MS ? { slow: true as const } : {}),
+                    // The dial says so itself when the connection did not go where the records pointed.
+                    ...(dialed?.source === "system" ? { systemDns: true as const } : systemDns())
+                };
             } catch (error) {
                 // A machine reaches its own IP directly, so that failure is real. Any other IP goes through a router, which may not send it back (no NAT hairpin).
                 // A Funnel name leads to Tailscale's servers and never back through this machine's router, so its failure is real too.
@@ -71,7 +89,8 @@ export async function verifyUnmanagedAddresses(input: {
                     address,
                     status,
                     error: (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " "),
-                    ...(error instanceof HandshakeTimeoutError ? { timedOut: true as const } : {})
+                    ...(error instanceof HandshakeTimeoutError ? { timedOut: true as const } : {}),
+                    ...systemDns()
                 };
             }
         })
@@ -102,6 +121,8 @@ export async function checkWssAddresses(input: Parameters<typeof verifyUnmanaged
 }
 
 export const BROWSER_LIMIT = formatSeconds(BROWSER_DIAL_TIMEOUT_MS);
+const SYSTEM_DNS_CAVEAT =
+    "The name was resolved by this machine's own resolver, because no public DNS resolver could be reached or the connection did not use their answer, so it may not lead where it leads browsers";
 export const slowHandshakeMessage = ({ address, handshakeMs }: UnmanagedAddress) =>
     `the handshake through ${address} took ${formatSeconds(handshakeMs!)}, and browsers give up on an address after ${BROWSER_LIMIT}`;
 
@@ -117,7 +138,8 @@ export function wssHandshakeCheck(addresses: UnmanagedAddress[]): ReachabilityCh
     const detail = [
         ...timed.map(({ address, handshakeMs }) => `The WSS handshake through ${address} took ${formatSeconds(handshakeMs!)}`),
         ...timedOut.map(({ address, error }) => `Through ${address}, ${error}`),
-        ...(slow.length > 0 ? [`Browsers give up on an address after ${BROWSER_LIMIT}, and are usually further from it than this machine, so some will fail to connect`] : [])
+        ...(slow.length > 0 ? [`Browsers give up on an address after ${BROWSER_LIMIT}, and are usually further from it than this machine, so some will fail to connect`] : []),
+        ...([...timed, ...timedOut].some((address) => address.systemDns) ? [SYSTEM_DNS_CAVEAT] : [])
     ].join(". ");
     const troubled = [...slow, ...timedOut];
     if (troubled.length === 0) return { id, status: "ok", detail };
