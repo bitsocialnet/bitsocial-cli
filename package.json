@@ -149,12 +149,12 @@
     "overrides": {},
     "webuis": [
         {
-            "url": "https://github.com/bitsocialnet/seedit/releases/tag/v0.6.3",
-            "sha256OfHtmlZip": "61047535cd43d16ed848c8a0af26a5e0813e52af52a28b69e45579294d6aa98b"
+            "url": "https://github.com/bitsocialnet/seedit/releases/tag/v0.7.0",
+            "sha256OfHtmlZip": "a77f7025e6746c178d85f22ce1205e080af28e5703659841544929e9885587da"
         },
         {
-            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.10.4",
-            "sha256OfHtmlZip": "2cdd081d0d2e00cb7ce2ccd8242b58a7e1a07e4a8daca913c944e873a63a3170"
+            "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.11.0",
+            "sha256OfHtmlZip": "c8e5c84d372beff392aeefffbc5959475b4d4e228aafbc9bdfa115b722ce3526"
         }
     ]
 }
