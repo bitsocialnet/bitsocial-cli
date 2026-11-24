@@ -32,7 +32,7 @@ Bitsocial is p2p and decentralized social media protocol built completely with I
 
 ## Install
 
-Requires Node.js 22.19 or later. We recommend using [nvm](https://github.com/nvm-sh/nvm) to install and manage Node.js versions.
+Requires Node.js 22.19 or later. We recommend using [nvm](https://github.com/nvm-sh/nvm) to install and manage Node.js versions. On an older Node.js, from version 12 on, every `bitsocial` command prints the required and the running version and exits with code 1, instead of failing later with an unrelated error.
 
 ```sh-session
 npm install -g @bitsocial/bitsocial-cli

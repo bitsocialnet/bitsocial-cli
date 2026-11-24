@@ -65,7 +65,7 @@ The daemon enables the debug namespaces `bitsocial*,pkc*,-pkc*trace` by default.
 DEBUG='bitsocial*,pkc*' bitsocial daemon     # includes pkc-js trace output
 ```
 
-`bin/run` removes `DEBUG` from the environment before the CLI loads and passes it on as `_PKC_DEBUG`, so the `debug` module never prints to the terminal on its own. Setting `_PKC_DEBUG` directly has the same effect and wins over `DEBUG`. `DEBUG=0` or an empty value means unset.
+`bin/run-cli.js`, which `bin/run` loads once it has checked the Node version, removes `DEBUG` from the environment before the CLI loads and passes it on as `_PKC_DEBUG`, so the `debug` module never prints to the terminal on its own. Setting `_PKC_DEBUG` directly has the same effect and wins over `DEBUG`. `DEBUG=0` or an empty value means unset.
 
 Useful namespaces:
 
