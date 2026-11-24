@@ -144,6 +144,9 @@ export async function pingFunnelIngress(input: { run?: RunCommand; now?: () => n
 const formatHop = (hop: FunnelIngressHop) =>
     hop.latencyMs === undefined ? `${hop.address} did not answer` : `${Math.round(hop.latencyMs)} ms via ${hop.via}`;
 
+// The one-line form, for the daemon's log and the last periodic check that `status` prints.
+export const formatFunnelIngress = (report: FunnelIngressReport) => (report.status === "skipped" ? `not measured (${report.note})` : report.hops.map(formatHop).join(", "));
+
 export function funnelIngressCheck(report: FunnelIngressReport): ReachabilityCheck {
     const id = "funnel-ingress";
     if (report.status === "skipped") return { id, status: "unknown", detail: `The hop from Tailscale's Funnel ingress to this node was not measured: ${report.note}` };

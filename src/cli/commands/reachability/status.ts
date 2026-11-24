@@ -6,7 +6,7 @@ import { composeStatus, type StatusPresentation } from "../../../reachability/pr
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
 import { funnelIngressCheck, type FunnelIngressReport } from "../../../reachability/tailscale.js";
-import { autonatEvidence, browserAddressCheck, checkWssAddresses, wssHandshakeCheck, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
+import { autonatEvidence, browserAddressCheck, checkWssAddresses, formatPeriodicWssCheck, wssHandshakeCheck, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
 import { connectivityVerdict, formatConnectivity, type Connectivity } from "../../../reachability/verdict.js";
 import { resolveKuboRpcUrl } from "../../../util.js";
 
@@ -145,6 +145,8 @@ export default class Status extends Command {
             this.log(`Domain check ${domain}: ${state}${check.droppedFromAnnounce ? ", no longer announced" : ""} (checked ${check.lastCheckAt})`);
         }
         if (status.lastChecks?.caddy) this.log(`Caddy: ${status.lastChecks.caddy.running ? "running" : "not running"}`);
+        // What the daemon last found on its own schedule, which can differ from the handshake this run just made.
+        if (status.lastChecks?.wssChecks) for (const line of formatPeriodicWssCheck(status.lastChecks.wssChecks)) this.log(line);
         printSections();
         return result;
     }

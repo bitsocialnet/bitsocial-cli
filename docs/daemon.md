@@ -11,6 +11,7 @@
 | `--chainProviderUrls` | six public Ethereum RPCs (`src/common-utils/resolvers.ts`) | RPC URLs for `.bso` name resolution. Repeat the flag for several |
 | `--[no-]enableIpfsGc` | on | Garbage-collect the kubo repo periodically, see [kubo.md](kubo.md#garbage-collection) |
 | `--ipfsGcIntervalMinutes` | `60` | How often |
+| `--wssCheckIntervalMinutes` | `15` | How often the daemon checks that its announced browser (WSS) addresses still complete a handshake in the time a browser allows. `0` turns it off, and the largest value is `35791` (about 24.8 days). See [reachability.md](reachability.md#the-periodic-wss-check) |
 | `--[no-]allowPrivateKeyExport` | on | Whether RPC clients may request community exports that include the signer's private key |
 | `--pkcOptions.<name>` | | Any pkc-js option, passed to the RPC server's pkc-js instance |
 

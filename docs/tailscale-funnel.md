@@ -76,7 +76,7 @@ The ping is best effort. `status` skips it with a one-line reason, and still run
 tailscale funnel --https=443 off
 ```
 
-The daemon only checks that an `--announce` name resolves, and in testing the `ts.net` name still resolved 15 minutes after Funnel was turned off. So the node keeps announcing an address that no longer works. To stop announcing it, run `bitsocial reachability disable --purge`, then `setup` again. A plain `disable` keeps the address for the next `setup`.
+The daemon never stops announcing an `--announce` address by itself unless its name stops resolving, and in testing the `ts.net` name still resolved 15 minutes after Funnel was turned off. So the node keeps announcing an address that no longer works. Its [periodic WSS check](reachability.md#the-periodic-wss-check) warns that the handshake fails, and leaves the address announced. To stop announcing it, run `bitsocial reachability disable --purge`, then `setup` again. A plain `disable` keeps the address for the next `setup`.
 
 ### As a second address
 
@@ -139,6 +139,8 @@ A Funnel address can become too slow for browsers to connect while everything on
 One node out of three is not a rate. While its path was healthy, Funnel passed 21 of 21 runs on iOS Safari and several days of desktop testing.
 
 **What follows from it.** The handshake `setup --announce` makes proves the path only at the moment it runs. An address that was verified can stop working for browsers later without anything changing on the node.
+
+**How you find out.** The daemon dials the announced address every 15 minutes, the way `status` does, and prints a warning when the handshake has become slow or no longer finishes, or when the hop from Tailscale's ingress is slow. Every result goes to the log file with its timings, and `status` shows the last one and the last problem under `Last periodic WSS check`. See [The periodic WSS check](reachability.md#the-periodic-wss-check).
 
 **How to check.** Run `bitsocial reachability status` on the node and read the two lines described in [Checking a Funnel address](#checking-a-funnel-address):
 

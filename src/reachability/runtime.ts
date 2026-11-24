@@ -19,15 +19,21 @@ import {
     writeReachabilityConfig,
     writeReachabilityRuntimeStatus,
     type ReachabilityConfig,
-    type ReachabilityRuntimeStatus
+    type ReachabilityRuntimeStatus,
+    type WssAddressCheck
 } from "./state.js";
+import { formatFunnelIngress, funnelIngressCheck, type RunCommand } from "./tailscale.js";
 import { setTimeout as delay } from "timers/promises";
 import {
     autonatEvidence,
+    checkWssAddresses,
+    describeWssCheck,
     desktopOnlyMessage,
     handshakeFailedMessage,
     handshakeSucceededMessage,
     isBrowserAddress,
+    slowHandshakeMessage,
+    summarizeWssResult,
     unconfirmedMessage,
     unverifiedMessage,
     verifyUnmanagedAddresses,
@@ -39,6 +45,10 @@ import {
 export const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 export const LEASE_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
 export const CADDY_WATCH_INTERVAL_MS = 5000;
+// How often the announced WSS addresses are dialed the way `status` dials them, unless the daemon's flag says otherwise.
+export const WSS_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+// Not at once: kubo and Caddy may still be starting, and a failure then would be a false alarm.
+const WSS_CHECK_FIRST_DELAY_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 export const STALE_NAME_DROP_AFTER_MS = 24 * HOUR_MS;
 export const CERTIFICATE_WARNING_HOURS = 24;
@@ -154,6 +164,13 @@ export interface RuntimeDependencies {
     announcedAddresses?: () => Promise<string[] | undefined>;
     // IPs counted as public, so tests can stand loopback in for a public address.
     treatAsPublic?: string[];
+    // How often to check the announced WSS addresses. 0 turns the check off. Set from the daemon's --wssCheckIntervalMinutes.
+    wssCheckIntervalMs?: number;
+    wssCheckFirstDelayMs?: number;
+    // Where routine results go: the log file, not the operator's terminal. Falls back to log.
+    record?: (message: string) => void;
+    // The tailscale command, so tests need no Tailscale.
+    runTailscale?: RunCommand;
 }
 
 export class ReachabilityRuntime {
@@ -180,6 +197,11 @@ export class ReachabilityRuntime {
     private publicAnnounceCheck: Promise<void> | undefined;
     // What the last check of an undecided node found, so an hourly check repeats warnings but not successes.
     private browserAddressesWork: boolean | undefined;
+    private wssCheckInFlight: Promise<void> | undefined;
+    private statusWrites: Promise<void> = Promise.resolve();
+    // Announced addresses whose last periodic check was slow or failed, so a recovery is logged once.
+    private readonly wssTrouble = new Set<string>();
+    private funnelIngressSlow = false;
 
     constructor(deps: RuntimeDependencies) {
         this.deps = deps;
@@ -216,6 +238,21 @@ export class ReachabilityRuntime {
         this.timers.push(setInterval(() => void this.runChecks().catch((error) => this.deps.warn(String(error))), CHECK_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.refreshLeases().catch((error) => this.deps.warn(String(error))), LEASE_REFRESH_INTERVAL_MS));
         this.timers.push(setInterval(() => void this.recheckUndecided().catch((error) => this.deps.warn(String(error))), UNDECIDED_RECHECK_INTERVAL_MS));
+        // Node turns a timer longer than this into one that fires after 1 ms.
+        const wssCheckIntervalMs = Math.min(this.deps.wssCheckIntervalMs ?? WSS_CHECK_INTERVAL_MS, 2 ** 31 - 1);
+        if (wssCheckIntervalMs > 0) {
+            const check = () => void this.runWssCheck().catch((error) => this.deps.warn(String(error)));
+            const firstDelayMs = Math.min(this.deps.wssCheckFirstDelayMs ?? WSS_CHECK_FIRST_DELAY_MS, wssCheckIntervalMs);
+            this.timers.push(
+                setTimeout(() => {
+                    check();
+                    if (this.stopping) return;
+                    const interval = setInterval(check, wssCheckIntervalMs);
+                    interval.unref();
+                    this.timers.push(interval);
+                }, firstDelayMs)
+            );
+        }
         for (const timer of this.timers) timer.unref();
     }
 
@@ -685,7 +722,99 @@ export class ReachabilityRuntime {
         await this.checkCertificates(config);
         status.caddy = { running: this.caddyRunning };
         status.updatedAt = nowIso;
-        await writeReachabilityRuntimeStatus(this.deps.dataPath, status);
+        // The periodic WSS check writes this file too, and may have done so while the steps above ran.
+        await this.updateRuntimeStatus((latest) => {
+            const { wssChecks: stale, ...checked } = status;
+            void stale;
+            return { ...checked, ...(latest?.wssChecks ? { wssChecks: latest.wssChecks } : {}) };
+        });
+    }
+
+    // The five-minute checks and the periodic WSS check each own some fields of runtime-status.json. Every write
+    // goes through here, one at a time and starting from what is on disk, so neither overwrites the other's fields
+    // and the two never share the temporary file the write goes through.
+    private updateRuntimeStatus(update: (latest: ReachabilityRuntimeStatus | null) => ReachabilityRuntimeStatus): Promise<void> {
+        const write = this.statusWrites.then(async () => writeReachabilityRuntimeStatus(this.deps.dataPath, update(await readReachabilityRuntimeStatus(this.deps.dataPath))));
+        this.statusWrites = write.catch(() => {});
+        return write;
+    }
+
+    // Single-flight: on a path so slow that every dial runs into its limit, a short interval could otherwise overlap.
+    runWssCheck(): Promise<void> {
+        this.wssCheckInFlight ??= this.runWssCheckOnce().finally(() => {
+            this.wssCheckInFlight = undefined;
+        });
+        return this.wssCheckInFlight;
+    }
+
+    // The check `status` runs, on a schedule (#283): an address that passed setup can become too slow for browsers
+    // hours later while everything on the node looks healthy. It only observes. Nothing here changes what is
+    // announced, because a slow address may still serve some browsers and a failed dial from this machine is weak proof.
+    private async runWssCheckOnce(): Promise<void> {
+        if (this.stopping) return;
+        const config = await this.readConfig();
+        const treatAsPublic = this.deps.treatAsPublic ?? [];
+        const announced = config?.enabled ? config.announce.filter((address) => isBrowserAddress(address, treatAsPublic)) : [];
+        if (announced.length === 0) return;
+        const identity = await (this.deps.kuboIdentity ?? (() => kuboIdentity(this.deps.kuboRpcUrl)))();
+        // Nothing to dial while kubo is down, and its absence is reported elsewhere.
+        if (!identity) return;
+        const { addresses, funnelIngress } = await checkWssAddresses({
+            running: announced.map((address) => `${address}/p2p/${identity.peerId}`),
+            config: [],
+            signal: this.stopController.signal,
+            treatAsPublic,
+            now: this.now,
+            ...(this.deps.dialAddress ? { dial: this.deps.dialAddress } : {}),
+            ...(this.deps.resolveDomain ? { resolve: this.deps.resolveDomain } : {}),
+            ...(this.deps.localIps ? { localIps: this.deps.localIps } : {}),
+            ...(this.deps.runTailscale ? { runTailscale: this.deps.runTailscale } : {}),
+            ...(this.deps.platform ? { platform: this.deps.platform } : {})
+        });
+        if (this.stopping) return;
+
+        const nowIso = new Date(this.now()).toISOString();
+        const checked: Record<string, WssAddressCheck> = {};
+        const summary: string[] = [];
+        for (const result of addresses) {
+            const check = summarizeWssResult(result);
+            const description = describeWssCheck(check);
+            summary.push(`${result.address} ${description}`);
+            const troubled = check.status === "slow" || check.status === "failed";
+            checked[result.address] = { ...check, ...(troubled ? { lastProblemAt: nowIso, lastProblem: description } : {}) };
+            const key = `wss:${result.address}`;
+            if (troubled) {
+                this.wssTrouble.add(result.address);
+                const finding =
+                    check.status === "slow"
+                        ? `An announced browser address has become slow: ${slowHandshakeMessage(result)}, so some will fail to connect`
+                        : `An announced browser address is not working: the handshake through ${result.address} failed (${result.error})`;
+                this.warnThrottled(key, `${finding}. ${STATUS_HINT}`);
+            } else if (check.status === "ok") {
+                if (this.wssTrouble.delete(result.address)) this.deps.log(`${result.address} completes a handshake in time again${check.handshakeMs === undefined ? "" : ` (${check.handshakeMs} ms)`}.`);
+                this.lastWarned.delete(key);
+            }
+        }
+        if (funnelIngress?.status === "warn") {
+            this.funnelIngressSlow = true;
+            this.warnThrottled("funnel-ingress", `${funnelIngressCheck(funnelIngress).detail}. ${STATUS_HINT}`);
+        } else if (funnelIngress?.status === "ok") {
+            if (this.funnelIngressSlow) this.deps.log(`The hop from Tailscale's Funnel ingress to this node is back to normal (${formatFunnelIngress(funnelIngress)}).`);
+            this.funnelIngressSlow = false;
+            this.lastWarned.delete("funnel-ingress");
+        }
+        // Every result, good or bad, so the log shows how often a path degrades and for how long.
+        (this.deps.record ?? this.deps.log)(`WSS check: ${summary.join("; ")}${funnelIngress ? `. Funnel ingress: ${formatFunnelIngress(funnelIngress)}` : ""}`);
+        await this.updateRuntimeStatus((latest) => {
+            // An address that is fine now keeps the last problem it had on record.
+            const previous = latest?.wssChecks?.addresses ?? {};
+            for (const [address, check] of Object.entries(checked)) {
+                const before = previous[address];
+                if (check.lastProblemAt === undefined && before?.lastProblemAt)
+                    checked[address] = { ...check, lastProblemAt: before.lastProblemAt, ...(before.lastProblem ? { lastProblem: before.lastProblem } : {}) };
+            }
+            return { ...(latest ?? { updatedAt: nowIso }), wssChecks: { at: nowIso, addresses: checked, ...(funnelIngress ? { funnelIngress } : {}) } };
+        });
     }
 
     async refreshLeases(): Promise<void> {
@@ -714,6 +843,8 @@ export class ReachabilityRuntime {
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
         await this.checkInFlight?.catch(() => {});
+        await this.wssCheckInFlight?.catch(() => {});
+        await this.statusWrites;
         await this.browserAddressCheck;
         await this.publicAnnounceCheck;
         await this.watchQueue;

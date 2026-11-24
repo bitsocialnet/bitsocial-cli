@@ -121,6 +121,15 @@ export default class Daemon extends Command {
             min: 1
         }),
 
+        wssCheckIntervalMinutes: Flags.integer({
+            description:
+                "How often to check that this node's announced browser (WSS) addresses still complete a handshake within the 6 seconds a browser allows, in minutes. Warns when one has become slow or stopped working. 0 turns the check off",
+            default: 15,
+            min: 0,
+            // About 24.8 days. Node turns a longer timer into one that fires after 1 ms.
+            max: 35791
+        }),
+
         allowPrivateKeyExport: Flags.boolean({
             description:
                 "Allow RPC clients to request community exports that include the community signer's private key (`bitsocial community export --includePrivateKey`). Disable with --no-allowPrivateKeyExport when exposing the RPC to untrusted clients",
@@ -813,10 +822,13 @@ export default class Daemon extends Command {
                         dataPath: mergedPkcOptions.dataPath!,
                         kuboRepoPath: resolveKuboRepoPath(mergedPkcOptions.dataPath!),
                         kuboRpcUrl: kuboRpcEndpoint,
+                        wssCheckIntervalMs: flags.wssCheckIntervalMinutes * 60 * 1000,
                         log: (message) => {
                             console.log(message);
                             reachabilityLog(message);
                         },
+                        // Routine check results: every one goes to the log file, and only problems to the terminal.
+                        record: (message) => reachabilityLog(message),
                         // stdout, because stderr goes only to the log file and operators need to see these.
                         warn: (message) => {
                             console.log(`Warning: ${message}`);

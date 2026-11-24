@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import net from "net";
 import path from "path";
 import type { KuboEditRecord } from "./kubo-config.js";
+import type { FunnelIngressReport } from "./tailscale.js";
 
 export const REACHABILITY_CONFIG_VERSION = 1;
 
@@ -48,8 +49,27 @@ export interface ReachabilityConfig {
 
 // Written only by the daemon, in its own file so a check landing mid-setup cannot overwrite the
 // operator's config with a stale copy.
+// What the daemon's periodic check found for one announced WSS address. "slow" is a handshake that worked but took
+// 3 seconds or more, and "unconfirmed" one this machine could not test from inside its own network.
+export interface WssAddressCheck {
+    status: "ok" | "slow" | "failed" | "unconfirmed";
+    handshakeMs?: number;
+    error?: string;
+    // The last time it was slow or failed, kept after it recovers so a past problem stays visible.
+    lastProblemAt?: string;
+    lastProblem?: string;
+}
+
+export interface PeriodicWssCheck {
+    at: string;
+    addresses: Record<string, WssAddressCheck>;
+    // Present when a ts.net address is announced.
+    funnelIngress?: FunnelIngressReport;
+}
+
 export interface ReachabilityRuntimeStatus {
     updatedAt: string;
+    wssChecks?: PeriodicWssCheck;
     lastIpCheck?: { at: string; publicIps: string[] };
     domains?: Record<string, { lastCheckAt: string; ok: boolean; failingSince?: string; droppedFromAnnounce?: boolean }>;
     caddy?: { running: boolean; lastExitAt?: string };
@@ -167,7 +187,11 @@ const isPlainObject = (value: unknown): value is Record<string, any> => value !=
 
 function isRuntimeStatus(value: unknown): value is ReachabilityRuntimeStatus {
     if (!isPlainObject(value) || typeof value["updatedAt"] !== "string") return false;
-    const { lastIpCheck, domains, caddy } = value;
+    const { lastIpCheck, domains, caddy, wssChecks } = value;
+    if (wssChecks !== undefined) {
+        if (!isPlainObject(wssChecks) || typeof wssChecks["at"] !== "string" || !isPlainObject(wssChecks["addresses"])) return false;
+        for (const address of Object.values(wssChecks["addresses"])) if (!isPlainObject(address) || typeof address["status"] !== "string") return false;
+    }
     if (lastIpCheck !== undefined && !(isPlainObject(lastIpCheck) && typeof lastIpCheck["at"] === "string" && isStringArray(lastIpCheck["publicIps"])))
         return false;
     if (domains !== undefined) {

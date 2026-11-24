@@ -137,7 +137,7 @@ kubo listens for WebTransport on `/udp/4001/quic-v1/webtransport` by default, so
 
 ### IP changes with your own proxy
 
-A proxy serving an IP address has that address hard-coded in its config and in `--announce`. **If the IP changes, you must update both.** The daemon does not check `/ip4` addresses served by your own proxy, so an old one stays announced. On a dynamic IP, use a domain instead. The daemon does check `/dns4` names, as described below.
+A proxy serving an IP address has that address hard-coded in its config and in `--announce`. **If the IP changes, you must update both.** The daemon does not re-derive `/ip4` addresses served by your own proxy, so an old one stays announced. Its [periodic WSS check](#the-periodic-wss-check) dials it, but a failed handshake with an IP that is not on this machine counts as untestable from here and does not warn. On a dynamic IP, use a domain instead. The daemon does check `/dns4` names, as described below.
 
 ## What changes in the kubo config
 
@@ -160,7 +160,7 @@ Only the first row applies until something can terminate WSS.
 ```
 <dataPath>/reachability/
 ├── config.json           # your choices, versioned; a newer version than this CLI understands is refused
-├── runtime-status.json   # the daemon's last checks; only the daemon writes it
+├── runtime-status.json   # the daemon's last checks, the periodic WSS check included; only the daemon writes it
 ├── Caddyfile             # generated, do not edit
 ├── bin/caddy-<version>   # downloaded on first setup
 ├── caddy-data/           # certificates and the ACME account
@@ -181,6 +181,7 @@ When `config.json` exists and is enabled, the daemon runs Caddy as a child proce
 | Every hour, while undecided | Repeats that check once and warns again if nothing works (see [Declining](#declining)) |
 | Every 5 s | Starts, reloads or stops Caddy to match the stored state, so `setup`, `enable` and `disable` apply to a running daemon and a crashed Caddy comes back |
 | Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
+| Every 15 min, first after 1 min | Dials every announced WSS address the way `status` does and warns when one has become slow or stopped working, see [The periodic WSS check](#the-periodic-wss-check). `--wssCheckIntervalMinutes` on `bitsocial daemon` sets the interval, and `0` turns it off |
 | At start and every 20 min | Renews router forwards when there is no public IPv4 on an interface. They are released on shutdown or once disabled |
 
 **IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued at all, it keeps the stored addresses.
@@ -192,6 +193,30 @@ Either way it waits before asking again for the family that failed: 1 hour, doub
 **Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Rerunning `setup` can also announce it again, which starts a new 24 hours. Rerunning `setup` while a name still points elsewhere stops announcing it straight away, and the daemon announces it again when it recovers. The name keeps its Caddy site throughout, so its certificate is there when it does. The exception is another server holding TCP 443, where the name waits for `setup` to be run again. Moving to another `--domain` forgets a dropped name for the old one. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
 
 **Mode.** Whenever the daemon changes the announced addresses, it updates `mode` to match them and logs the change, so `status` never shows a domain or proxy that is no longer announced. A node whose only address was dropped shows `webtransport-only` until it recovers. Each 5-minute check also corrects a stored `mode` that disagrees with the addresses, without touching kubo. A name passed with `--force` that is also a proxy address counts as `domain` only while the Caddyfile has a site for it, because the address alone cannot show whether that name got its own certificate, and `setup` adds that site only when it did.
+
+### The periodic WSS check
+
+An address that passed `setup` can stop working for browsers later without anything changing on the node. A Tailscale Funnel address did, about two hours after `setup` verified it ([A Funnel path can degrade](tailscale-funnel.md#a-funnel-path-can-degrade)). So while reachability is enabled and a WSS address is announced, the daemon runs the check `status` runs (`checkWssAddresses`) on a schedule: a handshake with each announced address, cut off at the 6 seconds a browser allows and timed, with the name resolved over public DNS, and for a `ts.net` address the latency from Tailscale's Funnel ingress servers.
+
+| Result | What the daemon does |
+| --- | --- |
+| Every check | Writes one line to the log file with the timings, for example `WSS check: /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws completed a handshake in 700 ms. Funnel ingress: 91 ms via DERP(par)`. Read them with `bitsocial logs`. They are the record of how often a path degrades and for how long |
+| A handshake took 3 s or more, or failed, including not finishing in 6 s | Warns on stdout, with the time or the reason. Repeats at most once an hour while it lasts |
+| The Funnel ingress latency is 500 ms or more, or a server does not answer | Warns on stdout, at most once an hour |
+| An address or the ingress hop is back to normal | Logs it once on stdout |
+| An address this machine cannot test from inside its own network (`unconfirmed`, usually no NAT hairpin) | Only the line in the log file. No warning, because the failure says nothing about other networks |
+
+The check only observes. It never stops announcing an address or changes the kubo config, because a slow address may still serve some browsers and a failed dial from the node's own machine is weak evidence.
+
+The last result is stored under `wssChecks` in `runtime-status.json`, with the time it was taken, each address's `status` (`ok`, `slow`, `failed` or `unconfirmed`), `handshakeMs` or `error`, and `funnelIngress`. A slow or failed result also sets `lastProblemAt` and `lastProblem`, which stay after the address recovers. `status` prints all of it, so a problem from last night is visible on a node that works now, and `--json` has it under `lastChecks.wssChecks`:
+
+```
+Last periodic WSS check: 2026-11-02T00:15:00.000Z
+  /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws: completed a handshake in 650 ms; last problem 2026-11-02T00:00:00.000Z (slow handshake in 4230 ms)
+  Funnel ingress: 91 ms via DERP(par)
+```
+
+The check is skipped while kubo does not answer, while reachability is disabled, and on a node `setup` has not configured, which has the hourly check described under [Addresses `setup` does not manage](#addresses-setup-does-not-manage).
 
 **Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
 

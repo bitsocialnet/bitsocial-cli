@@ -241,6 +241,18 @@ describe("reachability status", () => {
         expect((await readReachabilityStatus(dataPath)).lastChecks).toEqual(lastChecks);
     });
 
+    it("includes the daemon's last periodic WSS check (#283)", async () => {
+        const dataPath = randomDirectory();
+        await writeReachabilityConfig(dataPath, validConfig());
+        const wssChecks = {
+            at: "2026-11-02T00:15:00.000Z",
+            addresses: { "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws": { status: "ok" as const, handshakeMs: 650, lastProblemAt: "2026-11-02T00:00:00.000Z", lastProblem: "slow handshake in 4230 ms" } },
+            funnelIngress: { status: "ok" as const, hops: [{ address: "fd7a::1", relay: "par", latencyMs: 91, via: "DERP(par)" }] }
+        };
+        await writeReachabilityRuntimeStatus(dataPath, { updatedAt: "2026-11-02T00:15:00.000Z", wssChecks });
+        expect((await readReachabilityStatus(dataPath)).lastChecks?.wssChecks).toEqual(wssChecks);
+    });
+
     it.each([
         ["broken JSON", "{ broken"],
         ["a list", "[]"],
@@ -248,7 +260,10 @@ describe("reachability status", () => {
         ["publicIps not a list", JSON.stringify({ updatedAt: "x", lastIpCheck: { at: "x", publicIps: "1.1.1.1" } })],
         ["domains not an object", JSON.stringify({ updatedAt: "x", domains: [] })],
         ["a malformed domain entry", JSON.stringify({ updatedAt: "x", domains: { a: { ok: "yes" } } })],
-        ["caddy.running not a boolean", JSON.stringify({ updatedAt: "x", caddy: { running: 1 } })]
+        ["caddy.running not a boolean", JSON.stringify({ updatedAt: "x", caddy: { running: 1 } })],
+        ["wssChecks not an object", JSON.stringify({ updatedAt: "x", wssChecks: [] })],
+        ["wssChecks without addresses", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x" } })],
+        ["a malformed wssChecks entry", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x", addresses: { a: { status: 5 } } } })]
     ])("treats a runtime status file with %s as no checks yet", async (_label, content) => {
         const dataPath = randomDirectory();
         await writeReachabilityConfig(dataPath, validConfig());

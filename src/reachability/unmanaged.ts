@@ -4,7 +4,8 @@ import { TAILSCALE_FUNNEL_DOC } from "./guidance.js";
 import { BROWSER_DIAL_TIMEOUT_MS, dialWithLibp2p, formatSeconds, HandshakeTimeoutError, SLOW_HANDSHAKE_MS } from "./libp2p-dial.js";
 import { resolveOverPublicDns, type PublicRecords } from "./public-dns.js";
 import type { ResolvedDomain } from "./setup.js";
-import { isFunnelAddress, pingFunnelIngress, type FunnelIngressReport, type RunCommand } from "./tailscale.js";
+import type { PeriodicWssCheck, WssAddressCheck } from "./state.js";
+import { formatFunnelIngress, isFunnelAddress, pingFunnelIngress, type FunnelIngressReport, type RunCommand } from "./tailscale.js";
 
 // Browser addresses kubo announces that `setup` did not put there: AutoTLS, or a reverse proxy set up by hand.
 export interface UnmanagedAddress {
@@ -147,6 +148,33 @@ export function wssHandshakeCheck(addresses: UnmanagedAddress[]): ReachabilityCh
         ? `The Funnel path to this node is slow, which this node cannot repair. See "A Funnel path can degrade" in ${TAILSCALE_FUNNEL_DOC}`
         : "Check the server in front of kubo and the network path to it: the handshake is too slow for browsers";
     return { id, status: timedOut.length > 0 ? "fail" : "warn", detail, fix };
+}
+
+// One result of the daemon's periodic check, as it is stored and logged. Milliseconds, because these lines are the
+// record of how often and how badly a path degrades.
+export function summarizeWssResult(result: UnmanagedAddress): Pick<WssAddressCheck, "status" | "handshakeMs" | "error"> {
+    const status = result.status === "ok" ? (result.slow ? "slow" : "ok") : result.status === "failed" ? "failed" : "unconfirmed";
+    return { status, ...(result.handshakeMs !== undefined ? { handshakeMs: result.handshakeMs } : {}), ...(result.error !== undefined ? { error: result.error } : {}) };
+}
+
+export function describeWssCheck(check: Pick<WssAddressCheck, "status" | "handshakeMs" | "error">): string {
+    const took = check.handshakeMs === undefined ? "" : ` in ${check.handshakeMs} ms`;
+    if (check.status === "ok") return `completed a handshake${took}`;
+    if (check.status === "slow") return `slow handshake${took}`;
+    if (check.status === "failed") return `failed: ${check.error ?? "unknown reason"}`;
+    return `could not be tested from this machine: ${check.error ?? "unknown reason"}`;
+}
+
+// What `status` prints for the daemon's last periodic check. A problem the address has recovered from is kept on its line.
+export function formatPeriodicWssCheck(check: PeriodicWssCheck): string[] {
+    const lines = [`Last periodic WSS check: ${check.at}`];
+    for (const [address, result] of Object.entries(check.addresses)) {
+        const recovered = result.status === "ok" || result.status === "unconfirmed";
+        const past = recovered && result.lastProblemAt ? `; last problem ${result.lastProblemAt}${result.lastProblem ? ` (${result.lastProblem})` : ""}` : "";
+        lines.push(`  ${address}: ${describeWssCheck(result)}${past}`);
+    }
+    if (check.funnelIngress) lines.push(`  Funnel ingress: ${formatFunnelIngress(check.funnelIngress)}`);
+    return lines;
 }
 
 // Says what was tested, not "browsers can reach it": a machine dialing its own address never crosses a provider's firewall.
