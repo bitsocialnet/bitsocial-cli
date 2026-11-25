@@ -155,6 +155,10 @@
         {
             "url": "https://github.com/bitsocialnet/5chan/releases/tag/v0.11.0",
             "sha256OfHtmlZip": "c8e5c84d372beff392aeefffbc5959475b4d4e228aafbc9bdfa115b722ce3526"
+        },
+        {
+            "url": "https://github.com/bitsocialnet/bitbones/releases/tag/v0.2.0",
+            "sha256OfHtmlZip": "b44c3fd62bf9c3a547e4e2b3b59486620dd3a6313cd6672a7be72d00f70bdef1"
         }
     ]
 }
