@@ -73,18 +73,26 @@ export async function dialWithLibp2p(address: string, { timeoutMs = BROWSER_DIAL
         // The default gater refuses private addresses, and verifying them is the operator's call.
         connectionGater: { denyDialMultiaddr: () => false }
     });
-    const timeout = AbortSignal.timeout(timeoutMs);
-    const startedAt = performance.now();
+    // Both start once the dial does: withPinnedLookup may first wait for another dial through the same name, and
+    // that wait is neither part of the handshake nor of the time a browser allows it.
+    let timeout: AbortSignal | undefined;
+    let handshakeMs = 0;
     try {
-        // libp2p types Multiaddr from its own nested copy of the package; the runtime object is the same.
-        const dial = () => node.dial(parsed as unknown as Parameters<typeof node.dial>[0], { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+        const dial = async () => {
+            timeout = AbortSignal.timeout(timeoutMs);
+            const startedAt = performance.now();
+            // libp2p types Multiaddr from its own nested copy of the package; the runtime object is the same.
+            const connection = await node.dial(parsed as unknown as Parameters<typeof node.dial>[0], { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+            handshakeMs = Math.round(performance.now() - startedAt);
+            return connection;
+        };
         const { result: connection, lookups } = pinned ? await withPinnedLookup(pinned.name, pinned.ips, dial) : { result: await dial(), lookups: 0 };
         // A connection that never asked the pin resolved the name by itself, with this machine's resolver.
         const dns = pinned && lookups === 0 ? { name: pinned.name, source: "system" as const, ips: [] } : pinned;
-        return { peerId: connection.remotePeer.toString(), handshakeMs: Math.round(performance.now() - startedAt), ...(dns ? { dns } : {}) };
+        return { peerId: connection.remotePeer.toString(), handshakeMs, ...(dns ? { dns } : {}) };
     } catch (error) {
         // libp2p reports an aborted dial in several shapes, so the clock decides. A caller's own abort is not a timeout.
-        if (timeout.aborted && !signal?.aborted) throw new HandshakeTimeoutError(timeoutMs);
+        if (timeout?.aborted && !signal?.aborted) throw new HandshakeTimeoutError(timeoutMs);
         // A WebSocket that fails to open rejects with an ErrorEvent, which prints as "[object ErrorEvent]".
         if (error instanceof Error) throw error;
         const { message, error: cause } = (error ?? {}) as { message?: unknown; error?: { message?: unknown } };

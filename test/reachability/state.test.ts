@@ -243,7 +243,7 @@ describe("reachability status", () => {
 
     it("includes the daemon's last periodic WSS check (#283)", async () => {
         const dataPath = randomDirectory();
-        await writeReachabilityConfig(dataPath, validConfig());
+        await writeReachabilityConfig(dataPath, { ...validConfig(), announce: ["/dns4/machine.tailnet.ts.net/tcp/443/tls/ws"] });
         const wssChecks = {
             at: "2026-11-02T00:15:00.000Z",
             addresses: { "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws": { status: "ok" as const, handshakeMs: 650, lastProblemAt: "2026-11-02T00:00:00.000Z", lastProblem: "slow handshake in 4230 ms" } },
@@ -251,6 +251,39 @@ describe("reachability status", () => {
         };
         await writeReachabilityRuntimeStatus(dataPath, { updatedAt: "2026-11-02T00:15:00.000Z", wssChecks });
         expect((await readReachabilityStatus(dataPath)).lastChecks?.wssChecks).toEqual(wssChecks);
+    });
+
+    // The daemon's last check can predate a change to the addresses, and its result for one no longer announced is not news.
+    describe("leaves out a periodic WSS result that no longer applies", () => {
+        const announced = "/ip4/203.0.113.7/tcp/443/tls/ws";
+        const dropped = "/dns4/old.example/tcp/443/tls/ws";
+        const wssChecks = {
+            at: "2026-11-02T00:15:00.000Z",
+            addresses: { [announced]: { status: "ok" as const, handshakeMs: 650 }, [dropped]: { status: "slow" as const, handshakeMs: 4230 } }
+        };
+
+        it("for an address that is no longer announced", async () => {
+            const dataPath = randomDirectory();
+            await writeReachabilityConfig(dataPath, validConfig());
+            await writeReachabilityRuntimeStatus(dataPath, { updatedAt: "2026-11-02T00:15:00.000Z", wssChecks });
+            expect((await readReachabilityStatus(dataPath)).lastChecks?.wssChecks).toEqual({ at: wssChecks.at, addresses: { [announced]: wssChecks.addresses[announced] } });
+        });
+
+        it("altogether once reachability is disabled", async () => {
+            const dataPath = randomDirectory();
+            await writeReachabilityConfig(dataPath, { ...validConfig(), enabled: false });
+            await writeReachabilityRuntimeStatus(dataPath, { updatedAt: "2026-11-02T00:15:00.000Z", lastIpCheck: { at: "2026-11-02T00:15:00.000Z", publicIps: [] }, wssChecks });
+            const { lastChecks } = await readReachabilityStatus(dataPath);
+            expect(lastChecks?.wssChecks).toBeUndefined();
+            expect(lastChecks?.lastIpCheck).toBeDefined();
+        });
+
+        it("altogether once none of its addresses is announced", async () => {
+            const dataPath = randomDirectory();
+            await writeReachabilityConfig(dataPath, { ...validConfig(), announce: ["/ip4/203.0.113.8/tcp/443/tls/ws"] });
+            await writeReachabilityRuntimeStatus(dataPath, { updatedAt: "2026-11-02T00:15:00.000Z", wssChecks });
+            expect((await readReachabilityStatus(dataPath)).lastChecks?.wssChecks).toBeUndefined();
+        });
     });
 
     it.each([
@@ -263,7 +296,9 @@ describe("reachability status", () => {
         ["caddy.running not a boolean", JSON.stringify({ updatedAt: "x", caddy: { running: 1 } })],
         ["wssChecks not an object", JSON.stringify({ updatedAt: "x", wssChecks: [] })],
         ["wssChecks without addresses", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x" } })],
-        ["a malformed wssChecks entry", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x", addresses: { a: { status: 5 } } } })]
+        ["a malformed wssChecks entry", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x", addresses: { a: { status: 5 } } } })],
+        ["a funnelIngress without hops", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x", addresses: {}, funnelIngress: {} } })],
+        ["a malformed funnelIngress hop", JSON.stringify({ updatedAt: "x", wssChecks: { at: "x", addresses: {}, funnelIngress: { status: "ok", hops: [5] } } })]
     ])("treats a runtime status file with %s as no checks yet", async (_label, content) => {
         const dataPath = randomDirectory();
         await writeReachabilityConfig(dataPath, validConfig());

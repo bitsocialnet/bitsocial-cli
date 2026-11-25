@@ -65,11 +65,12 @@ export async function verifyUnmanagedAddresses(input: {
             let records: PublicRecords | undefined;
             const systemDns = () => (records?.source === "system" ? { systemDns: true as const } : {});
             try {
-                const name = address.match(/^\/dns[46]?\/([^/]+)\//)?.[1];
+                const [, protocol, name] = address.match(/^\/(dns[46]?)\/([^/]+)\//) ?? [];
                 if (name) {
                     const resolved = await resolve(name);
                     records = { v4: resolved.v4, v6: resolved.v6, source: resolved.source ?? "public" };
-                    targets = [...records.v4, ...records.v6];
+                    // Only the family the address is dialed over, as the dial picks: a /dns4 address never goes to an IPv6 record.
+                    targets = protocol === "dns4" ? records.v4 : protocol === "dns6" ? records.v6 : [...records.v4, ...records.v6];
                     if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses`, ...systemDns() };
                 }
                 // The dial goes to the addresses found here, so it takes the same path whatever this machine's own resolver says.

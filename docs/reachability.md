@@ -105,10 +105,11 @@ Before a handshake with a `/dns4`, `/dns6` or `/dns` address, the name is resolv
 
 The machine's own resolver is not used for this, because it can lead somewhere browsers never go. With Tailscale's MagicDNS on, a machine resolves its own `ts.net` name to its tailnet address, so the handshake landed on whatever listened on the machine's own TCP 443 and `setup --announce` failed although the address worked from the internet ([#281](https://github.com/bitsocialnet/bitsocial-cli/issues/281)). A hosts-file entry or a split-horizon DNS server has the same effect.
 
-- Addresses that share a name, such as a `/dns4` and a `/dns6` address for one domain, are dialed one after the other, so each goes to its own records.
+- Addresses that share a name, such as a `/dns4` and a `/dns6` address for one domain, are dialed one after the other, so each goes to its own records. The 6-second limit and the handshake time start when an address's own dial does, so waiting for the other one counts against neither.
+- A `/dns4` address is judged by its A records only and a `/dns6` address by its AAAA records only, because that is all the dial uses. A `/dns4` name with a private A record and a public AAAA record counts as resolving only to private addresses.
 - Only the name is sent to those resolvers, and only for a handshake. The checks of whether a `--domain` points at this machine still ask the resolvers the machine is configured with.
 - A name public DNS has no record for fails with `<name> has no A record in public DNS, so browsers cannot resolve it`.
-- If none of the public resolvers answers, as on a network that blocks outside DNS, the machine's own resolver is used. The same is reported if the connection turns out not to have used the public answer. `setup` then warns, and `status` adds `"systemDns": true` to the address in `wssHandshakes` and a sentence to the `wss-handshake` diagnostic, because that handshake may not have taken the path browsers take.
+- If none of the public resolvers answers, as on a network that blocks outside DNS, the machine's own resolver is used. The same goes for one record type alone: when the A query gets an answer and the AAAA query does not (or the other way round), the unanswered type is asked of the machine's own resolver, because an unanswered query does not mean the record is missing. The same is reported if the connection turns out not to have used the public answer. `setup` then warns, and `status` adds `"systemDns": true` to the address in `wssHandshakes` and a sentence to the `wss-handshake` diagnostic, because that handshake may not have taken the path browsers take.
 
 For a `ts.net` address, `status` then measures the hop from Tailscale's Funnel ingress servers to the node, see [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address).
 
@@ -217,6 +218,8 @@ Last periodic WSS check: 2026-11-02T00:15:00.000Z
 ```
 
 The check is skipped while kubo does not answer, while reachability is disabled, and on a node `setup` has not configured, which has the hourly check described under [Addresses `setup` does not manage](#addresses-setup-does-not-manage).
+
+A stored result is dropped when it no longer applies: the daemon removes `wssChecks` when it finds reachability disabled or no WSS address announced, and when it starts with `--wssCheckIntervalMinutes 0`. `status` also leaves out results for addresses that are no longer announced, and all of them while reachability is disabled, so a change shows at once rather than at the next check.
 
 **Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
 

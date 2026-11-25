@@ -155,7 +155,7 @@ describe("verifyUnmanagedAddresses", () => {
         });
 
         it("is unconfirmed when a name leads both here and elsewhere", async () => {
-            const both = async () => ({ v4: ["93.184.216.34"], v6: ["2606:4700::1"] });
+            const both = async () => ({ v4: ["93.184.216.34", "93.184.216.35"], v6: [] });
             expect(await verifyUnmanagedAddresses({ running: [wss], config: [], dial, resolve: both, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "unconfirmed", error: "timed out" }]);
         });
 
@@ -168,6 +168,17 @@ describe("verifyUnmanagedAddresses", () => {
         const dial = vi.fn(async () => ({ peerId }));
         const results = await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve: async () => ({ v4: ["192.168.1.5"], v6: [] }) });
         expect(results).toEqual([{ address: wss, status: "failed", error: "node.example resolves only to private addresses" }]);
+        expect(dial).not.toHaveBeenCalled();
+    });
+
+    // A /dns4 address is dialed over IPv4 only, so a public IPv6 record says nothing about where it leads.
+    it.each([
+        ["/dns4/node.example/tcp/443/tls/ws", { v4: ["192.168.1.20"], v6: ["2606:4700::40"] }],
+        ["/dns6/node.example/tcp/443/tls/ws", { v4: ["93.184.216.34"], v6: ["fd00::20"] }]
+    ])("judges %s only by the records of the family it dials", async (address, records) => {
+        const dial = vi.fn(async () => ({ peerId }));
+        const results = await verifyUnmanagedAddresses({ running: [`${address}/p2p/${peerId}`], config: [], dial, resolve: async () => records });
+        expect(results).toEqual([{ address, status: "failed", error: "node.example resolves only to private addresses" }]);
         expect(dial).not.toHaveBeenCalled();
     });
 

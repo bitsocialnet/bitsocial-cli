@@ -37,10 +37,11 @@ export async function resolveOverPublicDns(name: string, { query = queryDns, ser
         }
     };
     const [v4, v6] = await Promise.all([ask("A", servers), ask("AAAA", servers)]);
-    if (v4.answered || v6.answered) return { v4: v4.records, v6: v6.records, source: "public" };
+    if (v4.answered && v6.answered) return { v4: v4.records, v6: v6.records, source: "public" };
     // A network that blocks outside resolvers must not turn every check into a failure, so this machine's own
-    // resolver is the fallback. Callers say so, because that answer may not be the one browsers get.
-    const [systemV4, systemV6] = await Promise.all([ask("A"), ask("AAAA")]);
+    // resolver is the fallback, for each family public DNS gave no answer for: a query that went unanswered says
+    // nothing about whether the record exists. Callers say so, because that answer may not be the one browsers get.
+    const [systemV4, systemV6] = await Promise.all([v4.answered ? v4 : ask("A"), v6.answered ? v6 : ask("AAAA")]);
     return { v4: systemV4.records, v6: systemV6.records, source: "system" };
 }
 

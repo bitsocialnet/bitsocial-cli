@@ -252,6 +252,9 @@ export class ReachabilityRuntime {
                     this.timers.push(interval);
                 }, firstDelayMs)
             );
+        } else {
+            // A result from before the check was turned off would otherwise stay on record, and be shown, indefinitely.
+            await this.forgetWssChecks().catch((error) => this.deps.warn(String(error)));
         }
         for (const timer of this.timers) timer.unref();
     }
@@ -739,6 +742,15 @@ export class ReachabilityRuntime {
         return write;
     }
 
+    private async forgetWssChecks(): Promise<void> {
+        if (!(await readReachabilityRuntimeStatus(this.deps.dataPath))?.wssChecks) return;
+        await this.updateRuntimeStatus((latest) => {
+            const { wssChecks, ...rest } = latest ?? { updatedAt: new Date(this.now()).toISOString() };
+            void wssChecks;
+            return rest;
+        });
+    }
+
     // Single-flight: on a path so slow that every dial runs into its limit, a short interval could otherwise overlap.
     runWssCheck(): Promise<void> {
         this.wssCheckInFlight ??= this.runWssCheckOnce().finally(() => {
@@ -755,7 +767,8 @@ export class ReachabilityRuntime {
         const config = await this.readConfig();
         const treatAsPublic = this.deps.treatAsPublic ?? [];
         const announced = config?.enabled ? config.announce.filter((address) => isBrowserAddress(address, treatAsPublic)) : [];
-        if (announced.length === 0) return;
+        // With nothing to check, an earlier result describes addresses that are no longer announced.
+        if (announced.length === 0) return this.forgetWssChecks();
         const identity = await (this.deps.kuboIdentity ?? (() => kuboIdentity(this.deps.kuboRpcUrl)))();
         // Nothing to dial while kubo is down, and its absence is reported elsewhere.
         if (!identity) return;

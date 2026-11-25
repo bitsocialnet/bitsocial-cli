@@ -1598,6 +1598,27 @@ describe("ReachabilityRuntime", () => {
             expect(await stored()).toBeUndefined();
         });
 
+        // A result from before the check was turned off would otherwise be shown by status for as long as the file lives.
+        it("forgets the last result when the daemon starts with the check turned off", async () => {
+            const { runtime, path, stored, dataPath } = await watched(funnelNode(), { wssCheckIntervalMs: 0 });
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            expect(await stored()).toBeDefined();
+            await runtime.start();
+            await runtime.stop();
+            expect(await stored()).toBeUndefined();
+            expect(await readReachabilityRuntimeStatus(dataPath)).not.toBeNull();
+        });
+
+        it("forgets the last result once reachability is disabled", async () => {
+            const { runtime, path, stored, dataPath } = await watched();
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            await writeReachabilityConfig(dataPath, { ...(await readReachabilityConfig(dataPath))!, enabled: false });
+            await runtime.runWssCheck();
+            expect(await stored()).toBeUndefined();
+        });
+
         it("is started by the daemon's timers, and not at all when the interval is 0", async () => {
             vi.useFakeTimers();
             try {

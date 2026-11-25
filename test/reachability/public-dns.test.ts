@@ -55,6 +55,25 @@ describe("resolveOverPublicDns", () => {
         expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.41"], v6: [], source: "system" });
     });
 
+    // A query that got no answer says nothing about the record. Only one that public DNS answered "no such record" does.
+    it("asks this machine's resolver for a family public DNS gave no answer for, instead of calling it absent", async () => {
+        const query = vi.fn<DnsQuery>(async (_name, type, servers) => {
+            if (servers === undefined) return type === "A" ? ["93.184.216.41"] : [];
+            if (type === "A") throw dnsError("ETIMEOUT");
+            throw dnsError("ENODATA");
+        });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.41"], v6: [], source: "system" });
+    });
+
+    it("keeps the public answer for the family that got one", async () => {
+        const query = vi.fn<DnsQuery>(async (_name, type, servers) => {
+            if (servers === undefined) return type === "A" ? ["100.101.102.103"] : ["fd7a::1"];
+            if (type === "A") return ["93.184.216.40"];
+            throw dnsError("ETIMEOUT");
+        });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.40"], v6: ["fd7a::1"], source: "system" });
+    });
+
     it("resolves to nothing, by this machine's resolver, when nothing answers at all", async () => {
         const query: DnsQuery = async () => {
             throw dnsError("ETIMEOUT");
@@ -208,6 +227,20 @@ describe("dialWithLibp2p through a name", () => {
         } finally {
             globalThis.WebSocket = RealWebSocket;
         }
+    });
+
+    // Dials through one name take turns at the pin, so one can wait for another. That wait is not the handshake:
+    // it must not use up the browsers' time limit or show in the handshake time.
+    it("does not count the wait for another dial through the same name against the handshake", async () => {
+        let release!: () => void;
+        const holder = withPinnedLookup(name, ["127.0.0.1"], () => new Promise<void>((resolve) => (release = resolve)));
+        const dialing = dialWithLibp2p(address(), { timeoutMs: 1_000, records: { v4: ["127.0.0.1"], v6: [], source: "public" } });
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        release();
+        await holder;
+        const result = await dialing;
+        expect(result.peerId).toBe(listener.peerId.toString());
+        expect(result.handshakeMs).toBeLessThan(1_000);
     });
 
     it("asks nothing for an address that is already an IP", async () => {
