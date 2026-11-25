@@ -20,7 +20,7 @@ import {
     describeKuboEndpointMismatch
 } from "../../util.js";
 import type { PKCLoggerType } from "../../util.js";
-import { startDaemonServer } from "../../webui/daemon-server.js";
+import { startDaemonServer, webuiLabel } from "../../webui/daemon-server.js";
 import { printBanner } from "../ascii-banner.js";
 import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
 import { loadPageSortsIntoPKC } from "../../page-sort-packages/page-sort-utils.js";
@@ -580,15 +580,11 @@ export default class Daemon extends Command {
                 const localIpAddress = "localhost";
                 const remoteIpAddress = getLanIpV4Address() || localIpAddress;
                 const rpcPort = pkcRpcUrl.port;
-                const webuiDescriptions: Record<string, string> = {
-                    seedit: "Similar to old reddit UI",
-                    "5chan": "Imageboard-style UI"
-                };
                 for (const webui of daemonServer.webuis) {
-                    const desc = webuiDescriptions[webui.name] ? ` - ${webuiDescriptions[webui.name]}` : "";
-                    console.log(`WebUI (${webui.name}${desc}): http://${localIpAddress}:${rpcPort}${webui.endpointRemote}`);
+                    const label = webuiLabel(webui.name);
+                    console.log(`WebUI (${label}): http://${localIpAddress}:${rpcPort}${webui.endpointRemote}`);
                     if (remoteIpAddress !== localIpAddress)
-                        console.log(`WebUI (${webui.name}${desc}): http://${remoteIpAddress}:${rpcPort}${webui.endpointRemote}`);
+                        console.log(`WebUI (${label}): http://${remoteIpAddress}:${rpcPort}${webui.endpointRemote}`);
                 }
             };
 

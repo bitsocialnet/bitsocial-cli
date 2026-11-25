@@ -12,6 +12,18 @@ import { loadPageSortsIntoPKC, PAGE_SORT_PACKAGE_KIND } from "../page-sort-packa
 import { formatPackageNameVersion, type InstalledPackage, type PackageKind } from "../common-utils/package-registry.js";
 import { whyWebuiDirDoesNotMatchPins, type WebuiPin } from "./release-manifest.js";
 
+const webuiDescriptions: Record<string, string> = {
+    seedit: "Similar to old reddit UI",
+    "5chan": "Imageboard-style UI",
+    bitbones: "Developer UI showing the raw protocol data"
+};
+
+/** The label of a web UI in the daemon's startup URL lines, e.g. `5chan - Imageboard-style UI`. */
+export function webuiLabel(webuiName: string): string {
+    const description = webuiDescriptions[webuiName];
+    return description ? `${webuiName} - ${description}` : webuiName;
+}
+
 const rootHashRedirectScriptPattern =
     /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?window\.location\.replace\(["']\/#["']\s*\+\s*window\.location\.pathname\s*\+\s*window\.location\.search\);(?:(?!<\/script>)[\s\S])*?<\/script>/;
 

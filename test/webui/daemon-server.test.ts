@@ -4,7 +4,8 @@ import http from "http";
 import path from "path";
 import net from "net";
 import { directory as randomDirectory } from "tempy";
-import { startDaemonServer, _generateModifiedIndexHtmlWithRpcSettings } from "../../dist/webui/daemon-server.js";
+import { startDaemonServer, _generateModifiedIndexHtmlWithRpcSettings, webuiLabel } from "../../dist/webui/daemon-server.js";
+import packageJson from "../../package.json" with { type: "json" };
 
 // Intercept the PKCWsServer constructor so the plumbing tests below can assert the exact
 // options startDaemonServer passes to it, without booting a real pkc instance.
@@ -285,5 +286,23 @@ describe("web UIs that are not the pinned version", () => {
         expect(errors.find((line) => line.includes("bitbones-html-0.1.0"))).toContain("release manifest");
         expect(errors.find((line) => line.includes("plebones-html-0.1.27"))).toContain("pins no web UI");
         expect(errors.some((line) => line.includes("seedit-html-0.6.3"))).toBe(false);
+    });
+});
+
+// The daemon prints one `WebUI (<label>): <url>` line per web UI. A pinned web UI without a description
+// shows up as a bare name, which tells a user nothing about what it is (issue #287: bitbones).
+describe("web UI labels in the daemon's startup lines", () => {
+    const pinnedNames = packageJson.webuis.map((pin) => new URL(pin.url).pathname.split("/")[2]);
+
+    it.each(pinnedNames)("describes the pinned web UI %s", (name) => {
+        expect(webuiLabel(name)).toMatch(new RegExp(`^${name} - \\S`));
+    });
+
+    it("describes bitbones as a developer UI", () => {
+        expect(webuiLabel("bitbones")).toBe("bitbones - Developer UI showing the raw protocol data");
+    });
+
+    it("uses the bare name for a web UI without a description", () => {
+        expect(webuiLabel("plebones")).toBe("plebones");
     });
 });
