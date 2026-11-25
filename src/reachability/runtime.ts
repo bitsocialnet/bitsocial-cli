@@ -795,17 +795,19 @@ export class ReachabilityRuntime {
             summary.push(`${result.address} ${description}`);
             const troubled = check.status === "slow" || check.status === "failed";
             checked[result.address] = { ...check, ...(troubled ? { lastProblemAt: nowIso, lastProblem: description } : {}) };
-            const key = `wss:${result.address}`;
+            // One key per finding, so an address that was slow and then stops working warns about that at once.
+            const key = (status: "slow" | "failed") => `wss:${status}:${result.address}`;
             if (troubled) {
                 this.wssTrouble.add(result.address);
                 const finding =
                     check.status === "slow"
                         ? `An announced browser address has become slow: ${slowHandshakeMessage(result)}, so some will fail to connect`
                         : `An announced browser address is not working: the handshake through ${result.address} failed (${result.error})`;
-                this.warnThrottled(key, `${finding}. ${STATUS_HINT}`);
+                this.warnThrottled(key(check.status as "slow" | "failed"), `${finding}. ${STATUS_HINT}`);
             } else if (check.status === "ok") {
                 if (this.wssTrouble.delete(result.address)) this.deps.log(`${result.address} completes a handshake in time again${check.handshakeMs === undefined ? "" : ` (${check.handshakeMs} ms)`}.`);
-                this.lastWarned.delete(key);
+                this.lastWarned.delete(key("slow"));
+                this.lastWarned.delete(key("failed"));
             }
         }
         if (funnelIngress?.status === "warn") {

@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import net from "net";
 import path from "path";
 import type { KuboEditRecord } from "./kubo-config.js";
-import type { FunnelIngressReport } from "./tailscale.js";
+import { isFunnelAddress, type FunnelIngressReport } from "./tailscale.js";
 
 export const REACHABILITY_CONFIG_VERSION = 1;
 
@@ -287,7 +287,10 @@ function withCurrentWssChecks(lastChecks: ReachabilityRuntimeStatus, announced: 
     if (!wssChecks) return lastChecks;
     const addresses = Object.fromEntries(Object.entries(wssChecks.addresses).filter(([address]) => announced.includes(address)));
     if (Object.keys(addresses).length === 0) return rest;
-    return { ...rest, wssChecks: { ...wssChecks, addresses } };
+    // The ingress latency is about the Funnel path, so it goes with the last Funnel address.
+    const { funnelIngress, ...checked } = wssChecks;
+    const funnelAnnounced = Object.keys(addresses).some(isFunnelAddress);
+    return { ...rest, wssChecks: { ...checked, addresses, ...(funnelIngress && funnelAnnounced ? { funnelIngress } : {}) } };
 }
 
 export async function readReachabilityStatus(dataPath: string, now: Date = new Date()): Promise<ReachabilityStatus> {

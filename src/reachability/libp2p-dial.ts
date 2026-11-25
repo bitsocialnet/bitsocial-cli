@@ -1,4 +1,4 @@
-import { resolveOverPublicDns, withPinnedLookup, type PublicRecords, type ResolvePublicly } from "./public-dns.js";
+import { dnsUnansweredMessage, familiesOf, resolveOverPublicDns, withPinnedLookup, type PublicRecords, type ResolvePublicly } from "./public-dns.js";
 
 // How long a browser's libp2p waits on one address before it gives up on it (js-libp2p's per-address dial timeout).
 // A handshake that needs longer than this from here is one no browser will ever finish.
@@ -58,6 +58,7 @@ export async function dialWithLibp2p(address: string, { timeoutMs = BROWSER_DIAL
         const resolved = records ?? (await resolveName(name));
         const ips = nameProtocol === "dns4" ? resolved.v4 : nameProtocol === "dns6" ? resolved.v6 : [...resolved.v4, ...resolved.v6];
         if (ips.length === 0) {
+            if (familiesOf(nameProtocol).some((family) => resolved.unanswered?.includes(family))) throw new Error(dnsUnansweredMessage(name));
             const record = nameProtocol === "dns4" ? "A record" : nameProtocol === "dns6" ? "AAAA record" : "A or AAAA record";
             throw new Error(resolved.source === "public" ? `${name} has no ${record} in public DNS, so browsers cannot resolve it` : `${name} has no ${record}`);
         }

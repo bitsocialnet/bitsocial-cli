@@ -78,7 +78,17 @@ describe("resolveOverPublicDns", () => {
         const query: DnsQuery = async () => {
             throw dnsError("ETIMEOUT");
         };
-        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: [], v6: [], source: "system" });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: [], v6: [], source: "system", unanswered: ["v4", "v6"] });
+    });
+
+    // An outage of every resolver is not proof that the record is missing, so it must not read like an answer.
+    it("says which family no resolver answered for", async () => {
+        const query = vi.fn<DnsQuery>(async (_name, type, servers) => {
+            if (type === "A" && servers !== undefined) return ["93.184.216.40"];
+            if (type === "A") return ["100.101.102.103"];
+            throw dnsError("ETIMEOUT");
+        });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.40"], v6: [], source: "system", unanswered: ["v6"] });
     });
 });
 
@@ -203,6 +213,12 @@ describe("dialWithLibp2p through a name", () => {
     it("fails without dialing when public DNS has no record of the right family for the name", async () => {
         const resolveName = async () => ({ v4: [], v6: ["2606:4700::40"], source: "public" as const });
         await expect(dialWithLibp2p(address(), { resolveName })).rejects.toThrow(`${name} has no A record in public DNS, so browsers cannot resolve it`);
+    });
+
+    it("does not call a record missing when no resolver answered for it", async () => {
+        const resolveName = async () => ({ v4: [], v6: [], source: "system" as const, unanswered: ["v4" as const, "v6" as const] });
+        await expect(dialWithLibp2p(address(), { resolveName })).rejects.toThrow(`no DNS resolver answered for ${name}`);
+        await expect(dialWithLibp2p(address(), { resolveName })).rejects.not.toThrow(/has no A record/);
     });
 
     it("does not blame public DNS when this machine's resolver was the one asked", async () => {

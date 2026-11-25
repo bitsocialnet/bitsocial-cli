@@ -109,7 +109,7 @@ The machine's own resolver is not used for this, because it can lead somewhere b
 - A `/dns4` address is judged by its A records only and a `/dns6` address by its AAAA records only, because that is all the dial uses. A `/dns4` name with a private A record and a public AAAA record counts as resolving only to private addresses.
 - Only the name is sent to those resolvers, and only for a handshake. The checks of whether a `--domain` points at this machine still ask the resolvers the machine is configured with.
 - A name public DNS has no record for fails with `<name> has no A record in public DNS, so browsers cannot resolve it`.
-- If none of the public resolvers answers, as on a network that blocks outside DNS, the machine's own resolver is used. The same goes for one record type alone: when the A query gets an answer and the AAAA query does not (or the other way round), the unanswered type is asked of the machine's own resolver, because an unanswered query does not mean the record is missing. The same is reported if the connection turns out not to have used the public answer. `setup` then warns, and `status` adds `"systemDns": true` to the address in `wssHandshakes` and a sentence to the `wss-handshake` diagnostic, because that handshake may not have taken the path browsers take.
+- If none of the public resolvers answers, as on a network that blocks outside DNS, the machine's own resolver is used. The same goes for one record type alone: when the A query gets an answer and the AAAA query does not (or the other way round), the unanswered type is asked of the machine's own resolver, because an unanswered query does not mean the record is missing. If that one does not answer either, the address is `unconfirmed` with `no DNS resolver answered for <name>, so where it leads could not be checked`, not failed, and `setup --announce` stops with the same reason: a DNS outage on this machine says nothing about what browsers can resolve. The same is reported if the connection turns out not to have used the public answer. `setup` then warns, and `status` adds `"systemDns": true` to the address in `wssHandshakes` and a sentence to the `wss-handshake` diagnostic, because that handshake may not have taken the path browsers take.
 
 For a `ts.net` address, `status` then measures the hop from Tailscale's Funnel ingress servers to the node, see [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address).
 
@@ -202,7 +202,7 @@ An address that passed `setup` can stop working for browsers later without anyth
 | Result | What the daemon does |
 | --- | --- |
 | Every check | Writes one line to the log file with the timings, for example `WSS check: /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws completed a handshake in 700 ms. Funnel ingress: 91 ms via DERP(par)`. Read them with `bitsocial logs`. They are the record of how often a path degrades and for how long |
-| A handshake took 3 s or more, or failed, including not finishing in 6 s | Warns on stdout, with the time or the reason. Repeats at most once an hour while it lasts |
+| A handshake took 3 s or more, or failed, including not finishing in 6 s | Warns on stdout, with the time or the reason. Repeats at most once an hour while it lasts. Slow and failed are separate warnings, so an address that was slow and then stops working warns again at once |
 | The Funnel ingress latency is 500 ms or more, or a server does not answer | Warns on stdout, at most once an hour |
 | An address or the ingress hop is back to normal | Logs it once on stdout |
 | An address this machine cannot test from inside its own network (`unconfirmed`, usually no NAT hairpin) | Only the line in the log file. No warning, because the failure says nothing about other networks |
@@ -219,7 +219,7 @@ Last periodic WSS check: 2026-11-02T00:15:00.000Z
 
 The check is skipped while kubo does not answer, while reachability is disabled, and on a node `setup` has not configured, which has the hourly check described under [Addresses `setup` does not manage](#addresses-setup-does-not-manage).
 
-A stored result is dropped when it no longer applies: the daemon removes `wssChecks` when it finds reachability disabled or no WSS address announced, and when it starts with `--wssCheckIntervalMinutes 0`. `status` also leaves out results for addresses that are no longer announced, and all of them while reachability is disabled, so a change shows at once rather than at the next check.
+A stored result is dropped when it no longer applies: the daemon removes `wssChecks` when it finds reachability disabled or no WSS address announced, and when it starts with `--wssCheckIntervalMinutes 0`. `status` also leaves out results for addresses that are no longer announced (and the Funnel ingress latency once no Funnel address is left), and all of them while reachability is disabled, so a change shows at once rather than at the next check.
 
 **Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
 

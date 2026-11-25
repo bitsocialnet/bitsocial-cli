@@ -2,7 +2,7 @@ import type { ReachabilityCheck } from "./checks.js";
 import { isPublicIp, localIpsFromInterfaces, type KuboAutonat } from "./discovery.js";
 import { TAILSCALE_FUNNEL_DOC } from "./guidance.js";
 import { BROWSER_DIAL_TIMEOUT_MS, dialWithLibp2p, formatSeconds, HandshakeTimeoutError, SLOW_HANDSHAKE_MS } from "./libp2p-dial.js";
-import { resolveOverPublicDns, type PublicRecords } from "./public-dns.js";
+import { dnsUnansweredMessage, familiesOf, resolveOverPublicDns, type PublicRecords } from "./public-dns.js";
 import type { ResolvedDomain } from "./setup.js";
 import type { PeriodicWssCheck, WssAddressCheck } from "./state.js";
 import { formatFunnelIngress, isFunnelAddress, pingFunnelIngress, type FunnelIngressReport, type RunCommand } from "./tailscale.js";
@@ -53,7 +53,7 @@ export async function verifyUnmanagedAddresses(input: {
     treatAsPublic?: string[];
     dial?: DialAddress;
     // Over public DNS unless a test says otherwise. Records without a source count as public ones.
-    resolve?: (name: string) => Promise<ResolvedDomain & { source?: PublicRecords["source"] }>;
+    resolve?: (name: string) => Promise<ResolvedDomain & Partial<Pick<PublicRecords, "source" | "unanswered">>>;
     signal?: AbortSignal;
     localIps?: string[];
 }): Promise<UnmanagedAddress[]> {
@@ -68,9 +68,13 @@ export async function verifyUnmanagedAddresses(input: {
                 const [, protocol, name] = address.match(/^\/(dns[46]?)\/([^/]+)\//) ?? [];
                 if (name) {
                     const resolved = await resolve(name);
-                    records = { v4: resolved.v4, v6: resolved.v6, source: resolved.source ?? "public" };
+                    records = { v4: resolved.v4, v6: resolved.v6, source: resolved.source ?? "public", ...(resolved.unanswered ? { unanswered: resolved.unanswered } : {}) };
                     // Only the family the address is dialed over, as the dial picks: a /dns4 address never goes to an IPv6 record.
-                    targets = protocol === "dns4" ? records.v4 : protocol === "dns6" ? records.v6 : [...records.v4, ...records.v6];
+                    const families = familiesOf(protocol!);
+                    targets = families.flatMap((family) => records![family]);
+                    // A DNS outage here says nothing about what browsers can resolve, so it is no failure, Funnel or not.
+                    if (targets.length === 0 && families.some((family) => resolved.unanswered?.includes(family)))
+                        return { address, status: "unconfirmed", error: dnsUnansweredMessage(name), ...systemDns() };
                     if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses`, ...systemDns() };
                 }
                 // The dial goes to the addresses found here, so it takes the same path whatever this machine's own resolver says.

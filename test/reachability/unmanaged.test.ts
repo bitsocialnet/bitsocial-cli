@@ -159,6 +159,17 @@ describe("verifyUnmanagedAddresses", () => {
             expect(await verifyUnmanagedAddresses({ running: [wss], config: [], dial, resolve: both, localIps: ["93.184.216.34"] })).toEqual([{ address: wss, status: "unconfirmed", error: "timed out" }]);
         });
 
+        // A DNS outage on this machine says nothing about whether browsers can resolve the name, Funnel or not.
+        it.each(["/dns4/node.example/tcp/443/tls/ws", "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws"])("is unconfirmed, without dialing, when no DNS resolver answered for %s", async (address) => {
+            const dial = vi.fn(async () => ({ peerId }));
+            const resolve = async () => ({ v4: [], v6: [], source: "system" as const, unanswered: ["v4" as const, "v6" as const] });
+            const name = address.split("/")[2];
+            expect(await verifyUnmanagedAddresses({ running: [`${address}/p2p/${peerId}`], config: [], dial, resolve, localIps: [] })).toEqual([
+                { address, status: "unconfirmed", error: `no DNS resolver answered for ${name}, so where it leads could not be checked`, systemDns: true }
+            ]);
+            expect(dial).not.toHaveBeenCalled();
+        });
+
         it("is a failure when a name resolves to nothing", async () => {
             expect(await verifyUnmanagedAddresses({ running: [wss], config: [], dial, resolve: async () => ({ v4: [], v6: [] }), localIps: [] })).toEqual([{ address: wss, status: "failed", error: "timed out" }]);
         });

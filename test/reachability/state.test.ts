@@ -269,6 +269,19 @@ describe("reachability status", () => {
             expect((await readReachabilityStatus(dataPath)).lastChecks?.wssChecks).toEqual({ at: wssChecks.at, addresses: { [announced]: wssChecks.addresses[announced] } });
         });
 
+        it("and the Funnel ingress latency once no Funnel address is announced", async () => {
+            const dataPath = randomDirectory();
+            await writeReachabilityConfig(dataPath, validConfig());
+            const funnel = "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws";
+            const withFunnel = {
+                at: wssChecks.at,
+                addresses: { [announced]: wssChecks.addresses[announced], [funnel]: { status: "ok" as const, handshakeMs: 700 } },
+                funnelIngress: { status: "ok" as const, hops: [{ address: "fd7a::1", relay: "par", latencyMs: 91, via: "DERP(par)" }] }
+            };
+            await writeReachabilityRuntimeStatus(dataPath, { updatedAt: "2026-11-02T00:15:00.000Z", wssChecks: withFunnel });
+            expect((await readReachabilityStatus(dataPath)).lastChecks?.wssChecks).toEqual({ at: wssChecks.at, addresses: { [announced]: wssChecks.addresses[announced] } });
+        });
+
         it("altogether once reachability is disabled", async () => {
             const dataPath = randomDirectory();
             await writeReachabilityConfig(dataPath, { ...validConfig(), enabled: false });

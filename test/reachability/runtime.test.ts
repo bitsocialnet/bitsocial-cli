@@ -1486,6 +1486,31 @@ describe("ReachabilityRuntime", () => {
             expect(logs()).toEqual([`log: ${funnel} completes a handshake in time again (650 ms).`]);
         });
 
+        // A Funnel path that degrades tends to get slow first and then stop working. The second is news too.
+        it("warns when an address that has become slow stops working, without waiting out the hour", async () => {
+            const { runtime, path, warnings, advance } = await watched();
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            path.handshakeMs = new Error("connection refused");
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(2);
+            expect(warnings()[1]).toContain("is not working");
+            // Each finding is still repeated at most once an hour while it lasts.
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(2);
+            // After a recovery, both are news again.
+            path.handshakeMs = 650;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            path.handshakeMs = 4_230;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(3);
+            expect(warnings()[2]).toContain("has become slow");
+        });
+
         it("warns when the handshake no longer finishes in the time a browser allows", async () => {
             const { runtime, path, records, warnings, stored } = await watched();
             path.handshakeMs = new HandshakeTimeoutError(6_000);
