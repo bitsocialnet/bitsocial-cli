@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.148 (2026-11-25)</small>
+
+* chore(ci): download seedit from bitsocialnet and add bitbones in download-web-uis ([0b3c001](https://github.com/bitsocialnet/bitsocial-cli/commit/0b3c001))
+* feat(webui): bundle the bitbones web UI ([265ca79](https://github.com/bitsocialnet/bitsocial-cli/commit/265ca79))
+
 ## <small>0.19.147 (2026-11-24)</small>
 
 * chore(deps): upgrade seedit web UI v0.6.3 -> v0.7.0, 5chan v0.10.4 -> v0.11.0 ([18c937b](https://github.com/bitsocialnet/bitsocial-cli/commit/18c937b))
