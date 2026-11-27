@@ -1,5 +1,10 @@
 # Changelog
 
+## <small>0.19.149 (2026-11-27)</small>
+
+* fix(cli): refuse to run on an unsupported Node version with a clear message (#280) ([6427eeb](https://github.com/bitsocialnet/bitsocial-cli/commit/6427eeb)), closes [#280](https://github.com/bitsocialnet/bitsocial-cli/issues/280)
+* fix(cli): state which old Node versions reach the version check (#280) ([217214c](https://github.com/bitsocialnet/bitsocial-cli/commit/217214c)), closes [#280](https://github.com/bitsocialnet/bitsocial-cli/issues/280)
+
 ## <small>0.19.148 (2026-11-25)</small>
 
 * chore(ci): download seedit from bitsocialnet and add bitbones in download-web-uis ([0b3c001](https://github.com/bitsocialnet/bitsocial-cli/commit/0b3c001))
