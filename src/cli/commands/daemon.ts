@@ -20,7 +20,6 @@ import {
     resolveKuboRepoPath,
     describeKuboEndpointMismatch
 } from "../../util.js";
-import type { PKCLoggerType } from "../../util.js";
 import { startDaemonServer, webuiLabel } from "../../webui/daemon-server.js";
 import { printBanner } from "../ascii-banner.js";
 import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
@@ -28,12 +27,18 @@ import { loadPageSortsIntoPKC } from "../../page-sort-packages/page-sort-utils.j
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
 import { pruneStaleStates, writeDaemonState, deleteDaemonState, detectSelfSupervisor, pickDaemonEnv, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
-import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-utils/daemon-file-logger.js";
-import fs from "fs";
-import fsPromise from "fs/promises";
+import {
+    createDaemonFileLogger,
+    newDaemonLogStem,
+    DEFAULT_LOG_MAX_FILE_BYTES,
+    DEFAULT_LOG_MAX_TOTAL_BYTES,
+    type DaemonFileLogger,
+    type DaemonLogEntry
+} from "../../common-utils/daemon-file-logger.js";
+import { renderLogEntry, streamOfNamespace, STDOUT_NAMESPACE, STDERR_NAMESPACE } from "../../common-utils/daemon-log-format.js";
+import PKCLoggerModule from "@pkcprotocol/pkc-logger";
 
 import { EOL } from "node:os";
-import { formatWithOptions } from "node:util";
 import { createRequire } from "node:module";
 //@ts-expect-error
 import type { InputPKCOptions } from "@pkcprotocol/pkc-js/dist/node/types.js";
@@ -103,6 +108,19 @@ export default class Daemon extends Command {
             default: defaults.PKC_LOG_PATH
         }),
 
+        logMaxFileSize: Flags.integer({
+            description: "Size in megabytes at which the daemon moves on to a new log file",
+            default: DEFAULT_LOG_MAX_FILE_BYTES / 1_000_000,
+            min: 1
+        }),
+
+        logMaxTotalSize: Flags.integer({
+            description:
+                "Size in megabytes that all log files in --logPath may take together. The oldest files are deleted beyond it; the file being written can add up to --logMaxFileSize",
+            default: DEFAULT_LOG_MAX_TOTAL_BYTES / 1_000_000,
+            min: 1
+        }),
+
         chainProviderUrls: Flags.string({
             description: "RPC URL(s) for .bso name resolution. Can be specified multiple times.",
             multiple: true,
@@ -148,92 +166,82 @@ export default class Daemon extends Command {
         "bitsocial daemon --no-allowPrivateKeyExport",
     ];
 
-    private _setupLogger(Logger: PKCLoggerType) {
-        setupDebugLogger(Logger, { enableDefaultNamespace: true });
+    private _setupLogger() {
+        // The stdout/stderr capture logs through these two namespaces, so they stay on whatever DEBUG selects
+        setupDebugLogger(PKCLogger, { enableDefaultNamespace: true, alwaysEnabled: [STDOUT_NAMESPACE, STDERR_NAMESPACE] });
         console.log("To view logs, run: bitsocial logs");
         console.log("For custom debug logging, restart the daemon with DEBUG env, e.g.: DEBUG='bitsocial*,pkc*' bitsocial daemon");
     }
 
-    private async _getNewLogfileByEvacuatingOldLogsIfNeeded(logPath: string) {
-        try {
-            await fsPromise.mkdir(logPath, { recursive: true });
-        } catch (e) {
-            //@ts-expect-error
-            if (e.code !== "EEXIST") throw e;
-        }
-        const logFiles = (await fsPromise.readdir(logPath, { withFileTypes: true })).filter((file) =>
-            file.name.startsWith("bitsocial_cli_daemon")
-        );
-        const logfilesCapacity = 5; // we only store 5 log files
-        let deletedLogFile: string | undefined;
-        if (logFiles.length >= logfilesCapacity) {
-            // we need to pick the oldest log to delete
-            const logFileToDelete = logFiles.map((logFile) => logFile.name).sort()[0]; // TODO need to test this, not sure if it works
-            deletedLogFile = logFileToDelete;
-            await fsPromise.rm(path.join(logPath, logFileToDelete));
-        }
-
-        return {
-            logFilePath: path.join(logPath, `bitsocial_cli_daemon_${new Date().toISOString().replace(/:/g, "-")}.log`),
-            deletedLogFile,
-            logfilesCapacity
-        };
-    }
-
-    private async _pipeDebugLogsToLogFile(
-        logPath: string,
-        Logger: PKCLoggerType
-    ): Promise<{ logFilePath: string; stdoutWrite: typeof process.stdout.write; fileLogger: DaemonFileLogger }> {
-        const { logFilePath, deletedLogFile, logfilesCapacity } = await this._getNewLogfileByEvacuatingOldLogsIfNeeded(logPath);
-
-        const fileLogger = createDaemonFileLogger({ logFilePath });
+    /**
+     * Every entry of the cli's logger root goes to the JSONL log file through a listener. That root is passed to pkc-js,
+     * so it carries the daemon's, pkc-js's and the RPC server's lines. What reaches stdout or stderr some other way
+     * (library console calls, uncaught errors) is logged through two children of it, so the file has one writer.
+     */
+    private async _pipeLogsToLogFile(options: {
+        logPath: string;
+        maxFileBytes: number;
+        maxTotalBytes: number;
+    }): Promise<{ stdoutWrite: typeof process.stdout.write; fileLogger: DaemonFileLogger }> {
+        const fileLogger = await createDaemonFileLogger({
+            logDir: options.logPath,
+            stem: newDaemonLogStem(),
+            maxFileBytes: options.maxFileBytes,
+            maxTotalBytes: options.maxTotalBytes
+        });
         const stdoutWrite = process.stdout.write.bind(process.stdout);
         const stderrWrite = process.stderr.write.bind(process.stderr);
 
-        // Redirect debug library output directly to the log file
-        // instead of stderr, so only real errors appear in the terminal
-        // The `debug` copy pkc-logger prints through, which the cli's logger root (passed to pkc-js) uses
+        // pkc-logger prints each enabled line through `debug` before it hands the entry to listeners. The listeners
+        // write the file, so `debug` itself prints nothing: its stderr output would reach the capture below a second time.
         const debugModule = createRequire(import.meta.resolve("@pkcprotocol/pkc-logger"))("debug");
-        // Force colors on and suppress the debug library's own date prefix
-        // so that only writeTimestampedLine adds timestamps
-        debugModule.inspectOpts.colors = true;
-        debugModule.inspectOpts.hideDate = true;
-        debugModule.log = (...args: any[]) => {
-            const text = formatWithOptions({ depth: 10, colors: true }, ...args).trimStart() + EOL;
-            const wrote = fileLogger.writeTimestampedLine(text, "stderr");
-            // If the file logger could not accept the write (closed / pending buffer full),
-            // fall back to original stderr so debug output is never silently lost
-            if (!wrote) stderrWrite(text);
+        debugModule.log = () => {};
+
+        // If the file cannot take an entry, print it rather than lose it
+        const writeEntry = (entry: DaemonLogEntry) => {
+            if (fileLogger.writeEntry(entry)) return;
+            const text = renderLogEntry({ time: entry.time, level: entry.level, namespace: entry.namespace, stream: streamOfNamespace(entry.namespace), entry }) + EOL;
+            stderrWrite(text);
         };
+        const root = getCliLoggerRoot();
+        root.addListener(writeEntry);
+        // Code that logs through pkc-logger's default export (no instance in scope) uses another root, whose seq
+        // numbers mean nothing next to this root's, so those entries are written without one
+        PKCLoggerModule.addListener((entry) => writeEntry({ ...entry, seq: undefined }));
 
         const asString = (data: string | Uint8Array) => (typeof data === "string" ? data : Buffer.from(data).toString());
+        const stdoutLog = PKCLogger({ namespace: STDOUT_NAMESPACE });
+        const stderrLog = PKCLogger({ namespace: STDERR_NAMESPACE });
+        const capture = (logFn: (...args: unknown[]) => void, data: string | Uint8Array) => {
+            const text = asString(data).replace(/\r?\n$/, "");
+            if (text.trim().length === 0) return true;
+            try {
+                // "%s", so a "%" in the text is not read as a placeholder
+                logFn("%s", text);
+                return true;
+            } catch {
+                return false;
+            }
+        };
 
         process.stdout.write = (...args) => {
             //@ts-expect-error
             const res = stdoutWrite(...args);
-            fileLogger.writeTimestampedLine(asString(args[0]), "stdout");
+            capture(stdoutLog, args[0]);
             return res;
         };
 
+        // stderr goes to the log file only, so the terminal shows what the operator must see (stdout) and real errors
         process.stderr.write = (...args) => {
-            // Debug output goes to stderr; route it to the log file.
-            // If the file logger is unavailable (closed, errored), fall back to original stderr
-            // so output is never silently swallowed.
-            const text = asString(args[0]);
-            const wrote = fileLogger.writeTimestampedLine(text.trimStart(), "stderr");
-            if (!wrote) {
-                //@ts-expect-error
-                return stderrWrite(...args);
-            }
-            return true;
+            if (capture(stderrLog.error, args[0])) return true;
+            //@ts-expect-error
+            return stderrWrite(...args);
         };
 
-        const log = Logger({ namespace: "bitsocial-cli:daemon" });
-        log(`Will store stderr + stdout log to ${logFilePath}`);
-
-        if (deletedLogFile) {
-            log(`Will remove log (${deletedLogFile}) because we reached capacity (${logfilesCapacity})`);
-        }
+        const log = PKCLogger({ namespace: "bitsocial-cli:daemon" });
+        log(`Will store logs in ${fileLogger.currentPath}`);
+        await fileLogger._settled();
+        for (const deleted of fileLogger.deletedFiles) log(`Removed log file (${deleted}) to stay within the log limits`);
 
         // Write real errors to both the terminal and the log file
         const writeErrorToTerminal = (label: string, err: unknown) => {
@@ -255,7 +263,7 @@ export default class Daemon extends Command {
             fileLogger.close().catch(() => {});
         });
 
-        return { logFilePath, stdoutWrite, fileLogger };
+        return { stdoutWrite, fileLogger };
     }
 
     async run() {
@@ -275,11 +283,15 @@ export default class Daemon extends Command {
             )
             .catch(() => {}); // silently ignore errors (offline, npm unavailable, etc.)
 
-        process.env["DEBUG_COLORS"] = "1";
-        process.env["DEBUG_HIDE_DATE"] = "1";
         const { flags } = await this.parse(Daemon);
-        this._setupLogger(PKCLogger as PKCLoggerType);
-        const { logFilePath, stdoutWrite } = await this._pipeDebugLogsToLogFile(flags.logPath, PKCLogger as PKCLoggerType);
+        if (flags.logMaxTotalSize < flags.logMaxFileSize)
+            this.error(`--logMaxTotalSize (${flags.logMaxTotalSize}) must be at least --logMaxFileSize (${flags.logMaxFileSize})`);
+        this._setupLogger();
+        const { stdoutWrite, fileLogger } = await this._pipeLogsToLogFile({
+            logPath: flags.logPath,
+            maxFileBytes: flags.logMaxFileSize * 1_000_000,
+            maxTotalBytes: flags.logMaxTotalSize * 1_000_000
+        });
         const log = PKCLogger({ namespace: "bitsocial-cli:daemon" });
 
         // Captured once the async exit hook is registered (inside the try). The startup-failure
@@ -840,17 +852,19 @@ export default class Daemon extends Command {
             const errorMsg = err instanceof Error ? err.message : String(err);
             stdoutWrite(`\nDaemon failed to start: ${errorMsg}\n\n`);
 
-            // Show last 10 lines from log for context
+            // Show the last 10 entries for context, from the root's buffer: the file's stream may not have flushed them yet
             try {
-                const logContent = fs.readFileSync(logFilePath, "utf-8");
-                const lines = logContent.trimEnd().split("\n");
-                const lastLines = lines.slice(-10).join("\n");
-                stdoutWrite(`Last log lines:\n${lastLines}\n\n`);
+                const { entries } = getCliLoggerRoot().getLogs({ order: "desc", limit: 10 });
+                const lastLines = entries
+                    .reverse()
+                    .map((entry) => renderLogEntry({ time: entry.time, level: entry.level, namespace: entry.namespace, stream: streamOfNamespace(entry.namespace), entry }))
+                    .join("\n");
+                if (lastLines) stdoutWrite(`Last log lines:\n${lastLines}\n\n`);
             } catch {
-                /* log file might not exist yet */
+                /* nothing logged yet */
             }
 
-            stdoutWrite(`Full log: ${logFilePath}\n`);
+            stdoutWrite(`Full log: ${fileLogger.currentPath}\n`);
             stdoutWrite(`Or run: bitsocial logs\n`);
 
             // oclif's error handler calls process.exit() as it unwinds this throw, which runs only

@@ -60,7 +60,7 @@ describe("fresh daemon start does not restart kubo (issue #143)", () => {
     it("pkc-js init finds the pre-seeded Routing config and never shuts kubo down", { timeout: 180_000 }, async () => {
         const logDir = randomDirectory();
         const readDaemonLog = async (): Promise<string> => {
-            const files = (await fsPromise.readdir(logDir).catch(() => [] as string[])).filter((f) => f.endsWith(".log"));
+            const files = (await fsPromise.readdir(logDir).catch(() => [] as string[])).filter((f) => f.endsWith(".jsonl"));
             let combined = "";
             for (const file of files) combined += await fsPromise.readFile(path.join(logDir, file), "utf8");
             return combined;

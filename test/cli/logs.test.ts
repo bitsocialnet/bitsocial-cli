@@ -534,163 +534,8 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
 // The daemon trims its log in place (daemon-file-logger.ts: once it has written 20MB it rewrites the same file to the
 // last 15MB), so the file the follower reads can end before the offset it reached. `logs -f` used to read nothing from
 // then on and went silent while the daemon kept logging.
-describe("bitsocial logs -f after the log file shrinks in place (synthetic)", () => {
+describe("bitsocial logs -f after an old text log file shrinks in place (synthetic)", () => {
     const countOf = (haystack: string, needle: string) => haystack.split(needle).length - 1;
-
-    it("keeps following the daemon's trimmed log without skipping or repeating lines", async () => {
-        const { logDir } = await createLogDir();
-        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-01T00-00-00.000Z.log");
-        const lines: string[] = [];
-        for (let i = 0; i < 2000; i++) lines.push(buildLogLine(new Date(Date.UTC(2026, 5, 1, 0, 0, i)), `old line ${i} ${"x".repeat(40)}`));
-        lines.push(buildLogLine(new Date("2026-06-01T01:00:00.000Z"), "BEFORE_TRIM_MARKER"));
-        const content = lines.join("\n") + "\n";
-        await fsPromise.writeFile(file, content);
-
-        let trimmed = false;
-        const result = await runFollowUntil(["-f"], logDir, {
-            onChunk: (stdout) => {
-                if (trimmed || !stdout.includes("BEFORE_TRIM_MARKER")) return;
-                trimmed = true;
-                // Like the daemon: keep the last part of the file from a line boundary, rewrite the same path, then
-                // write the lines that were logged meanwhile
-                const keepFrom = content.indexOf("\n", Math.floor(content.length / 2)) + 1;
-                void (async () => {
-                    await fsPromise.writeFile(file, content.slice(keepFrom));
-                    await fsPromise.appendFile(file, buildLogLine(new Date("2026-06-01T01:00:01.000Z"), "AFTER_TRIM_MARKER") + "\n");
-                })();
-            },
-            doneWhen: (stdout) => stdout.includes("AFTER_TRIM_MARKER"),
-            // Lets a wrongly re-read part of the trimmed file surface before the process is stopped
-            graceMs: 1000,
-            maxMs: 20000
-        });
-
-        expect(result.stdout).toContain("AFTER_TRIM_MARKER");
-        expect(countOf(result.stdout, "AFTER_TRIM_MARKER")).toBe(1);
-        expect(countOf(result.stdout, "BEFORE_TRIM_MARKER")).toBe(1);
-        expect(countOf(result.stdout, "old line 1999 ")).toBe(1);
-        expect(result.stderr).not.toContain("truncated");
-    });
-
-    // The daemon buffers up to 5MB of lines while it trims and appends them right after, and a busy or slow follower
-    // polls late, so by the next poll the trimmed file can already be longer than the old offset again. Reading on from
-    // that offset skipped every line between the retained part and it.
-    it("keeps following a trimmed log that grew past the old offset before the next poll", async () => {
-        const { logDir } = await createLogDir();
-        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-03T00-00-00.000Z.log");
-        const lines: string[] = [];
-        for (let i = 0; i < 2000; i++) lines.push(buildLogLine(new Date(Date.UTC(2026, 5, 3, 0, 0, i)), `old line ${i} ${"x".repeat(40)}`));
-        lines.push(buildLogLine(new Date("2026-06-03T01:00:00.000Z"), "BEFORE_TRIM_MARKER"));
-        const content = lines.join("\n") + "\n";
-        await fsPromise.writeFile(file, content);
-
-        const NEW_LINES = 2000;
-        const newLines = Array.from({ length: NEW_LINES }, (_, i) =>
-            buildLogLine(new Date(Date.UTC(2026, 5, 3, 2, 0, 0, i)), `new line ${i}_ ${"y".repeat(40)}`)
-        );
-        newLines.push(buildLogLine(new Date("2026-06-03T03:00:00.000Z"), "AFTER_TRIM_MARKER"));
-        const keepFrom = content.indexOf("\n", Math.floor(content.length / 2)) + 1;
-        const regrown = content.slice(keepFrom) + newLines.join("\n") + "\n";
-        expect(regrown.length).toBeGreaterThan(content.length);
-
-        let trimmed = false;
-        const result = await runFollowUntil(["-f"], logDir, {
-            onChunk: (stdout) => {
-                if (trimmed || !stdout.includes("BEFORE_TRIM_MARKER")) return;
-                trimmed = true;
-                // The trimmed part and the lines logged meanwhile land before the follower's next poll
-                void fsPromise.writeFile(file, regrown);
-            },
-            doneWhen: (stdout) => stdout.includes("AFTER_TRIM_MARKER"),
-            graceMs: 1000,
-            maxMs: 20000
-        });
-
-        expect(result.stdout).toContain("AFTER_TRIM_MARKER");
-        const wrongCounts: string[] = [];
-        for (let i = 0; i < NEW_LINES; i++) {
-            const count = countOf(result.stdout, `new line ${i}_ `);
-            if (count !== 1) wrongCounts.push(`new line ${i}_ x${count}`);
-        }
-        expect(wrongCounts).toEqual([]);
-        expect(countOf(result.stdout, "BEFORE_TRIM_MARKER")).toBe(1);
-        expect(countOf(result.stdout, "old line 1999 ")).toBe(1);
-        expect(result.stderr).not.toContain("truncated");
-    });
-
-    // The check that the last bytes read still sit before the offset, and the read from that offset, are two calls.
-    // A trim that lands between them, with the file already longer than the offset again, passed the check and was
-    // then read from the old offset, and the next poll took the bytes of the regrown file as its anchor, so the
-    // skipped lines never came back. The preload does that rewrite right before the first data read after the
-    // trigger file appears, which is the window a stalled follower leaves open.
-    it("keeps following a log trimmed and regrown between its trim check and its read", async () => {
-        const { logDir } = await createLogDir();
-        const auxDir = randomDirectory(); // outside logDir, which the follower scans for log files
-        const file = path.join(logDir, "bitsocial_cli_daemon_2026-06-04T00-00-00.000Z.log");
-        const regrownFile = path.join(auxDir, "regrown");
-        const triggerFile = path.join(auxDir, "swap-now");
-        const lines: string[] = [];
-        for (let i = 0; i < 2000; i++) lines.push(buildLogLine(new Date(Date.UTC(2026, 5, 4, 0, 0, i)), `old line ${i} ${"x".repeat(40)}`));
-        lines.push(buildLogLine(new Date("2026-06-04T01:00:00.000Z"), "BEFORE_TRIM_MARKER"));
-        const content = lines.join("\n") + "\n";
-        await fsPromise.writeFile(file, content);
-
-        const NEW_LINES = 2000;
-        const newLines = Array.from({ length: NEW_LINES }, (_, i) =>
-            buildLogLine(new Date(Date.UTC(2026, 5, 4, 2, 0, 0, i)), `new line ${i}_ ${"y".repeat(40)}`)
-        );
-        newLines.push(buildLogLine(new Date("2026-06-04T03:00:00.000Z"), "AFTER_TRIM_MARKER"));
-        const keepFrom = content.indexOf("\n", Math.floor(content.length / 2)) + 1;
-        const regrown = content.slice(keepFrom) + newLines.join("\n") + "\n";
-        expect(regrown.length).toBeGreaterThan(content.length);
-        await fsPromise.writeFile(regrownFile, regrown);
-
-        // 65536 is the follower's read buffer: the trim check reads at most 4096 bytes, so only the data read matches
-        const swapBeforeDataRead = `import fs from "node:fs"; import fsp from "node:fs/promises";
-            const handle = await fsp.open(process.execPath, "r"); const proto = Object.getPrototypeOf(handle); await handle.close();
-            const realRead = proto.read;
-            proto.read = async function (...args) {
-                if (args[2] === 65536 && fs.existsSync(process.env.LOGS_TEST_SWAP_TRIGGER)) {
-                    fs.writeFileSync(process.env.LOGS_TEST_LOG_FILE, fs.readFileSync(process.env.LOGS_TEST_REGROWN));
-                    fs.rmSync(process.env.LOGS_TEST_SWAP_TRIGGER);
-                }
-                return realRead.apply(this, args);
-            };`;
-
-        let triggered = false;
-        const result = await runFollowUntil(["-f"], logDir, {
-            env: {
-                NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(swapBeforeDataRead)}`,
-                LOGS_TEST_SWAP_TRIGGER: triggerFile,
-                LOGS_TEST_LOG_FILE: file,
-                LOGS_TEST_REGROWN: regrownFile
-            },
-            onChunk: (stdout) => {
-                if (triggered || !stdout.includes("BEFORE_TRIM_MARKER")) return;
-                triggered = true;
-                void fsPromise.writeFile(triggerFile, "");
-            },
-            doneWhen: (stdout) => stdout.includes("AFTER_TRIM_MARKER"),
-            graceMs: 1000,
-            maxMs: 20000
-        });
-
-        const triggerLeft = await fsPromise.stat(triggerFile).then(
-            () => true,
-            () => false
-        );
-        expect(triggerLeft, "the follower never reached a data read after the trigger").toBe(false);
-        expect(result.stdout).toContain("AFTER_TRIM_MARKER");
-        const wrongCounts: string[] = [];
-        for (let i = 0; i < NEW_LINES; i++) {
-            const count = countOf(result.stdout, `new line ${i}_ `);
-            if (count !== 1) wrongCounts.push(`new line ${i}_ x${count}`);
-        }
-        expect(wrongCounts).toEqual([]);
-        expect(countOf(result.stdout, "BEFORE_TRIM_MARKER")).toBe(1);
-        expect(countOf(result.stdout, "old line 1999 ")).toBe(1);
-        expect(result.stderr).not.toContain("truncated");
-    });
 
     it("follows a log file that was emptied from its start", async () => {
         const { logDir } = await createLogDir();
@@ -726,7 +571,7 @@ describe("bitsocial logs (live daemon tests)", async () => {
         // Wait for log file to be written
         await waitForCondition(async () => {
             const files = await fsPromise.readdir(logDir);
-            return files.some((f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".log"));
+            return files.some((f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".jsonl"));
         }, 10000, 500);
     });
 
@@ -734,34 +579,37 @@ describe("bitsocial logs (live daemon tests)", async () => {
         await stopPkcDaemon(daemonProcess);
     });
 
-    it("daemon writes debug output to log file even when DEBUG is not set", async () => {
-        const files = (await fsPromise.readdir(logDir)).filter(
-            (f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".log")
-        );
+    const readNewestJsonl = async () => {
+        const files = (await fsPromise.readdir(logDir)).filter((f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".jsonl"));
         expect(files.length).toBeGreaterThan(0);
+        return fsPromise.readFile(path.join(logDir, files.sort().pop()!), "utf-8");
+    };
 
-        const logContent = await fsPromise.readFile(path.join(logDir, files.sort().pop()!), "utf-8");
-        // The log file should contain debug output from bitsocial or pkc namespaces
-        expect(logContent.length).toBeGreaterThan(0);
-        expect(logContent).toMatch(/bitsocial|pkc/i);
+    it("daemon writes debug output to log file even when DEBUG is not set", async () => {
+        const entries = (await readNewestJsonl()).trimEnd().split("\n").map((line) => JSON.parse(line));
+        expect(entries.some((entry) => entry.namespace.startsWith("bitsocial-cli:daemon"))).toBe(true);
     });
 
-    it("log file contains ISO timestamp prefixes", async () => {
-        const files = (await fsPromise.readdir(logDir)).filter(
-            (f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".log")
-        );
-        const logContent = await fsPromise.readFile(path.join(logDir, files.sort().pop()!), "utf-8");
-        // At least some lines should have the [ISO_TIMESTAMP] prefix
-        expect(logContent).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] /m);
+    it("log file has one JSON entry per line, with seq, time, level, namespace, msg and tags", async () => {
+        const lines = (await readNewestJsonl()).trimEnd().split("\n");
+        for (const line of lines) {
+            const entry = JSON.parse(line);
+            expect(typeof entry.time).toBe("number");
+            expect(["log", "error", "trace"]).toContain(entry.level);
+            expect(typeof entry.namespace).toBe("string");
+            expect(typeof entry.msg).toBe("string");
+            expect(typeof entry.tags).toBe("object");
+        }
+        // What the daemon printed to its terminal is in the file too
+        expect(lines.some((line) => JSON.parse(line).namespace === "bitsocial-cli:stdout")).toBe(true);
     });
 
-    it("log file preserves ANSI color codes", async () => {
-        const files = (await fsPromise.readdir(logDir)).filter(
-            (f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".log")
-        );
-        const logContent = await fsPromise.readFile(path.join(logDir, files.sort().pop()!), "utf-8");
-        // The log file should contain ANSI escape codes (colors not stripped)
-        expect(logContent).toMatch(/\u001b\[/);
+    it("log file and bitsocial logs output contain no ANSI escape codes; --color adds them", async () => {
+        expect(await readNewestJsonl()).not.toMatch(/\u001b\[/);
+        const plain = await runBitsocialLogs([], logDir);
+        expect(plain.stdout).not.toMatch(/\u001b\[/);
+        const colored = await runBitsocialLogs(["--color"], logDir);
+        expect(colored.stdout).toMatch(/\u001b\[/);
     });
 
     it("bitsocial logs dumps log file content and exits", async () => {
@@ -861,5 +709,159 @@ describe("bitsocial logs (live daemon tests)", async () => {
         });
 
         expect(result.stdout.length).toBeGreaterThan(0);
+    });
+});
+
+const jsonlEntry = (time: string, namespace: string, msg: string, extra: { level?: string; tags?: Record<string, string>; seq?: number } = {}) =>
+    JSON.stringify({ seq: extra.seq ?? 0, time: new Date(time).getTime(), level: extra.level ?? "log", namespace, msg, tags: extra.tags ?? {} });
+
+describe("bitsocial logs on JSONL files (synthetic)", () => {
+    const KEY = "12D3KooWAbc";
+    const writeRun = async (logDir: string) => {
+        const stem = "bitsocial_cli_daemon_2026-07-01T00-00-00.000Z";
+        await fsPromise.writeFile(
+            path.join(logDir, `${stem}.jsonl`),
+            [
+                jsonlEntry("2026-07-01T00:00:00.000Z", "bitsocial-cli:stdout", "PART0_STDOUT_MARKER", { seq: 1 }),
+                jsonlEntry("2026-07-01T00:00:01.000Z", "pkc-js:local-community", "storeComment: stored", { seq: 2, tags: { publicKey: KEY, cid: "QmCid" } })
+            ].join("\n") + "\n"
+        );
+        await fsPromise.writeFile(
+            path.join(logDir, `${stem}.1.jsonl`),
+            [
+                jsonlEntry("2026-07-01T00:00:02.000Z", "pkc-js:comment", "boom\n    at stack line 1\n    at stack line 2", { seq: 3, level: "error", tags: { publicKey: KEY } }),
+                jsonlEntry("2026-07-01T00:00:03.000Z", "bitsocial-cli:daemon", "PART1_LAST_MARKER", { seq: 4 })
+            ].join("\n") + "\n"
+        );
+        // An earlier run, which `bitsocial logs` does not read
+        await fsPromise.writeFile(
+            path.join(logDir, "bitsocial_cli_daemon_2026-06-30T00-00-00.000Z.jsonl"),
+            jsonlEntry("2026-06-30T00:00:00.000Z", "bitsocial-cli:daemon", "EARLIER_RUN_MARKER") + "\n"
+        );
+    };
+
+    it("prints every file of the newest run in order, as [time] [level] namespace [tags] msg", async () => {
+        const { logDir } = await createLogDir();
+        await writeRun(logDir);
+        const result = await runBitsocialLogs([], logDir);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).not.toContain("EARLIER_RUN_MARKER");
+        const lines = result.stdout.trimEnd().split("\n");
+        expect(lines[0]).toBe("[2026-07-01T00:00:00.000Z] [log] bitsocial-cli:stdout PART0_STDOUT_MARKER");
+        expect(lines[1]).toBe(`[2026-07-01T00:00:01.000Z] [log] pkc-js:local-community [publicKey=${KEY}, cid=QmCid] storeComment: stored`);
+        expect(lines[2]).toBe(`[2026-07-01T00:00:02.000Z] [error] pkc-js:comment [publicKey=${KEY}] boom`);
+        expect(lines[3]).toBe("    at stack line 1");
+        expect(lines[lines.length - 1]).toContain("PART1_LAST_MARKER");
+    });
+
+    // issue #291: a pattern spanning the namespace and the tag block must match piped output
+    it("output has no escape sequences, so a namespace-plus-tag pattern matches", async () => {
+        const { logDir } = await createLogDir();
+        await writeRun(logDir);
+        const result = await runBitsocialLogs([], logDir);
+        expect(result.stdout).not.toMatch(/\u001b\[/);
+        const pattern = new RegExp(`pkc-js:local-community \\[publicKey=${KEY}`);
+        expect(result.stdout.split("\n").filter((line) => pattern.test(line))).toHaveLength(1);
+        const anchored = /^\[[^\]]+\] \[[a-z]+\] [^ ]+ (\[[^\]]*\] )?storeComment: /;
+        expect(result.stdout.split("\n").filter((line) => anchored.test(line))).toHaveLength(1);
+    });
+
+    it("--color colors namespaces; --color and --json are mutually exclusive", async () => {
+        const { logDir } = await createLogDir();
+        await writeRun(logDir);
+        const colored = await runBitsocialLogs(["--color"], logDir);
+        expect(colored.stdout).toMatch(/\u001b\[3\d;1mpkc-js:comment\u001b\[0m/);
+        const both = await runBitsocialLogs(["--color", "--json"], logDir);
+        expect(both.exitCode).not.toBe(0);
+    });
+
+    it("--json prints the stored entries, one per line, with the stack inside msg", async () => {
+        const { logDir } = await createLogDir();
+        await writeRun(logDir);
+        const result = await runBitsocialLogs(["--json", "--level", "error"], logDir);
+        const lines = result.stdout.trimEnd().split("\n");
+        expect(lines).toHaveLength(1);
+        const entry = JSON.parse(lines[0]);
+        expect(entry).toMatchObject({ seq: 3, level: "error", namespace: "pkc-js:comment", tags: { publicKey: KEY } });
+        expect(entry.msg).toContain("at stack line 2");
+    });
+
+    it("--level and --stdout/--stderr filter by entry level and by whether the terminal showed it", async () => {
+        const { logDir } = await createLogDir();
+        await writeRun(logDir);
+        const errors = await runBitsocialLogs(["--level", "error"], logDir);
+        expect(errors.stdout.trimEnd().split("\n")[0]).toContain("[error] pkc-js:comment");
+        expect(errors.stdout).not.toContain("storeComment");
+        const stdout = await runBitsocialLogs(["--stdout"], logDir);
+        expect(stdout.stdout.trimEnd()).toBe("[2026-07-01T00:00:00.000Z] [log] bitsocial-cli:stdout PART0_STDOUT_MARKER");
+        const stderr = await runBitsocialLogs(["--stderr", "-n", "1"], logDir);
+        expect(stderr.stdout).toContain("PART1_LAST_MARKER");
+        expect(stderr.stdout).not.toContain("PART0_STDOUT_MARKER");
+    });
+
+    it("strips escape sequences from old text log files unless --color is given", async () => {
+        const { logDir } = await createLogDir();
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-05-01T00-00-00.000Z.log");
+        await fsPromise.writeFile(
+            file,
+            `[2026-05-01T00:00:00.000Z] [stderr] \u001b[36;1mpkc-js:local-community \u001b[0m[publicKey=${KEY}] hello \u001b[36m+0ms\u001b[0m\n`
+        );
+        const plain = await runBitsocialLogs([], logDir);
+        expect(plain.stdout.trimEnd()).toBe(`[2026-05-01T00:00:00.000Z] [stderr] pkc-js:local-community [publicKey=${KEY}] hello +0ms`);
+        const colored = await runBitsocialLogs(["--color"], logDir);
+        expect(colored.stdout).toMatch(/\u001b\[36;1m/);
+        const json = JSON.parse((await runBitsocialLogs(["--json"], logDir)).stdout.trim());
+        expect(json).toMatchObject({ namespace: "pkc-js:local-community", level: "log" });
+        expect(json.msg).not.toMatch(/\u001b/);
+    });
+
+    it("-f follows the daemon onto its next rotated file without a switch notice, and prints each line once", async () => {
+        const { logDir } = await createLogDir();
+        const stem = "bitsocial_cli_daemon_2026-07-02T00-00-00.000Z";
+        await fsPromise.writeFile(path.join(logDir, `${stem}.jsonl`), jsonlEntry("2026-07-02T00:00:00.000Z", "t:ns", "FIRST_MARKER") + "\n");
+        let rotated = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            onChunk: (stdout) => {
+                if (rotated || !stdout.includes("FIRST_MARKER")) return;
+                rotated = true;
+                void (async () => {
+                    // The last line of the old file lands after the next file exists, as when the daemon's stream flushes late
+                    await fsPromise.writeFile(path.join(logDir, `${stem}.1.jsonl`), jsonlEntry("2026-07-02T00:00:02.000Z", "t:ns", "NEXT_FILE_MARKER") + "\n");
+                    await fsPromise.appendFile(path.join(logDir, `${stem}.jsonl`), jsonlEntry("2026-07-02T00:00:01.000Z", "t:ns", "LATE_FLUSH_MARKER") + "\n");
+                })();
+            },
+            doneWhen: (stdout) => stdout.includes("NEXT_FILE_MARKER"),
+            graceMs: 1000
+        });
+        const count = (needle: string) => result.stdout.split(needle).length - 1;
+        expect(count("FIRST_MARKER")).toBe(1);
+        expect(count("LATE_FLUSH_MARKER")).toBe(1);
+        expect(count("NEXT_FILE_MARKER")).toBe(1);
+        expect(result.stdout.indexOf("LATE_FLUSH_MARKER")).toBeLessThan(result.stdout.indexOf("NEXT_FILE_MARKER"));
+        expect(result.stderr).not.toContain("switched to new log file");
+    });
+
+    it("-f with --level only prints new entries of that level", async () => {
+        const { logDir } = await createLogDir();
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-07-03T00-00-00.000Z.jsonl");
+        await fsPromise.writeFile(file, jsonlEntry("2026-07-03T00:00:00.000Z", "t:ns", "READY_MARKER", { level: "error" }) + "\n");
+        let appended = false;
+        const result = await runFollowUntil(["-f", "--level", "error"], logDir, {
+            onChunk: (stdout) => {
+                if (appended || !stdout.includes("READY_MARKER")) return;
+                appended = true;
+                void fsPromise.appendFile(
+                    file,
+                    jsonlEntry("2026-07-03T00:00:01.000Z", "t:ns", "LOG_LEVEL_MARKER") +
+                        "\n" +
+                        jsonlEntry("2026-07-03T00:00:02.000Z", "t:ns", "ERROR_LEVEL_MARKER", { level: "error" }) +
+                        "\n"
+                );
+            },
+            doneWhen: (stdout) => stdout.includes("ERROR_LEVEL_MARKER"),
+            graceMs: 500
+        });
+        expect(result.stdout).toContain("ERROR_LEVEL_MARKER");
+        expect(result.stdout).not.toContain("LOG_LEVEL_MARKER");
     });
 });
