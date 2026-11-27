@@ -124,12 +124,33 @@ describe("verifyUnmanagedAddresses", () => {
             expect(dial).not.toHaveBeenCalled();
         });
 
+        // Where each family's records came from decides, and only for the families the address is dialed over.
+        describe("with public DNS answering one family and this machine's resolver the other", () => {
+            it("still fails a /dns4 name public DNS leads only to a private address, whatever happened to AAAA", async () => {
+                const dial = vi.fn(async () => ({ peerId }));
+                const records = { v4: ["192.168.1.20"], v6: [], source: "system" as const, systemFamilies: ["v6" as const], unanswered: ["v6" as const] };
+                const results = await verifyUnmanagedAddresses({ running: [`${wss}/p2p/${peerId}`], config: [], dial, resolve: async () => records });
+                expect(results).toEqual([{ address: wss, status: "failed", error: "node.example resolves only to private addresses" }]);
+                expect(dial).not.toHaveBeenCalled();
+            });
+
+            it("dials a /dns name only where public DNS leads, without this machine's tailnet address or its caveat", async () => {
+                const address = "/dns/machine.tailnet.ts.net/tcp/443/tls/ws";
+                const dial = vi.fn(async () => ({ peerId, handshakeMs: 700 }));
+                const records = { v4: ["93.184.216.40"], v6: ["fd7a::1"], source: "system" as const, systemFamilies: ["v6" as const] };
+                const results = await verifyUnmanagedAddresses({ running: [`${address}/p2p/${peerId}`], config: [], dial, resolve: async () => records });
+                expect(results).toEqual([{ address, status: "ok", handshakeMs: 700 }]);
+                expect(dial).toHaveBeenCalledTimes(1);
+            });
+        });
+
         it("does not call a /dns name private-only while its AAAA query went unanswered", async () => {
             const dial = vi.fn(async () => ({ peerId }));
             const address = "/dns/node.example/tcp/443/tls/ws";
-            const partial = { v4: ["192.168.1.20"], v6: [], source: "system" as const, unanswered: ["v6" as const] };
+            const partial = { v4: ["192.168.1.20"], v6: [], source: "system" as const, systemFamilies: ["v6" as const], unanswered: ["v6" as const] };
             const results = await verifyUnmanagedAddresses({ running: [`${address}/p2p/${peerId}`], config: [], dial, resolve: async () => partial });
-            expect(results).toMatchObject([{ address, status: "unconfirmed", systemDns: true }]);
+            // Unconfirmed because AAAA is unknown. No caveat about this machine's resolver: none of its records were used.
+            expect(results).toEqual([{ address, status: "unconfirmed", error: "node.example resolves only to private addresses" }]);
             expect(dial).not.toHaveBeenCalled();
         });
     });

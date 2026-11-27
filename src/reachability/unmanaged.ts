@@ -2,7 +2,7 @@ import type { ReachabilityCheck } from "./checks.js";
 import { isPublicIp, localIpsFromInterfaces, type KuboAutonat } from "./discovery.js";
 import { TAILSCALE_FUNNEL_DOC } from "./guidance.js";
 import { BROWSER_DIAL_TIMEOUT_MS, dialWithLibp2p, formatSeconds, HandshakeTimeoutError, SLOW_HANDSHAKE_MS } from "./libp2p-dial.js";
-import { dnsUnansweredMessage, familiesOf, resolveOverPublicDns, type PublicRecords } from "./public-dns.js";
+import { dnsUnansweredMessage, familiesOf, recordsFor, resolveOverPublicDns, type PublicRecords } from "./public-dns.js";
 import type { ResolvedDomain } from "./setup.js";
 import type { PeriodicWssCheck, WssAddressCheck } from "./state.js";
 import { formatFunnelIngress, isFunnelAddress, pingFunnelIngress, type FunnelIngressReport, type RunCommand } from "./tailscale.js";
@@ -53,7 +53,7 @@ export async function verifyUnmanagedAddresses(input: {
     treatAsPublic?: string[];
     dial?: DialAddress;
     // Over public DNS unless a test says otherwise. Records without a source count as public ones.
-    resolve?: (name: string) => Promise<ResolvedDomain & Partial<Pick<PublicRecords, "source" | "unanswered">>>;
+    resolve?: (name: string) => Promise<ResolvedDomain & Partial<Pick<PublicRecords, "source" | "systemFamilies" | "unanswered">>>;
     signal?: AbortSignal;
     localIps?: string[];
 }): Promise<UnmanagedAddress[]> {
@@ -63,27 +63,37 @@ export async function verifyUnmanagedAddresses(input: {
         uniqueBrowserAddresses(input.running, treatAsPublic).map(async ([address, dialable]): Promise<UnmanagedAddress> => {
             let targets = [address.match(/^\/ip[46]\/([^/]+)\//)?.[1]].filter((ip) => ip !== undefined);
             let records: PublicRecords | undefined;
-            const systemDns = () => (records?.source === "system" ? { systemDns: true as const } : {});
+            // Whether the addresses this one is judged and dialed by came from this machine's resolver.
+            let fromSystem = false;
+            const systemDns = () => (fromSystem ? { systemDns: true as const } : {});
             try {
                 const [, protocol, name] = address.match(/^\/(dns[46]?)\/([^/]+)\//) ?? [];
                 if (name) {
                     const resolved = await resolve(name);
-                    records = { v4: resolved.v4, v6: resolved.v6, source: resolved.source ?? "public", ...(resolved.unanswered ? { unanswered: resolved.unanswered } : {}) };
-                    // Only the family the address is dialed over, as the dial picks: a /dns4 address never goes to an IPv6 record.
-                    const families = familiesOf(protocol!);
-                    targets = families.flatMap((family) => records![family]);
+                    records = {
+                        v4: resolved.v4,
+                        v6: resolved.v6,
+                        source: resolved.source ?? "public",
+                        ...(resolved.systemFamilies ? { systemFamilies: resolved.systemFamilies } : {}),
+                        ...(resolved.unanswered ? { unanswered: resolved.unanswered } : {})
+                    };
+                    // Only the families the address is dialed over, and the same addresses the dial picks: a /dns4 address never
+                    // goes to an IPv6 record, and a family public DNS answered is not mixed with this machine's answer for the other.
+                    const chosen = recordsFor(records, familiesOf(protocol!));
+                    targets = chosen.ips;
+                    fromSystem = chosen.source === "system";
                     // A DNS outage here says nothing about what browsers can resolve, so it is no failure, Funnel or not.
-                    if (targets.length === 0 && families.some((family) => resolved.unanswered?.includes(family)))
-                        return { address, status: "unconfirmed", error: dnsUnansweredMessage(name), ...systemDns() };
+                    if (targets.length === 0 && chosen.unanswered.length > 0) return { address, status: "unconfirmed", error: dnsUnansweredMessage(name), ...systemDns() };
                     // No record by this machine's own resolver, with no public resolver answering, is no more what browsers get than a private one.
-                    if (targets.length === 0 && records.source === "system") {
+                    if (targets.length === 0 && !chosen.publicComplete) {
                         const record = protocol === "dns4" ? "A record" : protocol === "dns6" ? "AAAA record" : "A or AAAA record";
                         return { address, status: "unconfirmed", error: `${name} has no ${record} by this machine's own resolver, and no public resolver answered`, ...systemDns() };
                     }
-                    // Not dialed either way. Public DNS saying so is what browsers get, so that is a failure. This machine's own
-                    // resolver saying so, as MagicDNS does for its own ts.net name, or with a family unanswered, proves nothing about them.
+                    // Not dialed either way. Public DNS saying so for every family the address uses is what browsers get, so that is a
+                    // failure. This machine's own resolver saying so, as MagicDNS does for its own ts.net name, or a family public DNS
+                    // gave no answer for, proves nothing about them.
                     if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip)))
-                        return { address, status: records.source === "system" ? "unconfirmed" : "failed", error: `${name} resolves only to private addresses`, ...systemDns() };
+                        return { address, status: chosen.publicComplete ? "failed" : "unconfirmed", error: `${name} resolves only to private addresses`, ...systemDns() };
                 }
                 // The dial goes to the addresses found here, so it takes the same path whatever this machine's own resolver says.
                 const { handshakeMs, dns: dialed } = await dial(dialable, { timeoutMs: BROWSER_DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}), ...(records ? { records } : {}) });

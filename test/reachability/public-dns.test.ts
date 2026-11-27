@@ -52,7 +52,7 @@ describe("resolveOverPublicDns", () => {
             if (servers !== undefined) throw dnsError(code);
             return type === "A" ? ["93.184.216.41"] : [];
         });
-        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.41"], v6: [], source: "system" });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.41"], v6: [], source: "system", systemFamilies: ["v4", "v6"] });
     });
 
     // A query that got no answer says nothing about the record. Only one that public DNS answered "no such record" does.
@@ -62,7 +62,7 @@ describe("resolveOverPublicDns", () => {
             if (type === "A") throw dnsError("ETIMEOUT");
             throw dnsError("ENODATA");
         });
-        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.41"], v6: [], source: "system" });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.41"], v6: [], source: "system", systemFamilies: ["v4"] });
     });
 
     it("keeps the public answer for the family that got one", async () => {
@@ -71,14 +71,14 @@ describe("resolveOverPublicDns", () => {
             if (type === "A") return ["93.184.216.40"];
             throw dnsError("ETIMEOUT");
         });
-        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.40"], v6: ["fd7a::1"], source: "system" });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.40"], v6: ["fd7a::1"], source: "system", systemFamilies: ["v6"] });
     });
 
     it("resolves to nothing, by this machine's resolver, when nothing answers at all", async () => {
         const query: DnsQuery = async () => {
             throw dnsError("ETIMEOUT");
         };
-        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: [], v6: [], source: "system", unanswered: ["v4", "v6"] });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: [], v6: [], source: "system", systemFamilies: ["v4", "v6"], unanswered: ["v4", "v6"] });
     });
 
     // An outage of every resolver is not proof that the record is missing, so it must not read like an answer.
@@ -88,7 +88,7 @@ describe("resolveOverPublicDns", () => {
             if (type === "A") return ["100.101.102.103"];
             throw dnsError("ETIMEOUT");
         });
-        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.40"], v6: [], source: "system", unanswered: ["v6"] });
+        expect(await resolveOverPublicDns(name, { query })).toEqual({ v4: ["93.184.216.40"], v6: [], source: "system", systemFamilies: ["v6"], unanswered: ["v6"] });
     });
 });
 
@@ -213,6 +213,21 @@ describe("dialWithLibp2p through a name", () => {
     it("fails without dialing when public DNS has no record of the right family for the name", async () => {
         const resolveName = async () => ({ v4: [], v6: ["2606:4700::40"], source: "public" as const });
         await expect(dialWithLibp2p(address(), { resolveName })).rejects.toThrow(`${name} has no A record in public DNS, so browsers cannot resolve it`);
+    });
+
+    // Public DNS answered A, and only AAAA came from this machine's resolver, as when outside AAAA queries are dropped.
+    describe("with only one family resolved by this machine's resolver", () => {
+        const mixed = { v4: ["127.0.0.1"], v6: ["::1"], source: "system" as const, systemFamilies: ["v6" as const] };
+
+        it("does not mix that family into a /dns address's public one, or call the dial's records this machine's", async () => {
+            const result = await dialWithLibp2p(`/dns/${name}/tcp/${port}/ws/p2p/${listener.peerId.toString()}`, { records: mixed });
+            expect(result.dns).toEqual({ name, source: "public", ips: ["127.0.0.1"] });
+        });
+
+        it("does not let it touch a /dns4 address at all", async () => {
+            const result = await dialWithLibp2p(address(), { records: mixed });
+            expect(result.dns).toEqual({ name, source: "public", ips: ["127.0.0.1"] });
+        });
     });
 
     it("does not call a record missing when no resolver answered for it", async () => {

@@ -9,6 +9,9 @@ import type { ResolvedDomain } from "./setup.js";
 export interface PublicRecords extends ResolvedDomain {
     // "system" when no public resolver could be reached and this machine's own resolver was asked instead.
     source: "public" | "system";
+    // The families whose records came from this machine's resolver, because public DNS gave no answer for them.
+    // Absent means every family, when source is "system".
+    systemFamilies?: DnsFamily[];
     // The families no resolver answered for, public or this machine's. Their empty lists mean nothing is known,
     // not that the record is missing.
     unanswered?: DnsFamily[];
@@ -18,6 +21,30 @@ export type DnsFamily = "v4" | "v6";
 
 // The families a /dns4, /dns6 or /dns address is dialed over.
 export const familiesOf = (protocol: string): DnsFamily[] => (protocol === "dns4" ? ["v4"] : protocol === "dns6" ? ["v6"] : ["v4", "v6"]);
+
+// What an address dialed over `families` goes by. Public DNS's answer whenever it led anywhere, and this machine's
+// resolver only when it did not: mixing the two would let MagicDNS's tailnet address into a /dns name's dial (#281),
+// and a family the address never uses must not decide anything about it.
+export function recordsFor(
+    records: Pick<PublicRecords, "v4" | "v6" | "source" | "systemFamilies" | "unanswered">,
+    families: DnsFamily[]
+): {
+    ips: string[];
+    // Whose answer `ips` is.
+    source: PublicRecords["source"];
+    // Every family the address uses was answered by public DNS, so an empty or private-only answer is what browsers get.
+    publicComplete: boolean;
+    unanswered: DnsFamily[];
+} {
+    const fromSystem = records.systemFamilies ?? (records.source === "system" ? ["v4", "v6"] : []);
+    const publicFamilies = families.filter((family) => !fromSystem.includes(family));
+    const systemFamilies = families.filter((family) => fromSystem.includes(family));
+    const unanswered = families.filter((family) => records.unanswered?.includes(family));
+    const publicIps = publicFamilies.flatMap((family) => records[family]);
+    const publicComplete = systemFamilies.length === 0;
+    if (publicIps.length > 0 || publicComplete) return { ips: publicIps, source: "public", publicComplete, unanswered };
+    return { ips: systemFamilies.flatMap((family) => records[family]), source: "system", publicComplete, unanswered };
+}
 
 export const dnsUnansweredMessage = (name: string) => `no DNS resolver answered for ${name}, so where it leads could not be checked`;
 
@@ -52,8 +79,9 @@ export async function resolveOverPublicDns(name: string, { query = queryDns, ser
     // resolver is the fallback, for each family public DNS gave no answer for: a query that went unanswered says
     // nothing about whether the record exists. Callers say so, because that answer may not be the one browsers get.
     const [systemV4, systemV6] = await Promise.all([v4.answered ? v4 : ask("A"), v6.answered ? v6 : ask("AAAA")]);
+    const systemFamilies: DnsFamily[] = [...(v4.answered ? [] : ["v4" as const]), ...(v6.answered ? [] : ["v6" as const])];
     const unanswered: DnsFamily[] = [...(systemV4.answered ? [] : ["v4" as const]), ...(systemV6.answered ? [] : ["v6" as const])];
-    return { v4: systemV4.records, v6: systemV6.records, source: "system", ...(unanswered.length > 0 ? { unanswered } : {}) };
+    return { v4: systemV4.records, v6: systemV6.records, source: "system", systemFamilies, ...(unanswered.length > 0 ? { unanswered } : {}) };
 }
 
 type LookupCallback = (error: NodeJS.ErrnoException | null, address?: string | dns.LookupAddress[], family?: number) => void;
