@@ -37,7 +37,7 @@ export default class Create extends BaseCommand {
     async run(): Promise<void> {
         const { flags } = await this.parse(Create);
 
-        const log = PKCLogger("bitsocial-cli:commands:community:create");
+        const log = PKCLogger({ namespace: "bitsocial-cli:commands:community:create" });
         log(`flags: `, flags);
         const pkc = await this._connectToPkcRpc(flags.pkcRpcUrl.toString());
         const cliCreateOptions = DataObjectParser.transpose(

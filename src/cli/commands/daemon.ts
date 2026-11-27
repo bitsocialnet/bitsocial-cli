@@ -9,6 +9,7 @@ import tcpPortUsed from "tcp-port-used";
 import {
     getLanIpV4Address,
     PKCLogger,
+    getCliLoggerRoot,
     setupDebugLogger,
     loadKuboConfigFile,
     kuboRpcUrlFromKuboConfig,
@@ -191,14 +192,14 @@ export default class Daemon extends Command {
 
         // Redirect debug library output directly to the log file
         // instead of stderr, so only real errors appear in the terminal
-        const require = createRequire(import.meta.url);
-        const debugModule = require("debug");
+        // The `debug` copy pkc-logger prints through, which the cli's logger root (passed to pkc-js) uses
+        const debugModule = createRequire(import.meta.resolve("@pkcprotocol/pkc-logger"))("debug");
         // Force colors on and suppress the debug library's own date prefix
         // so that only writeTimestampedLine adds timestamps
         debugModule.inspectOpts.colors = true;
         debugModule.inspectOpts.hideDate = true;
         debugModule.log = (...args: any[]) => {
-            const text = formatWithOptions({ depth: Logger.inspectOpts?.depth || 10, colors: true }, ...args).trimStart() + EOL;
+            const text = formatWithOptions({ depth: 10, colors: true }, ...args).trimStart() + EOL;
             const wrote = fileLogger.writeTimestampedLine(text, "stderr");
             // If the file logger could not accept the write (closed / pending buffer full),
             // fall back to original stderr so debug output is never silently lost
@@ -227,7 +228,7 @@ export default class Daemon extends Command {
             return true;
         };
 
-        const log = Logger("bitsocial-cli:daemon");
+        const log = Logger({ namespace: "bitsocial-cli:daemon" });
         log(`Will store stderr + stdout log to ${logFilePath}`);
 
         if (deletedLogFile) {
@@ -279,7 +280,7 @@ export default class Daemon extends Command {
         const { flags } = await this.parse(Daemon);
         this._setupLogger(PKCLogger as PKCLoggerType);
         const { logFilePath, stdoutWrite } = await this._pipeDebugLogsToLogFile(flags.logPath, PKCLogger as PKCLoggerType);
-        const log = PKCLogger("bitsocial-cli:daemon");
+        const log = PKCLogger({ namespace: "bitsocial-cli:daemon" });
 
         // Captured once the async exit hook is registered (inside the try). The startup-failure
         // catch and the force-quit signal guard use these to run kubo/daemon cleanup and drop the
@@ -292,11 +293,7 @@ export default class Daemon extends Command {
             // Log debug info after pipe is set up so it goes to the log file, not terminal
             const envDebug: string | undefined = process.env["_PKC_DEBUG"] || process.env["DEBUG"];
             const debugNamespace = envDebug === "0" || envDebug === "" ? undefined : envDebug;
-            if (debugNamespace) {
-                const debugDepth = process.env["DEBUG_DEPTH"] ? parseInt(process.env["DEBUG_DEPTH"]) : 10;
-                log("Debug logs is on with namespace", `"${debugNamespace}"`);
-                log("Debug depth is set to", debugDepth);
-            }
+            if (debugNamespace) log("Debug logs is on with namespace", `"${debugNamespace}"`);
 
             log(`flags: `, flags);
 
@@ -348,6 +345,8 @@ export default class Daemon extends Command {
             log("Merged pkc options that will be used for this node", mergedPkcOptions);
             const { nameResolvers: _nr, ...printablePkcOptions } = mergedPkcOptions;
             console.log("PKC options:", JSON.stringify(printablePkcOptions, null, 2));
+            // pkc-js logs through the cli's root: its lines follow the DEBUG enabled above and reach the log file (issue #292)
+            mergedPkcOptions.logger = { ...mergedPkcOptions.logger, instance: getCliLoggerRoot() };
 
             // Migrate data directory before creating PKC instance
             migrateDataDirectory(mergedPkcOptions.dataPath!);
@@ -790,7 +789,7 @@ export default class Daemon extends Command {
                 stopRepoGcScheduler = startRepoGcScheduler({
                     kuboApiUrl: kuboRpcEndpoint,
                     intervalMs: flags.ipfsGcIntervalMinutes * 60 * 1000,
-                    log: PKCLogger("bitsocial-cli:ipfs:repoGc")
+                    log: PKCLogger({ namespace: "bitsocial-cli:ipfs:repoGc" })
                 });
 
             keepKuboUpInterval = setInterval(async () => {
@@ -813,7 +812,7 @@ export default class Daemon extends Command {
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) {
                 try {
                     const { ReachabilityRuntime } = await import("../../reachability/runtime.js");
-                    const reachabilityLog = PKCLogger("bitsocial-cli:reachability");
+                    const reachabilityLog = PKCLogger({ namespace: "bitsocial-cli:reachability" });
                     reachabilityRuntime = new ReachabilityRuntime({
                         dataPath: mergedPkcOptions.dataPath!,
                         kuboRepoPath: resolveKuboRepoPath(mergedPkcOptions.dataPath!),

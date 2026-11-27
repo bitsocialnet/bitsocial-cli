@@ -23,7 +23,7 @@ export default class Stop extends BaseCommand {
     async run() {
         const { argv, flags } = await this.parse(Stop);
 
-        const log = PKCLogger("bitsocial-cli:commands:community:stop");
+        const log = PKCLogger({ namespace: "bitsocial-cli:commands:community:stop" });
         log(`addresses: `, argv);
         log(`flags: `, flags);
         const addresses = <string[]>argv;

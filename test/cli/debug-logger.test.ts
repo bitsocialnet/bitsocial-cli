@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
-import { PKCLogger, setupDebugLogger, type PKCLoggerType } from "../../dist/util.js";
+import { PKCLogger, setupDebugLogger } from "../../dist/util.js";
 
 describe("setupDebugLogger", () => {
     let savedDebug: string | undefined;
@@ -96,24 +96,18 @@ describe("setupDebugLogger", () => {
         expect(Logger.enabled("pkc-js:trace")).toBe(false);
     });
 
-    it("respects DEBUG_DEPTH env var", async () => {
+    it("adds alwaysEnabled namespaces to the default selection and to an explicit DEBUG", async () => {
         saveEnv();
-        const Logger = await resetLoggerAndSetEnv({ DEBUG: undefined, _PKC_DEBUG: undefined, DEBUG_DEPTH: "5" }) as PKCLoggerType;
+        let Logger = await resetLoggerAndSetEnv({ DEBUG: undefined, _PKC_DEBUG: undefined });
+        let result = setupDebugLogger(Logger, { enableDefaultNamespace: true, alwaysEnabled: ["capture:stdout"] });
+        expect(result.enabledNamespaces).toBe("bitsocial*,pkc*,-pkc*trace,capture:stdout");
+        expect(Logger.enabled("capture:stdout")).toBe(true);
 
-        const result = setupDebugLogger(Logger);
-
-        expect(result.debugDepth).toBe(5);
-        expect(Logger.inspectOpts?.depth).toBe(5);
-    });
-
-    it("defaults DEBUG_DEPTH to 10", async () => {
-        saveEnv();
-        const Logger = await resetLoggerAndSetEnv({ DEBUG: undefined, _PKC_DEBUG: undefined, DEBUG_DEPTH: undefined }) as PKCLoggerType;
-
-        const result = setupDebugLogger(Logger);
-
-        expect(result.debugDepth).toBe(10);
-        expect(Logger.inspectOpts?.depth).toBe(10);
+        Logger = await resetLoggerAndSetEnv({ DEBUG: "pkc-js*", _PKC_DEBUG: undefined });
+        result = setupDebugLogger(Logger, { enableDefaultNamespace: true, alwaysEnabled: ["capture:stdout"] });
+        expect(Logger.enabled("pkc-js:comment")).toBe(true);
+        expect(Logger.enabled("bitsocial-cli:daemon")).toBe(false);
+        expect(Logger.enabled("capture:stdout")).toBe(true);
     });
 
     it("treats DEBUG='0' as disabled", async () => {

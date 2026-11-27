@@ -41,7 +41,7 @@ export default class Start extends BaseCommand {
         const { argv, flags } = await this.parse(Start);
 
         const addresses = <string[]>argv;
-        const log = PKCLogger("bitsocial-cli:commands:community:start");
+        const log = PKCLogger({ namespace: "bitsocial-cli:commands:community:start" });
         log(`addresses: `, addresses);
         log(`flags: `, flags);
 

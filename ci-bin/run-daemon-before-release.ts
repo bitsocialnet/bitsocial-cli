@@ -11,7 +11,7 @@ interface SpawnOptions {
 
 const spawnBitsocialProcess = async (options: SpawnOptions): Promise<ChildProcess | string> => {
     const Logger = await import("@pkcprotocol/pkc-logger");
-    const log = Logger.default("bitsocial-cli:ci:run-daemon-before-release:spawnBitsocialProcess");
+    const log = Logger.default({ namespace: "bitsocial-cli:ci:run-daemon-before-release:spawnBitsocialProcess" });
 
     const { args, isDaemon = false, waitForPattern } = options;
 
@@ -71,7 +71,7 @@ const spawnBitsocialProcess = async (options: SpawnOptions): Promise<ChildProces
 
 const retrySpawnBitsocialProcess = async (options: SpawnOptions, maxRetries = 5): Promise<ChildProcess | string> => {
     const Logger = await import("@pkcprotocol/pkc-logger");
-    const log = Logger.default("bitsocial-cli:ci:run-daemon-before-release:retrySpawnBitsocialProcess");
+    const log = Logger.default({ namespace: "bitsocial-cli:ci:run-daemon-before-release:retrySpawnBitsocialProcess" });
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -91,7 +91,7 @@ const retrySpawnBitsocialProcess = async (options: SpawnOptions, maxRetries = 5)
 
 (async () => {
     const Logger = await import("@pkcprotocol/pkc-logger");
-    const log = Logger.default("bitsocial-cli:ci:run-daemon-before-release");
+    const log = Logger.default({ namespace: "bitsocial-cli:ci:run-daemon-before-release" });
 
     const bitsocialDaemon = (await spawnBitsocialProcess({
         args: ["daemon"],

@@ -1,4 +1,5 @@
 import { validatePageSortFileFactory } from "@pkcprotocol/pkc-js/page-sorts";
+import { PKCLogger } from "../util.js";
 import {
     getPackagesDir,
     importPackageFactory,
@@ -43,7 +44,7 @@ export const loadPageSortsIntoPKC = (dataPath?: string): Promise<InstalledPageSo
 export async function readPageSortName(packageDir: string, pkg?: { name: string; main?: string }): Promise<string> {
     const packageJson = pkg ?? (await readPackageJson(packageDir));
     const factory = await importPackageFactory(PAGE_SORT_PACKAGE_KIND, packageDir, packageJson);
-    return validatePageSortFileFactory(factory, { name: packageJson.name }).sortName;
+    return validatePageSortFileFactory(factory, { name: packageJson.name, log: PKCLogger({ namespace: "bitsocial-cli:page-sort-packages" }) }).sortName;
 }
 
 /** Where a community's settings.pages names `pageSortName`, e.g. "posts[0]". */

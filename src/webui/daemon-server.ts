@@ -85,7 +85,7 @@ export async function startDaemonServer(
     webuiSource?: { webuisDir: string; pins: WebuiPin[] }
 ) {
     // Start pkc-js RPC
-    const log = PKCLogger("bitsocial-cli:daemon:startDaemonServer");
+    const log = PKCLogger({ namespace: "bitsocial-cli:daemon:startDaemonServer" });
     const webuiExpressApp = express();
     // GET /exports/<exportId> is streamed by pkc-js's own request listener, attached to this same
     // http.Server inside PKCWsServer. Express must stay silent for those paths — its catch-all 404

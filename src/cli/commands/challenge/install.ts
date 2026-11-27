@@ -2,6 +2,7 @@ import { Args, Flags } from "@oclif/core";
 import { BaseCommand } from "../../base-command.js";
 import defaults from "../../../common-utils/defaults.js";
 import { validateChallengeFileFactory } from "@pkcprotocol/pkc-js/challenges";
+import { PKCLogger } from "../../../util.js";
 import {
     importPackageFactory,
     installPackage,
@@ -51,7 +52,10 @@ export default class Install extends BaseCommand {
                 dataPath,
                 // Refuse anything a community would reject (e.g. a page sort package) before it replaces an install
                 validate: async (pkgDir, pkg) =>
-                    void validateChallengeFileFactory(await importPackageFactory(CHALLENGE_PACKAGE_KIND, pkgDir, pkg), { name: pkg.name })
+                    void validateChallengeFileFactory(await importPackageFactory(CHALLENGE_PACKAGE_KIND, pkgDir, pkg), {
+                        name: pkg.name,
+                        log: PKCLogger({ namespace: "bitsocial-cli:commands:challenge:install" })
+                    })
             });
         } catch (err) {
             if (err instanceof InvalidPackageArchiveError || err instanceof InvalidPackageNameError) this.error(err.message);

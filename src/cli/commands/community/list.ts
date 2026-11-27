@@ -19,7 +19,7 @@ export default class List extends BaseCommand {
     async run(): Promise<void> {
         const { flags } = await this.parse(List);
 
-        const log = PKCLogger("bitsocial-cli:commands:community:list");
+        const log = PKCLogger({ namespace: "bitsocial-cli:commands:community:list" });
         log(`flags: `, flags);
         const pkc = await this._connectToPkcRpc(flags.pkcRpcUrl.toString());
         // pkc.communities entries carry `started` (pkc-js >= 0.0.129), so no per-community lookup is needed
