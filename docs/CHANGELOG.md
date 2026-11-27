@@ -1,5 +1,17 @@
 # Changelog
 
+## <small>0.19.150 (2026-11-27)</small>
+
+* fix(reachability): address review findings on the WSS checks ([ccb4e17](https://github.com/bitsocialnet/bitsocial-cli/commit/ccb4e17))
+* fix(reachability): address the second round of review findings ([375cf36](https://github.com/bitsocialnet/bitsocial-cli/commit/375cf36))
+* fix(reachability): address the third round of review findings ([0a0f2f8](https://github.com/bitsocialnet/bitsocial-cli/commit/0a0f2f8))
+* fix(reachability): leave a name unconfirmed when only this machine's resolver has no record for it ([9f41982](https://github.com/bitsocialnet/bitsocial-cli/commit/9f41982))
+* fix(reachability): resolve an announced name over public DNS before dialing it (#281) ([1b792c1](https://github.com/bitsocialnet/bitsocial-cli/commit/1b792c1)), closes [#281](https://github.com/bitsocialnet/bitsocial-cli/issues/281)
+* fix(reachability): track per record type whether public DNS answered ([6e08cf8](https://github.com/bitsocialnet/bitsocial-cli/commit/6e08cf8)), closes [#281](https://github.com/bitsocialnet/bitsocial-cli/issues/281)
+* feat(daemon): check announced WSS addresses periodically and warn when one fails or is slow (#283) ([23d91f4](https://github.com/bitsocialnet/bitsocial-cli/commit/23d91f4)), closes [#283](https://github.com/bitsocialnet/bitsocial-cli/issues/283)
+* feat(reachability): detect a WSS address that is too slow for browsers (#282) ([cc0b24d](https://github.com/bitsocialnet/bitsocial-cli/commit/cc0b24d)), closes [#282](https://github.com/bitsocialnet/bitsocial-cli/issues/282)
+* docs(reachability): prefer an IP-based WSS address, and say a Funnel path can degrade (#284) ([45c1393](https://github.com/bitsocialnet/bitsocial-cli/commit/45c1393)), closes [#284](https://github.com/bitsocialnet/bitsocial-cli/issues/284)
+
 ## <small>0.19.149 (2026-11-27)</small>
 
 * fix(cli): refuse to run on an unsupported Node version with a clear message (#280) ([6427eeb](https://github.com/bitsocialnet/bitsocial-cli/commit/6427eeb)), closes [#280](https://github.com/bitsocialnet/bitsocial-cli/issues/280)
