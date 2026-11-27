@@ -1,21 +1,30 @@
 #!/usr/bin/env node
 
-// Enable the V8 compile cache before any imports so the CLI's own dist/, oclif and all
-// deps get bytecode-cached across invocations. No-op on Node < 22.8, and on any failure
-// it reports via its return value rather than throwing. Cache dir defaults to
-// os.tmpdir()/node-compile-cache; override with NODE_COMPILE_CACHE, disable with
-// NODE_DISABLE_COMPILE_CACHE=1.
-const { enableCompileCache } = await import("node:module");
-enableCompileCache?.();
+// Checks the Node version, then loads the CLI from run-cli.js. On a Node older than package.json's engines.node the
+// CLI used to get as far as starting kubo and then fail with "Cannot read properties of undefined (reading 'bind')".
+//
+// Static imports load before anything runs, so this file imports nothing but "fs" and the guard. Everything else is
+// in run-cli.js, behind the check, because any other import may be what breaks on an old Node.
+//
+// The check is reached on Node 18.19 and later 18.x releases, and on 20.10 and later. Older versions cannot load an
+// extensionless file in a "type": "module" package and fail with ERR_UNKNOWN_FILE_EXTENSION before this file runs.
+import { readFileSync } from "fs";
+import { unsupportedNodeMessage } from "./node-version-guard.js";
 
-// Save and strip DEBUG before any imports so the debug module
-// doesn't auto-enable stderr output. The daemon command will
-// re-enable namespaces programmatically and redirect to the log file.
-if (process.env.DEBUG) {
-    process.env._PKC_DEBUG ||= process.env.DEBUG;
-    delete process.env.DEBUG;
+var requiredNode;
+try {
+    requiredNode = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).engines.node;
+} catch (error) {
+    // No readable requirement, so nothing to enforce.
 }
 
-// Dynamic import so the stripping above runs before oclif loads
-const oclif = await import("@oclif/core");
-oclif.default.run(undefined, import.meta.url).then(() => oclif.default.flush()).catch(oclif.default.Errors.handle);
+var unsupported = unsupportedNodeMessage(process.versions.node, requiredNode);
+if (unsupported) {
+    console.error(unsupported);
+    process.exit(1);
+} else {
+    import("./run-cli.js").catch(function (error) {
+        console.error(error);
+        process.exit(1);
+    });
+}

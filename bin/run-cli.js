@@ -1,0 +1,22 @@
+// The CLI itself, loaded by bin/run once the Node version has been checked. Unlike bin/run, this file may use
+// whatever syntax the supported Node versions have.
+
+// Enable the V8 compile cache before any imports so the CLI's own dist/, oclif and all
+// deps get bytecode-cached across invocations. No-op on Node < 22.8, and on any failure
+// it reports via its return value rather than throwing. Cache dir defaults to
+// os.tmpdir()/node-compile-cache; override with NODE_COMPILE_CACHE, disable with
+// NODE_DISABLE_COMPILE_CACHE=1.
+const { enableCompileCache } = await import("node:module");
+enableCompileCache?.();
+
+// Save and strip DEBUG before any imports so the debug module
+// doesn't auto-enable stderr output. The daemon command will
+// re-enable namespaces programmatically and redirect to the log file.
+if (process.env.DEBUG) {
+    process.env._PKC_DEBUG ||= process.env.DEBUG;
+    delete process.env.DEBUG;
+}
+
+// Dynamic import so the stripping above runs before oclif loads
+const oclif = await import("@oclif/core");
+oclif.default.run(undefined, import.meta.url).then(() => oclif.default.flush()).catch(oclif.default.Errors.handle);
