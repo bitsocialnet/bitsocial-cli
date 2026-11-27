@@ -90,18 +90,4 @@ describe("bin/run on an unsupported Node version", () => {
         expect([...source.matchAll(/import\("([^"]+)"\)/g)].map((match) => match[1])).toEqual(["./run-cli.js"]);
         expect(source.indexOf("unsupportedNodeMessage(process")).toBeLessThan(source.indexOf('import("./run-cli.js")'));
     });
-
-    // Node parses a whole file before running any of it. Syntax an old Node does not know would be a SyntaxError
-    // before the check, and the operator would never see the message.
-    it.each(["bin/run", "bin/node-version-guard.js"])("keeps %s to syntax that Node 12 already had", (file) => {
-        const code = fs
-            .readFileSync(file, "utf-8")
-            .split("\n")
-            .filter((line) => !line.trim().startsWith("//"))
-            .join("\n");
-        expect(code).not.toMatch(/\bawait\b/);
-        expect(code).not.toMatch(/\?\.|\?\?|\|\|=|&&=/);
-        expect(code).not.toMatch(/\bcatch\s*\{/);
-        expect(code).not.toMatch(/from "node:|import\("node:/);
-    });
 });

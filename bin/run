@@ -3,10 +3,11 @@
 // Checks the Node version, then loads the CLI from run-cli.js. On a Node older than package.json's engines.node the
 // CLI used to get as far as starting kubo and then fail with "Cannot read properties of undefined (reading 'bind')".
 //
-// Node parses a whole file before it runs any of it, and static imports load before anything runs. So that an old
-// Node gets as far as the message, this file and node-version-guard.js use only syntax that Node 12 already had (no
-// top-level await, no ?. or ??, no ||=), and import nothing but "fs". Everything else is in run-cli.js, behind
-// the check, because any other import may be what breaks on an old Node.
+// Static imports load before anything runs, so this file imports nothing but "fs" and the guard. Everything else is
+// in run-cli.js, behind the check, because any other import may be what breaks on an old Node.
+//
+// The check is reached on Node 18.19 and later 18.x releases, and on 20.10 and later. Older versions cannot load an
+// extensionless file in a "type": "module" package and fail with ERR_UNKNOWN_FILE_EXTENSION before this file runs.
 import { readFileSync } from "fs";
 import { unsupportedNodeMessage } from "./node-version-guard.js";
 

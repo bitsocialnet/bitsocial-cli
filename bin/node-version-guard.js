@@ -1,5 +1,5 @@
-// Checked by bin/run before anything else is loaded. This file must keep parsing on the old Node versions it
-// exists to refuse, so it uses no recent syntax and imports nothing.
+// Checked by bin/run before anything else is loaded. It imports nothing, because an import may be what breaks on
+// the old Node versions this file exists to refuse.
 
 function parseVersion(text) {
     var match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(text));
