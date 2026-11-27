@@ -75,6 +75,11 @@ export async function verifyUnmanagedAddresses(input: {
                     // A DNS outage here says nothing about what browsers can resolve, so it is no failure, Funnel or not.
                     if (targets.length === 0 && families.some((family) => resolved.unanswered?.includes(family)))
                         return { address, status: "unconfirmed", error: dnsUnansweredMessage(name), ...systemDns() };
+                    // No record by this machine's own resolver, with no public resolver answering, is no more what browsers get than a private one.
+                    if (targets.length === 0 && records.source === "system") {
+                        const record = protocol === "dns4" ? "A record" : protocol === "dns6" ? "AAAA record" : "A or AAAA record";
+                        return { address, status: "unconfirmed", error: `${name} has no ${record} by this machine's own resolver, and no public resolver answered`, ...systemDns() };
+                    }
                     // Not dialed either way. Public DNS saying so is what browsers get, so that is a failure. This machine's own
                     // resolver saying so, as MagicDNS does for its own ts.net name, or with a family unanswered, proves nothing about them.
                     if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip)))

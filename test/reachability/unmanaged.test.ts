@@ -181,6 +181,17 @@ describe("verifyUnmanagedAddresses", () => {
             expect(dial).not.toHaveBeenCalled();
         });
 
+        // Public DNS having no record is what browsers get. This machine's own resolver having none is not.
+        it.each(["/dns4/node.example/tcp/443/tls/ws", "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws"])("is unconfirmed, without dialing, when only this machine's resolver answered for %s, with no record", async (address) => {
+            const dial = vi.fn(async () => ({ peerId }));
+            const resolve = async () => ({ v4: [], v6: ["2606:4700::40"], source: "system" as const });
+            const name = address.split("/")[2];
+            expect(await verifyUnmanagedAddresses({ running: [`${address}/p2p/${peerId}`], config: [], dial, resolve, localIps: [] })).toEqual([
+                { address, status: "unconfirmed", error: `${name} has no A record by this machine's own resolver, and no public resolver answered`, systemDns: true }
+            ]);
+            expect(dial).not.toHaveBeenCalled();
+        });
+
         it("is a failure when a name resolves to nothing", async () => {
             expect(await verifyUnmanagedAddresses({ running: [wss], config: [], dial, resolve: async () => ({ v4: [], v6: [] }), localIps: [] })).toEqual([{ address: wss, status: "failed", error: "timed out" }]);
         });
