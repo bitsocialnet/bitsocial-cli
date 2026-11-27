@@ -19,8 +19,10 @@ import {
     STATUS_HINT,
     STALE_NAME_DROP_AFTER_MS,
     UNDECIDED_RECHECK_INTERVAL_MS,
+    WSS_CHECK_INTERVAL_MS,
     type RuntimeDependencies
 } from "../../src/reachability/runtime.js";
+import { HandshakeTimeoutError } from "../../src/reachability/libp2p-dial.js";
 import { readReachabilityConfig, readReachabilityRuntimeStatus, reachabilityDir, writeReachabilityConfig, writeReachabilityDeclined, type ReachabilityConfig } from "../../src/reachability/state.js";
 
 const V4 = "93.184.216.34";
@@ -1408,6 +1410,296 @@ describe("ReachabilityRuntime", () => {
         await runtime.start();
         await runtime.stop();
         expect(events.some((event) => event.includes("Reachability is not running"))).toBe(true);
+    });
+
+    // Issue #283: an address that passed setup can become too slow for browsers hours later, and nothing said so.
+    describe("the periodic check of announced WSS addresses", () => {
+        const peerId = "12D3KooWKWyr2rBUftSL2mq8ESvrXCAoB12AFMeqfRskkn7dP6J2";
+        const funnel = "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws";
+        const own = `/ip4/${V4}/tcp/443/tls/ws`;
+        const funnelNode = (overrides: Partial<ReachabilityConfig> = {}) => baseConfig({ mode: "reverse-proxy", announce: [funnel], externalAnnounce: [funnel], publicIps: [], ...overrides });
+        const kuboIdentity = async () => ({ peerId, addresses: [] as string[] });
+        const tailscaleStatus = (now: number) =>
+            JSON.stringify({
+                BackendState: "Running",
+                Peer: { a: { HostName: "funnel-ingress-node", Tags: ["tag:ingress"], TailscaleIPs: ["fd7a::1"], Relay: "par", InEngine: true, LastHandshake: new Date(now - 5_000).toISOString() } }
+            });
+        // A node whose handshake time and ingress latency the test sets before each check.
+        // null stands for a node nobody has set up.
+        const watched = async (config: ReachabilityConfig | null = funnelNode(), overrides: Partial<RuntimeDependencies> = {}) => {
+            const path = { handshakeMs: 700 as number | Error, pingMs: 91 };
+            const records: string[] = [];
+            const dialed: string[] = [];
+            const context = await setup(config ?? undefined, {
+                kuboIdentity,
+                record: (message) => records.push(message),
+                dialAddress: async (address) => {
+                    dialed.push(address);
+                    if (path.handshakeMs instanceof Error) throw path.handshakeMs;
+                    return { peerId, handshakeMs: path.handshakeMs };
+                },
+                runTailscale: async (_file, args) => ({ stdout: args[0] === "status" ? tailscaleStatus(context.deps.now!()) : `pong from funnel-ingress-node (fd7a::1) via DERP(par) in ${path.pingMs}ms\n` }),
+                ...overrides
+            });
+            const warnings = () => context.events.filter((event) => event.startsWith("warn:"));
+            const logs = () => context.events.filter((event) => event.startsWith("log:"));
+            const stored = async () => (await readReachabilityRuntimeStatus(context.dataPath))?.wssChecks;
+            return { ...context, path, records, dialed, warnings, logs, stored };
+        };
+
+        it("runs every 15 minutes unless the daemon is told otherwise", () => expect(WSS_CHECK_INTERVAL_MS).toBe(15 * 60_000));
+
+        it("dials each announced address the way status does and records the timings, without bothering the operator", async () => {
+            const { runtime, records, dialed, warnings, logs, stored } = await watched();
+            await runtime.runWssCheck();
+            expect(dialed).toEqual([`${funnel}/p2p/${peerId}`]);
+            expect(records).toEqual([`WSS check: ${funnel} completed a handshake in 700 ms. Funnel ingress: 91 ms via DERP(par)`]);
+            expect(warnings()).toEqual([]);
+            expect(logs()).toEqual([]);
+            expect(await stored()).toEqual({
+                at: "2026-11-02T00:00:00.000Z",
+                addresses: { [funnel]: { status: "ok", handshakeMs: 700 } },
+                funnelIngress: { status: "ok", hops: [{ address: "fd7a::1", relay: "par", latencyMs: 91, via: "DERP(par)" }] }
+            });
+        });
+
+        it("warns when an address has become slow, once, and says when it recovered", async () => {
+            const { runtime, path, records, warnings, logs, advance } = await watched();
+            await runtime.runWssCheck();
+            path.handshakeMs = 4_230;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(warnings()[0]).toContain(`the handshake through ${funnel} took 4.2 s`);
+            expect(warnings()[0]).toContain("browsers give up on an address after 6 s");
+            expect(warnings()[0]).toContain(STATUS_HINT);
+            // The same finding on the next check is recorded, not shouted again.
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(records).toHaveLength(3);
+            expect(records[2]).toContain("slow handshake in 4230 ms");
+            path.handshakeMs = 650;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(logs()).toEqual([`log: ${funnel} completes a handshake in time again (650 ms).`]);
+        });
+
+        // A Funnel path that degrades tends to get slow first and then stop working. The second is news too.
+        it("warns when an address that has become slow stops working, without waiting out the hour", async () => {
+            const { runtime, path, warnings, advance } = await watched();
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            path.handshakeMs = new Error("connection refused");
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(2);
+            expect(warnings()[1]).toContain("is not working");
+            // Each finding is still repeated at most once an hour while it lasts.
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(2);
+            // After a recovery, both are news again.
+            path.handshakeMs = 650;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            path.handshakeMs = 4_230;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(3);
+            expect(warnings()[2]).toContain("has become slow");
+        });
+
+        it("warns when the handshake no longer finishes in the time a browser allows", async () => {
+            const { runtime, path, records, warnings, stored } = await watched();
+            path.handshakeMs = new HandshakeTimeoutError(6_000);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(warnings()[0]).toContain(funnel);
+            expect(warnings()[0]).toContain("did not finish within 6 s");
+            expect(records[0]).toContain("failed: the handshake did not finish within 6 s");
+            expect((await stored())!.addresses[funnel]).toMatchObject({ status: "failed", lastProblemAt: "2026-11-02T00:00:00.000Z" });
+        });
+
+        it("repeats a warning that still holds after an hour", async () => {
+            const { runtime, path, warnings, advance } = await watched();
+            path.handshakeMs = new Error("connection refused");
+            for (let check = 0; check < 5; check++) {
+                await runtime.runWssCheck();
+                advance(WSS_CHECK_INTERVAL_MS);
+            }
+            // Checks at 0, 15, 30, 45 and 60 minutes.
+            expect(warnings()).toHaveLength(2);
+        });
+
+        it("warns about a slow hop from Tailscale's ingress even while the handshake is still quick enough", async () => {
+            const { runtime, path, records, warnings, logs, advance } = await watched();
+            path.pingMs = 1900;
+            await runtime.runWssCheck();
+            expect(records[0]).toContain("Funnel ingress: 1900 ms via DERP(par)");
+            expect(warnings()).toHaveLength(1);
+            expect(warnings()[0]).toContain("1900 ms");
+            path.pingMs = 90;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(logs()).toEqual(["log: The hop from Tailscale's Funnel ingress to this node is back to normal (90 ms via DERP(par))."]);
+        });
+
+        it("keeps the last problem on record after the address has recovered, so status can still show it", async () => {
+            const { runtime, path, stored, advance } = await watched();
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            path.handshakeMs = 650;
+            advance(WSS_CHECK_INTERVAL_MS);
+            await runtime.runWssCheck();
+            const checks = (await stored())!;
+            expect(checks.at).toBe("2026-11-02T00:15:00.000Z");
+            expect(checks.addresses[funnel]).toEqual({ status: "ok", handshakeMs: 650, lastProblemAt: "2026-11-02T00:00:00.000Z", lastProblem: "slow handshake in 4230 ms" });
+        });
+
+        it("does not warn about an address this machine cannot test from inside its own network, and records that", async () => {
+            const { runtime, path, records, warnings, stored } = await watched(baseConfig(), { localIps: ["192.168.1.5"] });
+            path.handshakeMs = new Error("connection refused");
+            await runtime.runWssCheck();
+            expect(warnings()).toEqual([]);
+            expect(records).toEqual([`WSS check: ${own} could not be tested from this machine: connection refused`]);
+            expect((await stored())!.addresses[own]).toEqual({ status: "unconfirmed", error: "connection refused" });
+        });
+
+        it("only observes: the announced addresses stay as they were whatever it finds", async () => {
+            const { runtime, path, dataPath, kuboRepoPath, events } = await watched();
+            path.handshakeMs = new HandshakeTimeoutError(6_000);
+            await runtime.runWssCheck();
+            expect((await readReachabilityConfig(dataPath))!.announce).toEqual([funnel]);
+            expect(await kuboAnnounce(kuboRepoPath)).toEqual([funnel]);
+            expect(events).not.toContain("restart kubo");
+        });
+
+        it("survives the five-minute checks, which write the same status file", async () => {
+            const { runtime, stored, dataPath } = await watched();
+            await runtime.runWssCheck();
+            await runtime.runChecks();
+            expect((await stored())!.addresses[funnel]).toMatchObject({ status: "ok", handshakeMs: 700 });
+            expect((await readReachabilityRuntimeStatus(dataPath))?.lastIpCheck).toBeDefined();
+        });
+
+        // Both write runtime-status.json, through a temporary file named after the process.
+        it("does not lose or break the status file when it overlaps the five-minute checks", async () => {
+            const { runtime, stored, dataPath, events } = await watched();
+            for (let round = 0; round < 20; round++) await Promise.all([runtime.runWssCheck(), runtime.runChecks(), runtime.runWssCheck()]);
+            expect(events.filter((event) => event.startsWith("warn:"))).toEqual([]);
+            expect((await stored())!.addresses[funnel]).toMatchObject({ status: "ok" });
+            expect((await readReachabilityRuntimeStatus(dataPath))?.lastIpCheck).toBeDefined();
+        });
+
+        it("never hands the timer an interval Node would turn into 1 ms", async () => {
+            vi.useFakeTimers();
+            try {
+                const { runtime, dialed } = await watched(funnelNode(), { wssCheckIntervalMs: 2 ** 31 + 1_000, wssCheckFirstDelayMs: 1_000 });
+                await runtime.start();
+                await vi.advanceTimersByTimeAsync(1_000);
+                await vi.waitFor(() => expect(dialed).toHaveLength(1));
+                await vi.advanceTimersByTimeAsync(60 * 60_000);
+                await runtime.stop();
+                expect(dialed).toHaveLength(1);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it.each([
+            ["reachability is disabled", funnelNode({ enabled: false }), {}],
+            ["no WSS address is announced", baseConfig({ mode: "webtransport-only", announce: [], publicIps: [] }), {}],
+            ["nothing is configured", null, {}],
+            ["kubo is not answering", funnelNode(), { kuboIdentity: async () => undefined }]
+        ] as const)("does nothing while %s", async (_name, config, overrides) => {
+            const { runtime, dialed, records, events, stored } = await watched(config, overrides);
+            await runtime.runWssCheck();
+            expect(dialed).toEqual([]);
+            expect(records).toEqual([]);
+            expect(events).toEqual([]);
+            expect(await stored()).toBeUndefined();
+        });
+
+        // A result from before the check was turned off would otherwise be shown by status for as long as the file lives.
+        it("forgets the last result when the daemon starts with the check turned off", async () => {
+            const { runtime, path, stored, dataPath } = await watched(funnelNode(), { wssCheckIntervalMs: 0 });
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            expect(await stored()).toBeDefined();
+            await runtime.start();
+            await runtime.stop();
+            expect(await stored()).toBeUndefined();
+            expect(await readReachabilityRuntimeStatus(dataPath)).not.toBeNull();
+        });
+
+        it("forgets the last result once reachability is disabled", async () => {
+            const { runtime, path, stored, dataPath } = await watched();
+            path.handshakeMs = 4_230;
+            await runtime.runWssCheck();
+            await writeReachabilityConfig(dataPath, { ...(await readReachabilityConfig(dataPath))!, enabled: false });
+            await runtime.runWssCheck();
+            expect(await stored()).toBeUndefined();
+        });
+
+        // A check takes seconds, and the operator can disable reachability or drop an address meanwhile.
+        it("drops what it found for an address that stopped being announced while it was being checked", async () => {
+            const other = "/dns4/other.tailnet.ts.net/tcp/443/tls/ws";
+            let dataPath = "";
+            const { runtime, warnings, stored, records, dataPath: path } = await watched(funnelNode({ announce: [funnel, other], externalAnnounce: [funnel, other] }), {
+                dialAddress: async (address) => {
+                    if (address.startsWith(other)) {
+                        const config = (await readReachabilityConfig(dataPath))!;
+                        await writeReachabilityConfig(dataPath, { ...config, announce: [funnel], externalAnnounce: [funnel] });
+                    }
+                    return { peerId, handshakeMs: 4_230 };
+                }
+            });
+            dataPath = path;
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(warnings()[0]).toContain(funnel);
+            expect(records[0]).not.toContain(other);
+            expect(Object.keys((await stored())!.addresses)).toEqual([funnel]);
+        });
+
+        it("drops all of it when reachability was disabled while it ran", async () => {
+            let dataPath = "";
+            const { runtime, warnings, stored, records, dataPath: path } = await watched(funnelNode(), {
+                dialAddress: async () => {
+                    await writeReachabilityConfig(dataPath, { ...(await readReachabilityConfig(dataPath))!, enabled: false });
+                    return { peerId, handshakeMs: 4_230 };
+                }
+            });
+            dataPath = path;
+            await runtime.runWssCheck();
+            expect(warnings()).toEqual([]);
+            expect(records).toEqual([]);
+            expect(await stored()).toBeUndefined();
+        });
+
+        it("is started by the daemon's timers, and not at all when the interval is 0", async () => {
+            vi.useFakeTimers();
+            try {
+                const on = await watched(funnelNode(), { wssCheckIntervalMs: 60_000, wssCheckFirstDelayMs: 1_000 });
+                await on.runtime.start();
+                await vi.advanceTimersByTimeAsync(1_000);
+                await vi.waitFor(() => expect(on.dialed).toHaveLength(1));
+                await vi.advanceTimersByTimeAsync(60_000);
+                await vi.waitFor(() => expect(on.dialed).toHaveLength(2));
+                await on.runtime.stop();
+
+                const off = await watched(funnelNode(), { wssCheckIntervalMs: 0, wssCheckFirstDelayMs: 1_000 });
+                await off.runtime.start();
+                await vi.advanceTimersByTimeAsync(10 * 60_000);
+                await off.runtime.stop();
+                expect(off.dialed).toEqual([]);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
     });
 });
 

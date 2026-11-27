@@ -52,6 +52,27 @@ describe("bitsocial reachability status", () => {
         expect(stdout).toContain("Caddy: not running");
     });
 
+    // Issue #283: a problem the daemon saw stays visible after the address has recovered.
+    it("prints the daemon's last periodic WSS check, with a problem the address has since recovered from", async () => {
+        const dataPath = randomDirectory();
+        const funnel = "/dns4/machine.tailnet.ts.net/tcp/443/tls/ws";
+        await writeReachabilityConfig(dataPath, { version: 1, enabled: true, mode: "reverse-proxy", wsPort: 4002, announce: [funnel], externalAnnounce: [funnel], publicIps: [], staging: false, acmeDirectory: "https://acme-v02.api.letsencrypt.org/directory", caddyAdminPort: 2019 });
+        await writeReachabilityRuntimeStatus(dataPath, {
+            updatedAt: "2026-11-02T00:15:00.000Z",
+            wssChecks: {
+                at: "2026-11-02T00:15:00.000Z",
+                addresses: { [funnel]: { status: "ok", handshakeMs: 650, lastProblemAt: "2026-11-02T00:00:00.000Z", lastProblem: "slow handshake in 4230 ms" } },
+                funnelIngress: { status: "ok", hops: [{ address: "fd7a::1", relay: "par", latencyMs: 91, via: "DERP(par)" }] }
+            }
+        });
+        const { stdout } = await runStatus(["--pkcOptions.dataPath", dataPath]);
+        expect(stdout).toContain("Last periodic WSS check: 2026-11-02T00:15:00.000Z");
+        expect(stdout).toContain(`  ${funnel}: completed a handshake in 650 ms; last problem 2026-11-02T00:00:00.000Z (slow handshake in 4230 ms)`);
+        expect(stdout).toContain("  Funnel ingress: 91 ms via DERP(par)");
+        const parsed = JSON.parse((await runStatus(["--json", "--pkcOptions.dataPath", dataPath])).stdout);
+        expect(parsed.lastChecks.wssChecks.addresses[funnel]).toMatchObject({ status: "ok", handshakeMs: 650, lastProblemAt: "2026-11-02T00:00:00.000Z" });
+    });
+
     it("--json carries the Tailscale Funnel hint on a node setup left without WSS (#226)", async () => {
         const dataPath = randomDirectory();
         const server = http.createServer();

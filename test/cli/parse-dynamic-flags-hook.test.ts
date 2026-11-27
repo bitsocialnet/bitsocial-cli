@@ -49,6 +49,17 @@ describe("prerun hook: `bitsocial daemon --no-<flag>`", () => {
         expect(flags).not.toHaveProperty("no-enableIpfsGc");
     });
 
+    // Issue #283: how often the daemon checks its announced WSS addresses is a flag, not an environment variable.
+    it("checks announced WSS addresses every 15 minutes by default, and takes another interval or 0 for off", async () => {
+        expect((await parseDaemonFlags(["--logPath", logPath])).wssCheckIntervalMinutes).toBe(15);
+        expect((await parseDaemonFlags(["--logPath", logPath, "--wssCheckIntervalMinutes", "5"])).wssCheckIntervalMinutes).toBe(5);
+        expect((await parseDaemonFlags(["--logPath", logPath, "--wssCheckIntervalMinutes=0"])).wssCheckIntervalMinutes).toBe(0);
+        await expect(parseDaemonFlags(["--logPath", logPath, "--wssCheckIntervalMinutes", "-1"])).rejects.toThrow();
+        // A timer longer than 2^31-1 ms fires after 1 ms in Node, which would turn "monthly" into "continuously".
+        expect((await parseDaemonFlags(["--logPath", logPath, "--wssCheckIntervalMinutes", "35791"])).wssCheckIntervalMinutes).toBe(35791);
+        await expect(parseDaemonFlags(["--logPath", logPath, "--wssCheckIntervalMinutes", "43200"])).rejects.toThrow();
+    });
+
     it("keeps both flags on by default and still registers dynamic flags", async () => {
         const flags = await parseDaemonFlags(["--pkcOptions.dataPath=/data", "--logPath", logPath]);
         expect(flags.allowPrivateKeyExport).toBe(true);

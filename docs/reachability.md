@@ -9,7 +9,7 @@
 
 ```bash
 bitsocial reachability setup     # discover, configure, get a certificate, verify; safe to rerun
-bitsocial reachability status    # who can connect, then mode, addresses, certificate expiry, last checks, requirements; --json for scripts
+bitsocial reachability status    # who can connect, then mode, addresses, certificate expiry, last checks, handshake times, requirements; --json for scripts
 bitsocial reachability enable    # repair and turn back on from the stored choices, never asks anything
 bitsocial reachability disable   # stop serving and restore the kubo config; --purge also moves the state to a backup
 ```
@@ -19,7 +19,7 @@ All take `--pkcOptions.dataPath`. `setup` also takes:
 | Flag | Meaning |
 | --- | --- |
 | `--domain <name>` | A domain pointing at this machine, to get a certificate for or to forward through your own server |
-| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds, tried three times, 15 seconds apart. `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
+| `--announce <multiaddr>` | An address your own server or Tailscale Funnel serves. Announced only after a real libp2p handshake through it succeeds within the 6 seconds a browser allows, tried three times, 15 seconds apart. `setup` prints how long the handshake took and warns from 3 seconds. A name in the address is resolved over public DNS first, see [Where a name is resolved](#where-a-name-is-resolved). `setup` then prints a `curl` test to run from another network, because that handshake comes from this machine. Needs no permission to bind TCP 443 or 80, see [`--announce` and this node's own certificate](#--announce-and-this-nodes-own-certificate) |
 | `--force` | Continue when the domain does not resolve to this machine, for a proxy in front of it. Remembered for later runs |
 | `--staging` | Use the Let's Encrypt staging CA, whose certificates browsers do not trust |
 | `--non-interactive` | Never ask. Prompts already only appear when stdin is a TTY |
@@ -71,17 +71,48 @@ An `--announce` address is served by something else, so it does not depend on th
 | nginx, Apache or IIS holds TCP 443 | `setup --domain node.example`, then add the printed snippet, then `setup --domain node.example --announce /dns4/node.example/tcp/443/tls/ws` | Your server terminates TLS. These cannot get an IP certificate by themselves |
 | No public address and no UPnP, or TCP 443 cannot be reached from the internet | `setup`, then follow the Tailscale Funnel steps it prints, see [tailscale-funnel.md](tailscale-funnel.md) | A `<machine>.<tailnet>.ts.net` address through Tailscale's relays, with nothing opened on the router. `setup` does not run Tailscale for you |
 
+**An address of the node's own comes first.** The first four rows give browsers an address on the node's own IP or domain: they connect straight to the node, with nobody else in the path and nothing between the browser and the node that can slow down. Use one of them whenever the internet can reach the machine on TCP 443. Tailscale Funnel, the last row, is the fallback for a node that cannot get such an address. It worked well in testing, but every connection passes through Tailscale's relays, and that path [can degrade](tailscale-funnel.md#a-funnel-path-can-degrade) while the node looks healthy. A node with an address of its own can add Funnel as a second one, and should not replace its own with it.
+
 `setup` never stops or edits a server it does not own. To replace one with bitsocial-cli's own Caddy, remove your hand-added address from `Addresses.AppendAnnounce` in the kubo config, stop the other server, then run `setup`. An existing `/ip4/127.0.0.1/tcp/<port>/ws` listener is reused.
 
 ### Addresses `setup` does not manage
 
 A node can already serve WSS without `setup`, through a reverse proxy set up by hand or an AutoTLS address. `configured` in `status --json` only means `setup` has run (`config.json` exists), so it stays `false` on these nodes and says nothing about whether browsers can connect.
 
-On a node without `config.json`, `status` tries a real libp2p handshake with every public `/tls/ws`, `/wss` and `/tls/sni/<name>/ws` address kubo announces, and lists the results in `unmanagedAddresses` (`--json`) and the `browser-address` check. Each is `ok`, `failed` or `unconfirmed` with the reason, or `unverified`. It skips relay addresses and private IPs, and a name that resolves only to private addresses counts as failed. While kubo is down, `status` lists the addresses in kubo's config as `unverified`.
+On a node without `config.json`, `status` tries a real libp2p handshake with every public `/tls/ws`, `/wss` and `/tls/sni/<name>/ws` address kubo announces, and lists the results in `unmanagedAddresses` (`--json`) and the `browser-address` check. Each is `ok`, `failed` or `unconfirmed` with the reason, or `unverified`. It skips relay addresses and private IPs, and a name that resolves only to private addresses is not dialed: it counts as failed when public DNS says so, and as `unconfirmed` when only this machine's own resolver was asked (see below). Names are resolved over public DNS, see [Where a name is resolved](#where-a-name-is-resolved). While kubo is down, `status` lists the addresses in kubo's config as `unverified`.
 
 A failed handshake is `failed` when every IP the address leads to is on one of the node's own interfaces, or the name resolves to nothing, because the node reaches its own IP directly. Any other IP goes through a router, which may not connect a machine to its own public address (no NAT hairpin), so that failure is `unconfirmed`: the `browser-address` check warns instead of failing.
 
 A handshake from the node itself does not prove other networks can connect, because traffic to a machine's own address does not cross a provider's firewall.
+
+#### How long a handshake may take
+
+A browser's libp2p gives up on an address after 6 seconds (js-libp2p's per-address dial timeout), so every handshake `status`, `setup --announce` and the daemon make is cut off at 6 seconds too, and timed:
+
+| Handshake | Result |
+| --- | --- |
+| Under 3 s | `ok`, with the time |
+| 3 s or more | `ok` with `"slow": true`, and a warning: this machine is usually closer to the address than a browser is, so some browsers will run out of time. 3 s is a judgment call, half the limit |
+| Not finished in 6 s | `failed` with `"timedOut": true` |
+
+A failure through a `ts.net` name is always `failed`, never `unconfirmed`, because a Tailscale Funnel name leads to Tailscale's servers and not back through the node's own router.
+
+`status --json` lists every address that was dialed under `wssHandshakes`, `setup`'s own included, each with `status`, `handshakeMs`, and `slow`, `timedOut` or `error` where they apply. `unmanagedAddresses` keeps its meaning.
+
+#### Where a name is resolved
+
+Before a handshake with a `/dns4`, `/dns6` or `/dns` address, the name is resolved through public resolvers (`1.1.1.1`, then `8.8.8.8`, then `9.9.9.9`) and the connection goes to the addresses they return. TLS still checks the certificate against the name. This holds for `setup --announce`, `status` and the daemon.
+
+The machine's own resolver is not used for this, because it can lead somewhere browsers never go. With Tailscale's MagicDNS on, a machine resolves its own `ts.net` name to its tailnet address, so the handshake landed on whatever listened on the machine's own TCP 443 and `setup --announce` failed although the address worked from the internet ([#281](https://github.com/bitsocialnet/bitsocial-cli/issues/281)). A hosts-file entry or a split-horizon DNS server has the same effect.
+
+- Addresses that share a name, such as a `/dns4` and a `/dns6` address for one domain, are dialed one after the other, so each goes to its own records. The 6-second limit and the handshake time start when an address's own dial does, so waiting for the other one counts against neither.
+- A `/dns4` address is judged by its A records only and a `/dns6` address by its AAAA records only, because that is all the dial uses. A `/dns4` name with a private A record and a public AAAA record counts as resolving only to private addresses.
+- A name that resolves only to private addresses is never dialed. When public DNS gave that answer for every record type the address is dialed over, it is a failure, because browsers get the same answer. When this machine's own resolver gave it, because no public resolver answered, the address is `unconfirmed`, and so is one that resolver has no record for: with MagicDNS on, a machine resolves its own `ts.net` name to its tailnet address whatever browsers get.
+- Only the name is sent to those resolvers, and only for a handshake. The checks of whether a `--domain` points at this machine still ask the resolvers the machine is configured with.
+- A name public DNS has no record for fails with `<name> has no A record in public DNS, so browsers cannot resolve it`.
+- If none of the public resolvers answers, as on a network that blocks outside DNS, the machine's own resolver is used. The same goes for one record type alone: when the A query gets an answer and the AAAA query does not (or the other way round), the unanswered type is asked of the machine's own resolver, because an unanswered query does not mean the record is missing. Each type keeps track of whose answer it is, and an address goes only by the types it is dialed over: it is dialed where public DNS leads whenever public DNS gave it an address, the machine's own records are never mixed in (with MagicDNS they include the machine's tailnet address), and the caveat about the machine's resolver applies only when its records were used. If that one does not answer either, the address is `unconfirmed` with `no DNS resolver answered for <name>, so where it leads could not be checked`, not failed, and `setup --announce` stops with the same reason: a DNS outage on this machine says nothing about what browsers can resolve. The same is reported if the connection turns out not to have used the public answer. `setup` then warns, and `status` adds `"systemDns": true` to the address in `wssHandshakes` and a sentence to the `wss-handshake` diagnostic, because that handshake may not have taken the path browsers take.
+
+For a `ts.net` address, `status` then measures the hop from Tailscale's Funnel ingress servers to the node, see [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address).
 
 When no WSS address works (none exists, or every handshake is `failed`), the `browser-address` check weighs AutoNAT's results. The lines `status` opens with are described in [Who can connect](#who-can-connect).
 
@@ -108,7 +139,7 @@ kubo listens for WebTransport on `/udp/4001/quic-v1/webtransport` by default, so
 
 ### IP changes with your own proxy
 
-A proxy serving an IP address has that address hard-coded in its config and in `--announce`. **If the IP changes, you must update both.** The daemon does not check `/ip4` addresses served by your own proxy, so an old one stays announced. On a dynamic IP, use a domain instead. The daemon does check `/dns4` names, as described below.
+A proxy serving an IP address has that address hard-coded in its config and in `--announce`. **If the IP changes, you must update both.** The daemon does not re-derive `/ip4` addresses served by your own proxy, so an old one stays announced. Its [periodic WSS check](#the-periodic-wss-check) dials it, but a failed handshake with an IP that is not on this machine counts as untestable from here and does not warn. On a dynamic IP, use a domain instead. The daemon does check `/dns4` names, as described below.
 
 ## What changes in the kubo config
 
@@ -131,7 +162,7 @@ Only the first row applies until something can terminate WSS.
 ```
 <dataPath>/reachability/
 ├── config.json           # your choices, versioned; a newer version than this CLI understands is refused
-├── runtime-status.json   # the daemon's last checks; only the daemon writes it
+├── runtime-status.json   # the daemon's last checks, the periodic WSS check included; only the daemon writes it
 ├── Caddyfile             # generated, do not edit
 ├── bin/caddy-<version>   # downloaded on first setup
 ├── caddy-data/           # certificates and the ACME account
@@ -152,6 +183,7 @@ When `config.json` exists and is enabled, the daemon runs Caddy as a child proce
 | Every hour, while undecided | Repeats that check once and warns again if nothing works (see [Declining](#declining)) |
 | Every 5 s | Starts, reloads or stops Caddy to match the stored state, so `setup`, `enable` and `disable` apply to a running daemon and a crashed Caddy comes back |
 | Every 5 min | Re-derives public IPs, verifies announced names, checks certificate expiry |
+| Every 15 min, first after 1 min | Dials every announced WSS address the way `status` does and warns when one has become slow or stopped working, see [The periodic WSS check](#the-periodic-wss-check). `--wssCheckIntervalMinutes` on `bitsocial daemon` sets the interval, and `0` turns it off |
 | At start and every 20 min | Renews router forwards when there is no public IPv4 on an interface. They are released on shutdown or once disabled |
 
 **IP changes.** A new address must be seen on two checks in a row, and finding nothing for an address family is not treated as a change. The daemon then rewrites the Caddyfile, reloads Caddy, waits for the certificate, updates `AppendAnnounce` and restarts kubo. If no certificate can be issued at all, it keeps the stored addresses.
@@ -163,6 +195,32 @@ Either way it waits before asking again for the family that failed: 1 hour, doub
 **Stale names.** A `/dns4` or `/dns6` name that stops pointing here warns once an hour and is dropped from `AppendAnnounce` after 24 hours of failure, a count that survives daemon restarts. It is announced again when it recovers. Rerunning `setup` can also announce it again, which starts a new 24 hours. Rerunning `setup` while a name still points elsewhere stops announcing it straight away, and the daemon announces it again when it recovers. The name keeps its Caddy site throughout, so its certificate is there when it does. The exception is another server holding TCP 443, where the name waits for `setup` to be run again. Moving to another `--domain` forgets a dropped name for the old one. Names you passed with `--force` or `--announce` only have to resolve, because a proxy answers for them.
 
 **Mode.** Whenever the daemon changes the announced addresses, it updates `mode` to match them and logs the change, so `status` never shows a domain or proxy that is no longer announced. A node whose only address was dropped shows `webtransport-only` until it recovers. Each 5-minute check also corrects a stored `mode` that disagrees with the addresses, without touching kubo. A name passed with `--force` that is also a proxy address counts as `domain` only while the Caddyfile has a site for it, because the address alone cannot show whether that name got its own certificate, and `setup` adds that site only when it did.
+
+### The periodic WSS check
+
+An address that passed `setup` can stop working for browsers later without anything changing on the node. A Tailscale Funnel address did, about two hours after `setup` verified it ([A Funnel path can degrade](tailscale-funnel.md#a-funnel-path-can-degrade)). So while reachability is enabled and a WSS address is announced, the daemon runs the check `status` runs (`checkWssAddresses`) on a schedule: a handshake with each announced address, cut off at the 6 seconds a browser allows and timed, with the name resolved over public DNS, and for a `ts.net` address the latency from Tailscale's Funnel ingress servers.
+
+| Result | What the daemon does |
+| --- | --- |
+| Every check | Writes one line to the log file with the timings, for example `WSS check: /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws completed a handshake in 700 ms. Funnel ingress: 91 ms via DERP(par)`. Read them with `bitsocial logs`. They are the record of how often a path degrades and for how long |
+| A handshake took 3 s or more, or failed, including not finishing in 6 s | Warns on stdout, with the time or the reason. Repeats at most once an hour while it lasts. Slow and failed are separate warnings, so an address that was slow and then stops working warns again at once |
+| The Funnel ingress latency is 500 ms or more, or a server does not answer | Warns on stdout, at most once an hour |
+| An address or the ingress hop is back to normal | Logs it once on stdout |
+| An address this machine cannot test from inside its own network (`unconfirmed`, usually no NAT hairpin) | Only the line in the log file. No warning, because the failure says nothing about other networks |
+
+The check only observes. It never stops announcing an address or changes the kubo config, because a slow address may still serve some browsers and a failed dial from the node's own machine is weak evidence.
+
+The last result is stored under `wssChecks` in `runtime-status.json`, with the time it was taken, each address's `status` (`ok`, `slow`, `failed` or `unconfirmed`), `handshakeMs` or `error`, and `funnelIngress`. A slow or failed result also sets `lastProblemAt` and `lastProblem`, which stay after the address recovers. `status` prints all of it, so a problem from last night is visible on a node that works now, and `--json` has it under `lastChecks.wssChecks`:
+
+```
+Last periodic WSS check: 2026-11-02T00:15:00.000Z
+  /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws: completed a handshake in 650 ms; last problem 2026-11-02T00:00:00.000Z (slow handshake in 4230 ms)
+  Funnel ingress: 91 ms via DERP(par)
+```
+
+The check is skipped while kubo does not answer, while reachability is disabled, and on a node `setup` has not configured, which has the hourly check described under [Addresses `setup` does not manage](#addresses-setup-does-not-manage).
+
+A check re-reads the config when it finishes, and neither warns about nor stores an address that was dropped, or reachability disabled, while it ran. A stored result is dropped when it no longer applies: the daemon removes `wssChecks` when it finds reachability disabled or no WSS address announced, and when it starts with `--wssCheckIntervalMinutes 0`. `status` also leaves out results for addresses that are no longer announced (and the Funnel ingress latency once no Funnel address is left), and all of them while reachability is disabled, so a change shows at once rather than at the next check.
 
 **Certificates.** Caddy renews them. The daemon warns when one has under 24 hours left, which means renewal is failing.
 
@@ -200,7 +258,8 @@ Browsers, first match wins. `status` tries a handshake from this machine with ev
 
 | Evidence | Line | Status |
 | --- | --- | --- |
-| A WSS handshake succeeded | should be able to connect over WSS; the firewall was not tested from other networks | `ok` |
+| A WSS handshake succeeded in under 3 s | should be able to connect over WSS, with the handshake time; the firewall was not tested from other networks. A slower address is named too | `ok` |
+| Every WSS handshake that succeeded took 3 s or more | may fail to connect over WSS, with the time and the 6 s limit (see [How long a handshake may take](#how-long-a-handshake-may-take)) | `warn` |
 | AutoNAT reached WebTransport | those that support WebTransport should be able to connect, unless their network blocks UDP; then why WSS is missing: `run setup to add WSS`, the failed handshake, an untestable WSS address, or reachability being disabled | `warn` |
 | A WSS handshake could not be tested from this machine (`unconfirmed`, usually no NAT hairpin) | may be able to connect over WSS | `unknown` |
 | AutoNAT has not tested WebTransport, or desktop nodes are not known yet | not known yet | `unknown` |
@@ -224,6 +283,8 @@ On a node that never ran `setup`, a `Reachability: not configured` line follows,
 | `public-address-announced` | Running kubo announces no public address: no public IPv4, no global IPv6 (`fec0::/10` and other private ranges don't count), no `/dns*` name and no relay address. No other node or browser can dial it, so it seeds nothing for anyone. Typical of a VM on NAT networking (`10.0.2.15` plus `fec0::`). Runs on every node, `setup` or not. `unknown` while kubo is down. The daemon warns once at start-up in the same case |
 | `public-address` | No public address on an interface. `setup` also tries the router and kubo |
 | `browser-address` | Without `setup`: the handshake results for the WSS addresses kubo announces, weighed against AutoNAT's results. See [Addresses `setup` does not manage](#addresses-setup-does-not-manage). After `setup`: a `warn` pointing at [Tailscale Funnel](tailscale-funnel.md) when `setup` could not give the node a WSS address. It is absent when an address is announced, when another program holds TCP 443 on a node with a public address, when a WSS address `setup` does not manage works, or when a dropped name is waiting for its DNS |
+| `wss-handshake` | How long the handshake with each WSS address took. `warn` when one took 3 s or more, `fail` when one did not finish in the 6 s a browser allows. Absent when no handshake was timed. Other handshake failures are reported by `browser-address` and the `Browsers:` line |
+| `funnel-ingress` | Only with a `ts.net` address: the latency from Tailscale's Funnel ingress servers to this node, from `tailscale ping`. `warn` from 500 ms or when a server does not answer, `unknown` with the reason when it could not be measured. See [Checking a Funnel address](tailscale-funnel.md#checking-a-funnel-address) |
 | `tcp-443` | Held by another program, or Caddy may not bind it. `ok` if an address on that port passed the handshake, on any node, `setup`'s own addresses included, as the program is then serving it |
 | `udp-443` | Held by another program, or kubo may not bind it. kubo would otherwise run normally and silently not listen. When kubo cannot use it and a WSS address passed the handshake, this follows AutoNAT's result for WebTransport on kubo's other UDP port: `ok` if reached, otherwise `warn`. "Reached" proves inbound UDP, not a browser handshake (see [WebTransport and AutoNAT](#webtransport-and-autonat)) |
 | `tcp-80` | A warning only: Let's Encrypt can still validate through TCP 443 |
@@ -256,7 +317,7 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is l
 
 ## For maintainers
 
-**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages.
+**Layout.** The kubo edits are pure (`kubo-config.ts`). `setup.ts` is the one-shot flow, `runtime.ts` the daemon side, `lifecycle.ts` `disable` and `--purge`, `checks.ts` the requirements, `guidance.ts` the printed messages. `libp2p-dial.ts` is the handshake, `public-dns.ts` the name lookup it starts with, `unmanaged.ts` the check of announced WSS addresses built on it (`checkWssAddresses`), and `tailscale.ts` the Funnel ingress ping.
 
 **Bumping Caddy.** Change `CADDY_VERSION` and all six entries of `CADDY_RELEASE_SHA256` in `src/reachability/caddy.ts`, in one commit. Compute the sha256 of each archive, and check the archives against the SHA-512 `checksums.txt` on the release first. Pinning in source matters because that file shares the download's origin.
 
@@ -284,4 +345,6 @@ Otherwise use `sudo setcap cap_net_bind_service=+ep <binary>` on each. This is l
 
 - `setup` refuses the production Let's Encrypt directory when `CI` is set.
 - Node's global `WebSocket`, which libp2p uses, ignores TLS options. To trust Pebble, run the dial in a child process with `NODE_EXTRA_CA_CERTS`.
+- The public DNS lookup is injectable too: `resolveName` on `dialWithLibp2p`, `resolve` on `verifyUnmanagedAddresses` and `checkWssAddresses`, `query` on `resolveOverPublicDns`. Node's global `WebSocket` takes no resolver, so `withPinnedLookup` answers `dns.lookup` for the one name while the dial runs. `test/reachability/public-dns.test.ts` dials a loopback listener through a name only the injected resolver knows, which fails if that pin stops taking effect, for example after a Node or libp2p upgrade.
+- The `tailscale` command is run through an injectable `RunCommand` (`runTailscale` on `checkWssAddresses`, `run` on `pingFunnelIngress`), so tests fake it and never need Tailscale installed.
 - Other test files' kubos bind random ports, so a port chosen by a test can be taken before it is used (#87). Retry with a fresh port when that happens, and do not check "is this UDP port free" as a test assertion.

@@ -5,7 +5,8 @@ import { kuboSwarmPeerCount } from "../../../reachability/discovery.js";
 import { composeStatus, type StatusPresentation } from "../../../reachability/presentation.js";
 import { resolveKuboBinaryPath } from "../../../ipfs/startIpfs.js";
 import { readReachabilityConfig, readReachabilityStatus, type ReachabilityStatus } from "../../../reachability/state.js";
-import { autonatEvidence, browserAddressCheck, verifyUnmanagedAddresses, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
+import { funnelIngressCheck, type FunnelIngressReport } from "../../../reachability/tailscale.js";
+import { autonatEvidence, browserAddressCheck, checkWssAddresses, formatPeriodicWssCheck, wssHandshakeCheck, type UnmanagedAddress } from "../../../reachability/unmanaged.js";
 import { connectivityVerdict, formatConnectivity, type Connectivity } from "../../../reachability/verdict.js";
 import { resolveKuboRpcUrl } from "../../../util.js";
 
@@ -27,7 +28,9 @@ export default class Status extends Command {
 
     static override examples = ["bitsocial reachability status", "bitsocial reachability status --json"];
 
-    async run(): Promise<ReachabilityStatus & { connectivity: Connectivity; unmanagedAddresses: UnmanagedAddress[]; checks: ReachabilityCheck[] } & StatusPresentation> {
+    async run(): Promise<
+        ReachabilityStatus & { connectivity: Connectivity; unmanagedAddresses: UnmanagedAddress[]; wssHandshakes: UnmanagedAddress[]; funnelIngress?: FunnelIngressReport; checks: ReachabilityCheck[] } & StatusPresentation
+    > {
         const { flags } = await this.parse(Status);
         const dataPath = flags["pkcOptions.dataPath"] || defaults.PKC_DATA_PATH;
         const status = await readReachabilityStatus(dataPath);
@@ -59,11 +62,14 @@ export default class Status extends Command {
         const setupWss = status.configured && servesWss ? (wssDisabled ? ("disabled" as const) : ("enabled" as const)) : undefined;
         const setupAddresses = wssDisabled ? (config?.announce ?? []) : [];
         const notSetups = (addresses: string[] | undefined) => addresses?.filter((address) => !setupAddresses.some((own) => address === own || address.startsWith(`${own}/p2p/`)));
-        const wssAddresses = await verifyUnmanagedAddresses({
+        // Each handshake is held to the 6 seconds a browser allows and timed. For a Tailscale Funnel address, the hop
+        // from Tailscale's ingress servers to this node is then measured with `tailscale ping`, where that command exists.
+        const { addresses: wssAddresses, funnelIngress } = await checkWssAddresses({
             running: notSetups(facts.kuboRunningAnnounce),
             config: notSetups(facts.kuboConfigAnnounce),
             ...(override ? { treatAsPublic: override.split(",") } : {})
         });
+        const handshakeCheck = wssHandshakeCheck(wssAddresses);
         // Only a node setup does not manage reports these: on one it does, kubo-announce and the daemon's own checks cover them.
         const unmanagedAddresses = status.configured ? [] : wssAddresses;
         const evidence = autonatEvidence(facts.kuboAutonat);
@@ -98,6 +104,8 @@ export default class Status extends Command {
         const checks = [
             announcedCheck,
             ...(browserCheck ? [browserCheck] : []),
+            ...(handshakeCheck ? [handshakeCheck] : []),
+            ...(funnelIngress ? [funnelIngressCheck(funnelIngress)] : []),
             // Every handshake that worked, setup's own included: one through an operator's server shows that server on the port is no problem.
             ...evaluateChecks({ ...facts, verifiedWss: wssAddresses.filter(({ status }) => status === "ok").map(({ address }) => address) })
         ];
@@ -111,7 +119,8 @@ export default class Status extends Command {
                 suggestions.forEach((suggestion, index) => this.log(`  ${index + 1}. ${suggestion.detail}`));
             }
         };
-        const result = { ...status, connectivity, unmanagedAddresses, checks, diagnostics, suggestions };
+        // wssHandshakes covers every WSS address that was dialed, setup's own included, unlike unmanagedAddresses.
+        const result = { ...status, connectivity, unmanagedAddresses, wssHandshakes: wssAddresses, ...(funnelIngress ? { funnelIngress } : {}), checks, diagnostics, suggestions };
 
         for (const line of formatConnectivity(connectivity)) this.log(line);
         if (!status.configured) {
@@ -136,6 +145,8 @@ export default class Status extends Command {
             this.log(`Domain check ${domain}: ${state}${check.droppedFromAnnounce ? ", no longer announced" : ""} (checked ${check.lastCheckAt})`);
         }
         if (status.lastChecks?.caddy) this.log(`Caddy: ${status.lastChecks.caddy.running ? "running" : "not running"}`);
+        // What the daemon last found on its own schedule, which can differ from the handshake this run just made.
+        if (status.lastChecks?.wssChecks) for (const line of formatPeriodicWssCheck(status.lastChecks.wssChecks)) this.log(line);
         printSections();
         return result;
     }

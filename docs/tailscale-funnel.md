@@ -2,6 +2,8 @@
 
 `bitsocial reachability setup` gives a node a WSS address only when the internet can reach it on TCP 443. A node behind NAT or carrier-grade NAT, with no UPnP and no port forwarding, cannot get one. [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) is one tested way around that: it gives the machine a public `<machine>.<tailnet>.ts.net` name with a Let's Encrypt certificate and forwards connections to it, with nothing opened on the router. It is on every Tailscale plan, including the free one.
 
+**Prefer an address of the node's own when it can have one.** If the node has a public IP and the internet reaches it on TCP 443, use the WSS address a plain `bitsocial reachability setup` creates for that IP or for your domain. Browsers then connect straight to the node, with no third party in the path, no unpublished bandwidth limit, and no relay path between the browser and the node that can slow down. Funnel is the fallback for a node that cannot get such an address: behind NAT or carrier-grade NAT, with no UPnP and no port forwarding. A node that has both can keep Funnel [as a second address](#as-a-second-address), but should not replace its own address with it.
+
 bitsocial-cli does not install or run Tailscale. `setup` prints the steps below when it applies, and `status` points at this page. Read [What you are trusting Tailscale with](#what-you-are-trusting-tailscale-with) before you start.
 
 ```
@@ -45,10 +47,28 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
    bitsocial reachability setup --announce /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws
    ```
 
-   This adds kubo's loopback listener, restarts kubo, and completes a real libp2p handshake through the address before announcing it. It tries the handshake three times, 15 seconds apart. If all three fail, it puts kubo back as it was and exits `1`, and you can run it again later. It needs no permission to bind TCP 443 or 80: on a node that serves no WSS address of its own, it does not start Caddy or ask Let's Encrypt for anything, even when the machine has a public address. Nothing is listening on `<wsPort>` before this step, so until then the Funnel name answers `502`.
-7. **Test from another network.** `setup` prints a `curl` command. Run it from a phone hotspot or another machine and expect `101`. `curl` then appears to hang because the WebSocket stays open. The handshake in step 6 comes from the node's own machine, so it does not prove other networks can connect.
+   This adds kubo's loopback listener, restarts kubo, and completes a real libp2p handshake through the address before announcing it. The name is resolved over public DNS for this, so the handshake goes out through Tailscale's relays even when MagicDNS makes the machine resolve its own name to its tailnet address. It tries the handshake three times, 15 seconds apart. If all three fail, it puts kubo back as it was and exits `1`, and you can run it again later. It needs no permission to bind TCP 443 or 80: on a node that serves no WSS address of its own, it does not start Caddy or ask Let's Encrypt for anything, even when the machine has a public address. Nothing is listening on `<wsPort>` before this step, so until then the Funnel name answers `502`.
+7. **Test from another network.** `setup` prints a `curl` command. Run it from a phone hotspot or another machine and expect `101`. `curl` then appears to hang because the WebSocket stays open. The handshake in step 6 goes through Tailscale's relays but starts on the node's own machine, so it does not prove every other network can connect.
 
 `bitsocial reachability status` then shows `Mode: reverse-proxy`, the address under `Announced addresses`, and `Browsers: should be able to connect over WSS`.
+
+### Checking a Funnel address
+
+`bitsocial reachability status` checks a Funnel address in two steps and prints both under Diagnostics:
+
+```
+  [ok] The WSS handshake through /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws took 0.7 s
+  [ok] Tailscale's Funnel ingress reaches this node in 91 ms via DERP(par)
+```
+
+1. **The handshake**, cut off after the 6 seconds a browser allows. It warns when the handshake took 3 seconds or more, and fails when it did not finish. See [How long a handshake may take](reachability.md#how-long-a-handshake-may-take).
+2. **The hop from Tailscale's ingress to the node.** Funnel traffic goes from the browser to one of Tailscale's public ingress servers, and from there to the node over the tailnet. `status` reads `tailscale status --json`, picks the ingress servers that just carried the node's traffic (peers named `funnel-ingress-node` with the tag `tag:ingress`, `InEngine: true` and a `LastHandshake` in the last 5 minutes), and runs `tailscale ping` on up to three of them, three pings each, reporting the median. It warns from 500 ms, or when one does not answer.
+
+`via DERP(...)` means the hop is relayed, and that is normal: on a node whose Funnel worked well the hop was relayed too, at 91 to 95 ms. The warning goes by latency alone. The one degraded node that was measured took about 1.9 s. The 500 ms line is drawn from those two measurements only.
+
+The ping is best effort. `status` skips it with a one-line reason, and still runs the handshake, when the `tailscale` command is not found (on macOS it also tries `/Applications/Tailscale.app/Contents/MacOS/Tailscale`), when Tailscale is not running, stopped or logged out, or when no ingress server carried traffic in the last 5 minutes. In the Docker setup the command lives in the sidecar container, so the ping is always skipped there. To measure the hop by hand: `docker compose exec tailscale tailscale status --json`, then `docker compose exec tailscale tailscale ping <address of an ingress server>`. The peer names and JSON fields are Tailscale's own and not a documented interface, so a Tailscale update can turn the ping into a skip.
+
+`--json` carries the result under `funnelIngress`: `status` (`ok`, `warn` or `skipped`), `note` when skipped, and `hops`, each with the ingress server's tailnet `address`, its `relay` region, `latencyMs` and `via`, or `error`.
 
 ### Turning it off
 
@@ -56,7 +76,7 @@ browser ──wss://<machine>.<tailnet>.ts.net:443──▶ Tailscale relay ─�
 tailscale funnel --https=443 off
 ```
 
-The daemon only checks that an `--announce` name resolves, and in testing the `ts.net` name still resolved 15 minutes after Funnel was turned off. So the node keeps announcing an address that no longer works. To stop announcing it, run `bitsocial reachability disable --purge`, then `setup` again. A plain `disable` keeps the address for the next `setup`.
+The daemon never stops announcing an `--announce` address by itself unless its name stops resolving, and in testing the `ts.net` name still resolved 15 minutes after Funnel was turned off. So the node keeps announcing an address that no longer works. Its [periodic WSS check](reachability.md#the-periodic-wss-check) warns that the handshake fails, and leaves the address announced. To stop announcing it, run `bitsocial reachability disable --purge`, then `setup` again. A plain `disable` keeps the address for the next `setup`.
 
 ### As a second address
 
@@ -102,13 +122,53 @@ This was tested with an image built from source, Docker Compose 5.5.1 and `tails
 
 **Your home IP:** peers connecting through Funnel see a Tailscale relay IP, not yours. This is only partial privacy, because kubo still announces its other addresses, and those can include your public IP.
 
+## A Funnel path can degrade
+
+A Funnel address can become too slow for browsers to connect while everything on the node looks healthy.
+
+**What was seen** ([#276](https://github.com/bitsocialnet/bitsocial-cli/issues/276)), once, on one of three nodes tested:
+
+- `setup --announce` verified the address on its first attempt.
+- About two hours later an iPhone Safari run could not load the community. The page showed no connection, no connection events and no errors.
+- Discovery was fine: every HTTP router returned the node with its Funnel address.
+- Through that node's Funnel name, the TCP connection to Tailscale's relay took 40 ms, but TLS, which `tailscaled` on the node terminates, took 5.6 to 20 s, and throughput was about 17 KB/s. Every libp2p dial failed at 6 s, which is when a browser gives up on an address.
+- `tailscale ping` from the node to the ingress server took about 1.9 s. The same relay reached the node's other tailnet peers in 52 to 79 ms.
+- A Funnel on a second machine on the same LAN completed TLS in 0.4 to 1.1 s at the same moment.
+- Reconnecting Tailscale did not help. The cause was not found, and it has not been reproduced. It looked specific to one node on Tailscale's side.
+
+One node out of three is not a rate. While its path was healthy, Funnel passed 21 of 21 runs on iOS Safari and several days of desktop testing.
+
+**What follows from it.** The handshake `setup --announce` makes proves the path only at the moment it runs. An address that was verified can stop working for browsers later without anything changing on the node.
+
+**How you find out.** The daemon dials the announced address every 15 minutes, the way `status` does, and prints a warning when the handshake has become slow or no longer finishes, or when the hop from Tailscale's ingress is slow. Every result goes to the log file with its timings, and `status` shows the last one and the last problem under `Last periodic WSS check`. See [The periodic WSS check](reachability.md#the-periodic-wss-check).
+
+**How to check.** Run `bitsocial reachability status` on the node and read the two lines described in [Checking a Funnel address](#checking-a-funnel-address):
+
+| Line | Healthy | Degraded |
+| --- | --- | --- |
+| `The WSS handshake through /dns4/<machine>.<tailnet>.ts.net/tcp/443/tls/ws took ...` | Around a second or less: `[ok]` | `[warning]` from 3 s. `[problem]` when it did not finish within 6 s, and the `Browsers:` line then no longer says they should be able to connect over WSS |
+| `Tailscale's Funnel ingress reaches this node in ...` | About 90 ms, `via DERP(...)` included: `[ok]` | `[warning]` from 500 ms. About 1.9 s on the degraded node |
+
+A slow handshake with a normal ingress latency points away from the Funnel hop, for example at the node's own uplink.
+
+To check from outside, time the TLS handshake through the Funnel name from another network, such as a phone hotspot:
+
+```bash
+curl -sS --http1.1 -o /dev/null -w 'tcp %{time_connect}s  tls %{time_appconnect}s\n' https://<machine>.<tailnet>.ts.net/
+```
+
+`tls` is the time until TLS is done and includes the TCP connection. Around a second or less is healthy. Several seconds means browsers will time out.
+
+**What to do.** Nothing on the node is known to repair it. A second browser path keeps the node reachable meanwhile: WebTransport if inbound UDP reaches the machine, or an address of the node's own if it can have one.
+
 ## Limits and trade-offs
 
 - **Every browser connection passes through one company's relays.** If Tailscale has an outage, changes Funnel's terms or limits your traffic, the address stops working. WebTransport and other nodes are not affected.
 - **Funnel's bandwidth limits are not published.** Tailscale says Funnel traffic is subject to limits without stating them.
 - **Some connections through Funnel fail in bursts.** In testing, when 60 WebSocket upgrades were opened at once from one address on another network, 3 to 6 failed each time. Their TCP connection to Tailscale's relay needed retransmits and TLS then timed out, so they never reached the node. Upgrades made one at a time over IPv4 all succeeded. One `setup --announce` on a host also failed to connect for a reason that was not found. A browser retries, and `setup` tries its handshake three times.
 - **kubo sees every Funnel peer as `127.0.0.1`.** `tailscaled` proxies locally. kubo's per-IP connection limits exempt loopback, so they do not cap Funnel connections, and they also cannot tell one Funnel peer from another. One abusive client can open many connections, held back only by kubo's global resource manager limits and connection manager. An IP ban cannot single it out. kubo's gossipsub runs without peer scoring, so sharing an IP costs Funnel peers nothing there.
-- **A handshake from the node itself is weak proof.** `setup` and `status` dial the address from the node's own machine. With Tailscale's MagicDNS on, a machine may resolve its own `ts.net` name to its tailnet address, and the dial would then never leave the machine. This was not tested: the test machine had MagicDNS off, and its dial went out through Tailscale's relays. Only the test from another network proves the address.
+- **A handshake from the node itself is not the whole proof.** `setup`, `status` and the daemon dial the address from the node's own machine. With Tailscale's MagicDNS on, a machine resolves its own `ts.net` name to its tailnet address, and a dial through the name then never leaves the machine: on one machine it reached another program on TCP 443 and `setup --announce` failed 3 of 3, although the address worked from the internet ([#281](https://github.com/bitsocialnet/bitsocial-cli/issues/281)). The name is therefore resolved over public DNS and the dial goes to Tailscale's relays, see [Where a name is resolved](reachability.md#where-a-name-is-resolved). If no public resolver can be reached, the machine's own is used and `setup` and `status` say so. Even through the relays the dial starts from the node's own network, so the test from another network is still what proves the address for others.
+- **A Funnel path can degrade.** One node's Funnel address became too slow for browsers about two hours after `setup` verified it, while the node itself looked healthy. See [A Funnel path can degrade](#a-funnel-path-can-degrade) for what was measured and how to check for it.
 - **`curl` needs `--http1.1`.** Over HTTP/2 the WebSocket upgrade through Funnel returns `404`. The command `setup` prints already passes it. Browsers are not affected.
 
 ## Alternatives that were looked at

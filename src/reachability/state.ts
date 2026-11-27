@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import net from "net";
 import path from "path";
 import type { KuboEditRecord } from "./kubo-config.js";
+import { isFunnelAddress, type FunnelIngressReport } from "./tailscale.js";
 
 export const REACHABILITY_CONFIG_VERSION = 1;
 
@@ -48,8 +49,27 @@ export interface ReachabilityConfig {
 
 // Written only by the daemon, in its own file so a check landing mid-setup cannot overwrite the
 // operator's config with a stale copy.
+// What the daemon's periodic check found for one announced WSS address. "slow" is a handshake that worked but took
+// 3 seconds or more, and "unconfirmed" one this machine could not test from inside its own network.
+export interface WssAddressCheck {
+    status: "ok" | "slow" | "failed" | "unconfirmed";
+    handshakeMs?: number;
+    error?: string;
+    // The last time it was slow or failed, kept after it recovers so a past problem stays visible.
+    lastProblemAt?: string;
+    lastProblem?: string;
+}
+
+export interface PeriodicWssCheck {
+    at: string;
+    addresses: Record<string, WssAddressCheck>;
+    // Present when a ts.net address is announced.
+    funnelIngress?: FunnelIngressReport;
+}
+
 export interface ReachabilityRuntimeStatus {
     updatedAt: string;
+    wssChecks?: PeriodicWssCheck;
     lastIpCheck?: { at: string; publicIps: string[] };
     domains?: Record<string, { lastCheckAt: string; ok: boolean; failingSince?: string; droppedFromAnnounce?: boolean }>;
     caddy?: { running: boolean; lastExitAt?: string };
@@ -167,7 +187,17 @@ const isPlainObject = (value: unknown): value is Record<string, any> => value !=
 
 function isRuntimeStatus(value: unknown): value is ReachabilityRuntimeStatus {
     if (!isPlainObject(value) || typeof value["updatedAt"] !== "string") return false;
-    const { lastIpCheck, domains, caddy } = value;
+    const { lastIpCheck, domains, caddy, wssChecks } = value;
+    if (wssChecks !== undefined) {
+        if (!isPlainObject(wssChecks) || typeof wssChecks["at"] !== "string" || !isPlainObject(wssChecks["addresses"])) return false;
+        for (const address of Object.values(wssChecks["addresses"])) if (!isPlainObject(address) || typeof address["status"] !== "string") return false;
+        // status prints every hop, so a report without them would throw there.
+        const { funnelIngress } = wssChecks;
+        if (funnelIngress !== undefined) {
+            if (!isPlainObject(funnelIngress) || typeof funnelIngress["status"] !== "string" || !Array.isArray(funnelIngress["hops"])) return false;
+            if (!funnelIngress["hops"].every((hop: unknown) => isPlainObject(hop) && typeof hop["address"] === "string")) return false;
+        }
+    }
     if (lastIpCheck !== undefined && !(isPlainObject(lastIpCheck) && typeof lastIpCheck["at"] === "string" && isStringArray(lastIpCheck["publicIps"])))
         return false;
     if (domains !== undefined) {
@@ -250,6 +280,19 @@ export async function readIssuedCertificates(dataPath: string, now: Date = new D
     return certificates.sort((a, b) => a.notAfter.localeCompare(b.notAfter));
 }
 
+// The daemon's last periodic WSS check can predate disabling reachability or a change to the announced addresses,
+// and a result for an address no longer announced is not news.
+function withCurrentWssChecks(lastChecks: ReachabilityRuntimeStatus, announced: string[]): ReachabilityRuntimeStatus {
+    const { wssChecks, ...rest } = lastChecks;
+    if (!wssChecks) return lastChecks;
+    const addresses = Object.fromEntries(Object.entries(wssChecks.addresses).filter(([address]) => announced.includes(address)));
+    if (Object.keys(addresses).length === 0) return rest;
+    // The ingress latency is about the Funnel path, so it goes with the last Funnel address.
+    const { funnelIngress, ...checked } = wssChecks;
+    const funnelAnnounced = Object.keys(addresses).some(isFunnelAddress);
+    return { ...rest, wssChecks: { ...checked, addresses, ...(funnelIngress && funnelAnnounced ? { funnelIngress } : {}) } };
+}
+
 export async function readReachabilityStatus(dataPath: string, now: Date = new Date()): Promise<ReachabilityStatus> {
     const config = await readReachabilityConfig(dataPath);
     const [allCertificates, lastChecks] = await Promise.all([readIssuedCertificates(dataPath, now), readRuntimeStatus(dataPath)]);
@@ -264,7 +307,7 @@ export async function readReachabilityStatus(dataPath: string, now: Date = new D
         domain: config?.domain ?? null,
         staging: config?.staging ?? false,
         certificates,
-        lastChecks,
+        lastChecks: lastChecks && withCurrentWssChecks(lastChecks, config?.enabled ? config.announce : []),
         declined: config === undefined && (await isReachabilityDeclined(dataPath))
     };
 }

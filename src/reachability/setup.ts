@@ -54,7 +54,7 @@ import {
 import { formatCheck, type ReachabilityCheck } from "./checks.js";
 import { localWsSwarmAddress, planKuboConfig } from "./kubo-config.js";
 import { discoverNatRouter, type NatRouter } from "./nat.js";
-import { dialWithLibp2p } from "./libp2p-dial.js";
+import { BROWSER_DIAL_TIMEOUT_MS, dialWithLibp2p, formatSeconds, SLOW_HANDSHAKE_MS } from "./libp2p-dial.js";
 import { caddyDataDir, clearReachabilityDeclined, isSameCertificateName, readReachabilityConfig, reachabilityDir, writeJsonAtomic, writeReachabilityConfig, type ReachabilityConfig, type ReachabilityMode } from "./state.js";
 
 export class NeedsAnswerError extends Error {}
@@ -96,7 +96,7 @@ export interface SetupDependencies {
     lanIpv4: () => string | undefined;
     ensureCaddy: (dataPath: string) => Promise<string>;
     resolveDomain: (domain: string) => Promise<ResolvedDomain>;
-    dial: (address: string) => Promise<{ peerId: string }>;
+    dial: (address: string) => Promise<{ peerId: string; handshakeMs?: number; dns?: { name: string; source: "public" | "system"; ips: string[] } }>;
     // Requirements to report before changing anything. Absent in tests that drive setup directly.
     checkRequirements?: (input: { publicIps: string[]; httpsPort: number; httpPort?: number; caddyAdminPort: number; wsPort: number }) => Promise<ReachabilityCheck[]>;
     certificateTimeoutMs?: number;
@@ -557,8 +557,10 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
     if (options.announce) {
         const identity = await kuboIdentity(options.kuboRpcUrl);
         if (!identity) throw new SetupRefusedError("--announce is verified by dialling this node through it, so the daemon must be running.");
+        let handshakeMs: number | undefined;
+        let dialedThrough: Awaited<ReturnType<SetupDependencies["dial"]>>["dns"];
         try {
-            await dialWithRetries(`${options.announce}/p2p/${identity.peerId}`, deps);
+            ({ handshakeMs, dns: dialedThrough } = await dialWithRetries(`${options.announce}/p2p/${identity.peerId}`, deps));
         } catch (error) {
             // Back to how it was before this attempt, so a failed try does not cost AutoTLS or the filter.
             applied = await applyKuboConfig(
@@ -569,7 +571,13 @@ export async function runReachabilitySetup(options: SetupOptions, deps: SetupDep
             await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
             throw new SetupRefusedError(`Could not complete a libp2p handshake with this node through ${options.announce}, so it was not announced: ${(error as Error).message}`);
         }
-        deps.log(`Verified ${options.announce} with a libp2p handshake.`);
+        deps.log(`Verified ${options.announce} with a libp2p handshake${handshakeMs === undefined ? "" : ` that took ${formatSeconds(handshakeMs)}`}.`);
+        // The handshake goes where public DNS leads. Without it, MagicDNS can lead a ts.net name straight back to this machine.
+        if (dialedThrough?.source === "system")
+            deps.warn(`No public DNS resolver could be reached, so ${dialedThrough.name} was resolved by this machine's own resolver${dialedThrough.ips.length > 0 ? ` (${dialedThrough.ips.join(", ")})` : ""}. That may not be where the name leads browsers, so test the address from another network.`);
+        // Announced all the same: it works, and the daemon and `status` keep watching how long it takes.
+        if (handshakeMs !== undefined && handshakeMs >= SLOW_HANDSHAKE_MS)
+            deps.warn(`The handshake through ${options.announce} took ${formatSeconds(handshakeMs)}, and browsers give up on an address after ${formatSeconds(BROWSER_DIAL_TIMEOUT_MS)}, so some may fail to connect. Check it again with: bitsocial reachability status`);
         externalAnnounce = [...new Set([...externalAnnounce, options.announce])];
         applied = await applyKuboConfig({ ...buildConfig(externalAnnounce, true), ...(applied.config.kuboEdits ? { kuboEdits: applied.config.kuboEdits } : {}) }, options, true);
         await restartAndVerifyKubo(applied.config, applied.kuboConfigChanged, options, deps);
