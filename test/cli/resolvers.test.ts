@@ -1,11 +1,15 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createBsoResolvers } from "../../dist/common-utils/resolvers.js";
+import { PKCLogger } from "../../dist/util.js";
+
+// bso-resolver 0.1.0 requires the caller's log, which pkc-js passes in the daemon
+const log = PKCLogger({ namespace: "bitsocial-cli:test:resolvers" });
 
 describe("createBsoResolvers", () => {
     let resolvers: ReturnType<typeof createBsoResolvers> = [];
 
     afterEach(async () => {
-        for (const r of resolvers) await r.destroy();
+        for (const r of resolvers) await r.destroy({ log });
         resolvers = [];
     });
 
@@ -54,7 +58,7 @@ describe("daemon wiring: chainProviderUrls -> PKC nameResolvers", () => {
     let resolvers: ReturnType<typeof createBsoResolvers> = [];
 
     afterEach(async () => {
-        for (const r of resolvers) await r.destroy();
+        for (const r of resolvers) await r.destroy({ log });
         resolvers = [];
     });
 
