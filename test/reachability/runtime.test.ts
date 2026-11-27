@@ -1644,6 +1644,42 @@ describe("ReachabilityRuntime", () => {
             expect(await stored()).toBeUndefined();
         });
 
+        // A check takes seconds, and the operator can disable reachability or drop an address meanwhile.
+        it("drops what it found for an address that stopped being announced while it was being checked", async () => {
+            const other = "/dns4/other.tailnet.ts.net/tcp/443/tls/ws";
+            let dataPath = "";
+            const { runtime, warnings, stored, records, dataPath: path } = await watched(funnelNode({ announce: [funnel, other], externalAnnounce: [funnel, other] }), {
+                dialAddress: async (address) => {
+                    if (address.startsWith(other)) {
+                        const config = (await readReachabilityConfig(dataPath))!;
+                        await writeReachabilityConfig(dataPath, { ...config, announce: [funnel], externalAnnounce: [funnel] });
+                    }
+                    return { peerId, handshakeMs: 4_230 };
+                }
+            });
+            dataPath = path;
+            await runtime.runWssCheck();
+            expect(warnings()).toHaveLength(1);
+            expect(warnings()[0]).toContain(funnel);
+            expect(records[0]).not.toContain(other);
+            expect(Object.keys((await stored())!.addresses)).toEqual([funnel]);
+        });
+
+        it("drops all of it when reachability was disabled while it ran", async () => {
+            let dataPath = "";
+            const { runtime, warnings, stored, records, dataPath: path } = await watched(funnelNode(), {
+                dialAddress: async () => {
+                    await writeReachabilityConfig(dataPath, { ...(await readReachabilityConfig(dataPath))!, enabled: false });
+                    return { peerId, handshakeMs: 4_230 };
+                }
+            });
+            dataPath = path;
+            await runtime.runWssCheck();
+            expect(warnings()).toEqual([]);
+            expect(records).toEqual([]);
+            expect(await stored()).toBeUndefined();
+        });
+
         it("is started by the daemon's timers, and not at all when the interval is 0", async () => {
             vi.useFakeTimers();
             try {

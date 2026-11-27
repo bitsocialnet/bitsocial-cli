@@ -75,7 +75,10 @@ export async function verifyUnmanagedAddresses(input: {
                     // A DNS outage here says nothing about what browsers can resolve, so it is no failure, Funnel or not.
                     if (targets.length === 0 && families.some((family) => resolved.unanswered?.includes(family)))
                         return { address, status: "unconfirmed", error: dnsUnansweredMessage(name), ...systemDns() };
-                    if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip))) return { address, status: "failed", error: `${name} resolves only to private addresses`, ...systemDns() };
+                    // Not dialed either way. Public DNS saying so is what browsers get, so that is a failure. This machine's own
+                    // resolver saying so, as MagicDNS does for its own ts.net name, or with a family unanswered, proves nothing about them.
+                    if (targets.length > 0 && !targets.some((ip) => isPublicIp(ip) || treatAsPublic.includes(ip)))
+                        return { address, status: records.source === "system" ? "unconfirmed" : "failed", error: `${name} resolves only to private addresses`, ...systemDns() };
                 }
                 // The dial goes to the addresses found here, so it takes the same path whatever this machine's own resolver says.
                 const { handshakeMs, dns: dialed } = await dial(dialable, { timeoutMs: BROWSER_DIAL_TIMEOUT_MS, ...(signal ? { signal } : {}), ...(records ? { records } : {}) });

@@ -22,7 +22,7 @@ import {
     type ReachabilityRuntimeStatus,
     type WssAddressCheck
 } from "./state.js";
-import { formatFunnelIngress, funnelIngressCheck, type RunCommand } from "./tailscale.js";
+import { formatFunnelIngress, funnelIngressCheck, isFunnelAddress, type RunCommand } from "./tailscale.js";
 import { setTimeout as delay } from "timers/promises";
 import {
     autonatEvidence,
@@ -772,7 +772,7 @@ export class ReachabilityRuntime {
         const identity = await (this.deps.kuboIdentity ?? (() => kuboIdentity(this.deps.kuboRpcUrl)))();
         // Nothing to dial while kubo is down, and its absence is reported elsewhere.
         if (!identity) return;
-        const { addresses, funnelIngress } = await checkWssAddresses({
+        const { addresses: found, funnelIngress: foundIngress } = await checkWssAddresses({
             running: announced.map((address) => `${address}/p2p/${identity.peerId}`),
             config: [],
             signal: this.stopController.signal,
@@ -785,6 +785,12 @@ export class ReachabilityRuntime {
             ...(this.deps.platform ? { platform: this.deps.platform } : {})
         });
         if (this.stopping) return;
+        // The check takes seconds, and the operator may have disabled reachability or dropped an address meanwhile.
+        const current = await this.readConfig();
+        const stillAnnounced = new Set(current?.enabled ? current.announce : []);
+        const addresses = found.filter(({ address }) => stillAnnounced.has(address));
+        if (addresses.length === 0) return this.forgetWssChecks();
+        const funnelIngress = addresses.some(({ address }) => isFunnelAddress(address)) ? foundIngress : undefined;
 
         const nowIso = new Date(this.now()).toISOString();
         const checked: Record<string, WssAddressCheck> = {};

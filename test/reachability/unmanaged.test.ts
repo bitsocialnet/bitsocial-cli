@@ -113,12 +113,23 @@ describe("verifyUnmanagedAddresses", () => {
             expect(results).toEqual([{ address: funnel, status: "ok", handshakeMs: 700, systemDns: true }]);
         });
 
-        it("still fails a name that even this machine's resolver only leads to a private address, as MagicDNS does", async () => {
+        // With MagicDNS on, this machine resolves its own ts.net name to its tailnet address. That says nothing about
+        // what browsers get from public DNS, so the address is not dialed and not called broken either.
+        it("leaves a name this machine's resolver only leads to a private address, as MagicDNS does, unconfirmed", async () => {
             const dial = vi.fn(async () => ({ peerId }));
             const tailnet = { v4: ["100.101.102.103"], v6: [], source: "system" as const };
             const results = await verifyUnmanagedAddresses({ running: [`${funnel}/p2p/${peerId}`], config: [], dial, resolve: async () => tailnet });
-            expect(results).toMatchObject([{ address: funnel, status: "failed", systemDns: true }]);
+            expect(results).toMatchObject([{ address: funnel, status: "unconfirmed", systemDns: true }]);
             expect(results[0]!.error).toMatch(/resolves only to private addresses/);
+            expect(dial).not.toHaveBeenCalled();
+        });
+
+        it("does not call a /dns name private-only while its AAAA query went unanswered", async () => {
+            const dial = vi.fn(async () => ({ peerId }));
+            const address = "/dns/node.example/tcp/443/tls/ws";
+            const partial = { v4: ["192.168.1.20"], v6: [], source: "system" as const, unanswered: ["v6" as const] };
+            const results = await verifyUnmanagedAddresses({ running: [`${address}/p2p/${peerId}`], config: [], dial, resolve: async () => partial });
+            expect(results).toMatchObject([{ address, status: "unconfirmed", systemDns: true }]);
             expect(dial).not.toHaveBeenCalled();
         });
     });
