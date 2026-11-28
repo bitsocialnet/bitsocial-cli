@@ -21,10 +21,15 @@ const createLogDir = async () => {
     return { logDir };
 };
 
-const runBitsocialLogs = (args: string[], logDir: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> => {
+const runBitsocialLogs = (
+    args: string[],
+    logDir: string,
+    env?: Record<string, string>
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> => {
     return new Promise((resolve, reject) => {
         const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, ...args], {
-            stdio: ["pipe", "pipe", "pipe"]
+            stdio: ["pipe", "pipe", "pipe"],
+            ...(env ? { env: { ...process.env, ...env } } : {})
         });
 
         let stdout = "";
@@ -863,5 +868,25 @@ describe("bitsocial logs on JSONL files (synthetic)", () => {
         });
         expect(result.stdout).toContain("ERROR_LEVEL_MARKER");
         expect(result.stdout).not.toContain("LOG_LEVEL_MARKER");
+    });
+    // The daemon deletes a run's oldest files to stay within --logMaxTotalSize, so one can vanish between the listing
+    // and the read. The preload deletes the first file just before it is read, the way that race lands.
+    it("prints the run's remaining files when one is deleted while it reads them", async () => {
+        const { logDir } = await createLogDir();
+        const stem = "bitsocial_cli_daemon_2026-07-04T00-00-00.000Z";
+        await fsPromise.writeFile(path.join(logDir, `${stem}.jsonl`), jsonlEntry("2026-07-04T00:00:00.000Z", "t:ns", "DELETED_PART_MARKER") + "\n");
+        await fsPromise.writeFile(path.join(logDir, `${stem}.1.jsonl`), jsonlEntry("2026-07-04T00:00:01.000Z", "t:ns", "SURVIVING_PART_MARKER") + "\n");
+        const deleteFirstFileOnRead = `import fsp from "node:fs/promises";
+const readFile = fsp.readFile; let deleted = false;
+fsp.readFile = async (file, ...rest) => {
+    if (!deleted && String(file).endsWith("${stem}.jsonl")) { deleted = true; await fsp.rm(file); }
+    return readFile(file, ...rest);
+};`;
+        const result = await runBitsocialLogs([], logDir, { NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(deleteFirstFileOnRead)}` });
+        // oclif warns about sources on stderr whenever NODE_OPTIONS has --import, so only look for the error
+        expect(result.stderr).not.toMatch(/ENOENT|Error/);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("SURVIVING_PART_MARKER");
+        expect(result.stdout).not.toContain("DELETED_PART_MARKER");
     });
 });

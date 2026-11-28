@@ -131,4 +131,30 @@ describe("daemon file logger", () => {
         expect(parseDaemonLogFileName("bitsocial_cli_daemon_2026-11-13T13-25-40.108Z.log")).toMatchObject({ format: "log", part: 0 });
         expect(parseDaemonLogFileName("other.jsonl")).toBeUndefined();
     });
+    // rotate() ended the previous stream without keeping it, so close() waited for the newest stream only: with part 0
+    // still flushing a burst, close() resolved while its entries were not on disk yet
+    it("resolves close() only once every rotated file is fully written", async () => {
+        const dir = randomDirectory();
+        const maxFileBytes = 8_000_000;
+        const logger = await createDaemonFileLogger({
+            logDir: dir,
+            stem: "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z",
+            maxFileBytes,
+            maxTotalBytes: 10 * maxFileBytes
+        });
+        // A burst that fills part 0 synchronously, then one small entry in part 1
+        const big = (i: number) => entry(i, { msg: `m${i}-`.padEnd(100_000, "x") });
+        let written = 0;
+        while (written * 100_000 < maxFileBytes - 200_000) logger.writeEntry(big(written++));
+        logger.writeEntry(big(written++));
+        logger.writeEntry(big(written++));
+        logger.writeEntry(entry(written++));
+        await logger.close();
+
+        let lines = 0;
+        for (const file of await listDaemonLogFiles(dir))
+            lines += (await fsPromise.readFile(file.path, "utf-8")).split("\n").filter(Boolean).length;
+        expect((await listDaemonLogFiles(dir)).length).toBeGreaterThan(1);
+        expect(lines).toBe(written);
+    });
 });

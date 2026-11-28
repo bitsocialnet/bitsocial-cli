@@ -221,7 +221,7 @@ See [docs/data-paths.md](docs/data-paths.md) for what each entry in it is.
 
 ### The logs directory of Bitsocial
 
-bitsocial-cli will keep logs in this directory: one file per daemon start, the 5 newest kept, each trimmed to its last 15 MB once it reaches 20 MB. See [docs/logs.md](docs/logs.md).
+bitsocial-cli will keep logs in this directory as JSON lines: each daemon start writes its own files, moving on to a new file at `--logMaxFileSize` (20 MB) and deleting the oldest files once all of them exceed `--logMaxTotalSize` (200 MB); the files of the 5 newest starts are kept. See [docs/logs.md](docs/logs.md).
 
 -   macOS: ~/Library/Logs/bitsocial
 -   Windows: %LOCALAPPDATA%\bitsocial\Log
@@ -955,8 +955,9 @@ Run a network-connected Bitsocial node. Once the daemon is running you can creat
 
 ```
 USAGE
-  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--chainProviderUrls <value>...] [--enableIpfsGc]
-    [--ipfsGcIntervalMinutes <value>] [--wssCheckIntervalMinutes <value>] [--allowPrivateKeyExport]
+  $ bitsocial daemon --pkcRpcUrl <value> --logPath <value> [--logMaxFileSize <value>] [--logMaxTotalSize
+    <value>] [--chainProviderUrls <value>...] [--enableIpfsGc] [--ipfsGcIntervalMinutes <value>]
+    [--wssCheckIntervalMinutes <value>] [--allowPrivateKeyExport]
 
 FLAGS
   --[no-]allowPrivateKeyExport       Allow RPC clients to request community exports that include the community signer's
@@ -970,6 +971,10 @@ FLAGS
                                      is up. Only reclaims unpinned blocks — pinned data and MFS are never collected.
                                      Disable with --no-enableIpfsGc
   --ipfsGcIntervalMinutes=<value>    [default: 60] How often to garbage-collect the IPFS repo, in minutes
+  --logMaxFileSize=<value>           [default: 20] Size in megabytes at which the daemon moves on to a new log file
+  --logMaxTotalSize=<value>          [default: 200] Size in megabytes that all log files in --logPath may take together.
+                                     The oldest files are deleted beyond it; the file being written can add up to
+                                     --logMaxFileSize
   --logPath=<value>                  (required) [default: /home/runner/.local/state/bitsocial] Specify a directory which
                                      will be used to store logs
   --pkcRpcUrl=<value>                (required) [default: ws://localhost:9138/] Specify PKC RPC URL to listen on
@@ -1025,27 +1030,33 @@ _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v6.2.3
 
 ## `bitsocial logs`
 
-View the latest BitSocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output in real-time (like tail -f).
+View the latest BitSocial daemon log. By default prints the newest daemon run's log and exits. Use --follow to stream new output in real-time (like tail -f). Output has no colors unless --color is given, so it can be piped into grep; --json prints one JSON object per entry for jq.
 
 ```
 USAGE
   $ bitsocial logs [-f] [-n <value>] [--since <value>] [--until <value>] [--logPath <value>] [--stdout |
-    --stderr]
+    --stderr] [--level log|error|trace...] [--json | --color]
 
 FLAGS
-  -f, --follow           Follow log output in real-time (like tail -f)
-  -n, --tail=<value>     [default: all] Number of log entries to show from the end. Use "all" to show everything.
-      --logPath=<value>  Specify the directory containing log files
-      --since=<value>    Show logs since timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
-                         42m, 2h, 1d)
-      --stderr           Show only stderr log entries (output of pkc-logger library)
-      --stdout           Show only stdout log entries
-      --until=<value>    Show logs before timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
-                         42m, 2h, 1d)
+  -f, --follow             Follow log output in real-time (like tail -f)
+  -n, --tail=<value>       [default: all] Number of log entries to show from the end. Use "all" to show everything.
+      --color              Color namespaces and errors (off by default, so piped output has no escape sequences)
+      --json               Print each entry as one JSON object ({ seq, time, level, namespace, msg, tags }), for
+                           filtering with jq
+      --level=<option>...  Show only entries of this level. Can be given more than once
+                           <options: log|error|trace>
+      --logPath=<value>    Specify the directory containing log files
+      --since=<value>      Show logs since timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
+                           42m, 2h, 1d)
+      --stderr             Show only what the daemon did not print to its terminal (debug output and stderr)
+      --stdout             Show only what the daemon printed to its terminal (stdout)
+      --until=<value>      Show logs before timestamp (ISO 8601, e.g. 2026-01-02T13:23:37Z) or relative time (e.g. 30s,
+                           42m, 2h, 1d)
 
 DESCRIPTION
-  View the latest BitSocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output
-  in real-time (like tail -f).
+  View the latest BitSocial daemon log. By default prints the newest daemon run's log and exits. Use --follow to stream
+  new output in real-time (like tail -f). Output has no colors unless --color is given, so it can be piped into grep;
+  --json prints one JSON object per entry for jq.
 
 EXAMPLES
   $ bitsocial logs
@@ -1062,9 +1073,25 @@ EXAMPLES
 
   $ bitsocial logs --stdout
 
-  $ bitsocial logs --stderr
+  $ bitsocial logs --level error
 
-  $ bitsocial logs --stdout -f
+  $ bitsocial logs --color | less -R
+
+  Lines of one community
+
+    $ bitsocial logs | grep -F "publicKey=$PUBLIC_KEY"
+
+  Lines of one comment (by cid) or one challenge exchange (by signature)
+
+    $ bitsocial logs | grep -F "cid=$CID"
+
+  Follow one community's lines as they arrive
+
+    $ bitsocial logs -f -n 0 | grep --line-buffered -F "publicKey=$PUBLIC_KEY"
+
+  Errors of one community, stack traces included
+
+    $ bitsocial logs --json --level error | jq -r 'select(.tags.publicKey == "'"$PUBLIC_KEY"'") | .msg'
 ```
 
 _See code: [src/cli/commands/logs.ts](https://github.com/bitsocialnet/bitsocial-cli/blob/v0.19.150/src/cli/commands/logs.ts)_

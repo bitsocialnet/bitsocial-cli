@@ -1,6 +1,7 @@
 import { ChildProcess, spawn, spawnSync } from "child_process";
 import net from "net";
 import path from "path";
+import fsPromise from "fs/promises";
 import { directory as randomDirectory } from "tempy";
 import WebSocket from "ws";
 import defaults from "../../dist/common-utils/defaults.js";
@@ -133,9 +134,12 @@ export const startPkcDaemon = (args: string[], env?: Record<string, string>): Pr
             daemonProcess.off("error", onError);
             reject(error);
         };
+        // Keeps collecting stdout after the daemon is ready, so tests can check what it prints later
+        let ready = false;
         const onStdoutData = (data: Buffer) => {
             const output = data.toString();
             daemonProcess.capturedStdout += output;
+            if (ready) return;
             const kuboConfigMatch = output.match(/kuboRpcClientsOptions:\s*\[\s*'([^']+)'/);
             if (!daemonProcess.kuboRpcUrl && kuboConfigMatch?.[1]) {
                 try {
@@ -145,7 +149,7 @@ export const startPkcDaemon = (args: string[], env?: Record<string, string>): Pr
                 }
             }
             if (output.match("Communities in data path")) {
-                daemonProcess.stdout!.off("data", onStdoutData);
+                ready = true;
                 daemonProcess.off("exit", onExit);
                 daemonProcess.off("error", onError);
                 resolve(daemonProcess);
@@ -348,4 +352,21 @@ export const withKuboBindRetry = async <T>(
         }
     }
     throw lastError;
+};
+
+export type DaemonLogFileEntry = { seq?: number; time: number; level: string; namespace: string; msg: string; tags: Record<string, string> };
+
+/**
+ * Every entry in the daemon's JSONL log files in `logDir`, file by file. A read can end partway through the line a live
+ * daemon is writing, so the text after a file's last newline is left out; a complete line that is not JSON still throws.
+ */
+export const readDaemonLogEntries = async (logDir: string): Promise<DaemonLogFileEntry[]> => {
+    const names = (await fsPromise.readdir(logDir)).filter((name) => name.endsWith(".jsonl")).sort();
+    const entries: DaemonLogFileEntry[] = [];
+    for (const name of names) {
+        const lines = (await fsPromise.readFile(path.join(logDir, name), "utf-8")).split("\n");
+        lines.pop();
+        for (const line of lines) if (line) entries.push(JSON.parse(line));
+    }
+    return entries;
 };

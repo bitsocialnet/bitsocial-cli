@@ -21,6 +21,17 @@ export function getCliLoggerRoot(): PKCLoggerInstance {
     return (cliLoggerRoot ??= createLogger());
 }
 
+/**
+ * Creates the root with these options, before anything logs: pkc-logger sizes a root's buffer only when it creates it,
+ * and pkc-js accepts `logger.instance` or `logger.buffer`, not both. The daemon calls this with
+ * `--pkcOptions.logger.buffer`, then passes only the instance to pkc-js.
+ */
+export function initCliLoggerRoot(options: { buffer?: { maxBytes?: number } }): PKCLoggerInstance {
+    if (cliLoggerRoot) throw new Error("The cli's logger root already exists: initCliLoggerRoot must run before anything logs");
+    cliLoggerRoot = createLogger(options.buffer ? { buffer: options.buffer } : {});
+    return cliLoggerRoot;
+}
+
 type PKCLoggerFn = ((options: { namespace: string; tags?: Record<string, string | undefined> }) => PKCLoggerInstance) & {
     enable: (namespaces: string) => void;
     disable: () => void;

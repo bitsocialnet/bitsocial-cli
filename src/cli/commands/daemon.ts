@@ -10,6 +10,7 @@ import {
     getLanIpV4Address,
     PKCLogger,
     getCliLoggerRoot,
+    initCliLoggerRoot,
     setupDebugLogger,
     loadKuboConfigFile,
     kuboRpcUrlFromKuboConfig,
@@ -25,7 +26,7 @@ import { printBanner } from "../ascii-banner.js";
 import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
 import { loadPageSortsIntoPKC } from "../../page-sort-packages/page-sort-utils.js";
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
-import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
+import { createBsoResolvers, DEFAULT_PROVIDERS, redactProviderUrl } from "../../common-utils/resolvers.js";
 import { pruneStaleStates, writeDaemonState, deleteDaemonState, detectSelfSupervisor, pickDaemonEnv, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
 import {
     createDaemonFileLogger,
@@ -36,10 +37,11 @@ import {
     type DaemonLogEntry
 } from "../../common-utils/daemon-file-logger.js";
 import { renderLogEntry, streamOfNamespace, STDOUT_NAMESPACE, STDERR_NAMESPACE } from "../../common-utils/daemon-log-format.js";
-import PKCLoggerModule from "@pkcprotocol/pkc-logger";
+import PKCLoggerModule, { formatLogArgs } from "@pkcprotocol/pkc-logger";
 
 import { EOL } from "node:os";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 //@ts-expect-error
 import type { InputPKCOptions } from "@pkcprotocol/pkc-js/dist/node/types.js";
 //@ts-expect-error
@@ -192,16 +194,36 @@ export default class Daemon extends Command {
         const stdoutWrite = process.stdout.write.bind(process.stdout);
         const stderrWrite = process.stderr.write.bind(process.stderr);
 
-        // pkc-logger prints each enabled line through `debug` before it hands the entry to listeners. The listeners
-        // write the file, so `debug` itself prints nothing: its stderr output would reach the capture below a second time.
-        const debugModule = createRequire(import.meta.resolve("@pkcprotocol/pkc-logger"))("debug");
-        debugModule.log = () => {};
-
         // If the file cannot take an entry, print it rather than lose it
         const writeEntry = (entry: DaemonLogEntry) => {
             if (fileLogger.writeEntry(entry)) return;
             const text = renderLogEntry({ time: entry.time, level: entry.level, namespace: entry.namespace, stream: streamOfNamespace(entry.namespace), entry }) + EOL;
             stderrWrite(text);
+        };
+
+        // pkc-logger prints each enabled line through `debug` before it hands the entry to listeners, which write it to
+        // the file, so `debug` prints nothing itself (its stderr output would reach the capture below a second time).
+        // Other libraries in the process (oclif, acme-client...) share this `debug` copy and have no listener: their
+        // enabled lines are written to the file here, under their own namespace.
+        const pkcLoggerEntry = import.meta.resolve("@pkcprotocol/pkc-logger");
+        const pkcLoggerDir = path.dirname(fileURLToPath(pkcLoggerEntry));
+        const debugModule = createRequire(pkcLoggerEntry)("debug");
+        // Formatting is pkc-logger's (formatLogArgs below), so debug adds no prefix, color or +ms suffix
+        debugModule.formatArgs = () => {};
+        // Whether pkc-logger prints under a namespace, decided once per namespace from the stack of its first line
+        const printedByPkcLogger = new Map<string, boolean>();
+        debugModule.log = function (this: { namespace: string }, ...args: unknown[]) {
+            let ownedByPkcLogger = printedByPkcLogger.get(this.namespace);
+            if (ownedByPkcLogger === undefined) {
+                ownedByPkcLogger = (new Error().stack ?? "").includes(pkcLoggerDir);
+                printedByPkcLogger.set(this.namespace, ownedByPkcLogger);
+            }
+            if (ownedByPkcLogger) return;
+            try {
+                writeEntry({ time: Date.now(), level: "log", namespace: this.namespace, msg: formatLogArgs(args), tags: {} });
+            } catch {
+                // a log line must never break the code that logged it
+            }
         };
         const root = getCliLoggerRoot();
         root.addListener(writeEntry);
@@ -212,9 +234,13 @@ export default class Daemon extends Command {
         const asString = (data: string | Uint8Array) => (typeof data === "string" ? data : Buffer.from(data).toString());
         const stdoutLog = PKCLogger({ namespace: STDOUT_NAMESPACE });
         const stderrLog = PKCLogger({ namespace: STDERR_NAMESPACE });
-        const capture = (logFn: (...args: unknown[]) => void, data: string | Uint8Array) => {
+        // False when nothing was logged, so the caller can write the text itself
+        const capture = (namespace: string, logFn: (...args: unknown[]) => void, data: string | Uint8Array) => {
             const text = asString(data).replace(/\r?\n$/, "");
             if (text.trim().length === 0) return true;
+            // DEBUG can exclude the namespace ("-bitsocial*" wins over the one the daemon appends); pkc-logger then
+            // drops the line without telling
+            if (!PKCLogger.enabled(namespace)) return false;
             try {
                 // "%s", so a "%" in the text is not read as a placeholder
                 logFn("%s", text);
@@ -227,13 +253,14 @@ export default class Daemon extends Command {
         process.stdout.write = (...args) => {
             //@ts-expect-error
             const res = stdoutWrite(...args);
-            capture(stdoutLog, args[0]);
+            capture(STDOUT_NAMESPACE, stdoutLog, args[0]);
             return res;
         };
 
-        // stderr goes to the log file only, so the terminal shows what the operator must see (stdout) and real errors
+        // stderr goes to the log file only, so the terminal shows what the operator must see (stdout) and real errors.
+        // What the file does not take is printed.
         process.stderr.write = (...args) => {
-            if (capture(stderrLog.error, args[0])) return true;
+            if (capture(STDERR_NAMESPACE, stderrLog.error, args[0])) return true;
             //@ts-expect-error
             return stderrWrite(...args);
         };
@@ -286,6 +313,19 @@ export default class Daemon extends Command {
         const { flags } = await this.parse(Daemon);
         if (flags.logMaxTotalSize < flags.logMaxFileSize)
             this.error(`--logMaxTotalSize (${flags.logMaxTotalSize}) must be at least --logMaxFileSize (${flags.logMaxFileSize})`);
+        const pkcOptionsFlagNames = Object.keys(flags).filter((flag) => flag.startsWith("pkcOptions"));
+        const pkcOptionsFromFlag: InputPKCOptions | undefined =
+            pkcOptionsFlagNames.length > 0
+                ? DataObjectParser.transpose(remeda.pick(flags, pkcOptionsFlagNames))["_data"]?.["pkcOptions"]
+                : undefined;
+        // The root takes --pkcOptions.logger.buffer, and pkc-js gets only the root (it rejects instance and buffer together)
+        if (pkcOptionsFromFlag?.logger?.buffer) {
+            try {
+                initCliLoggerRoot({ buffer: pkcOptionsFromFlag.logger.buffer });
+            } catch (error) {
+                this.error(`Invalid --pkcOptions.logger.buffer: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
         this._setupLogger();
         const { stdoutWrite, fileLogger } = await this._pipeLogsToLogFile({
             logPath: flags.logPath,
@@ -307,15 +347,9 @@ export default class Daemon extends Command {
             const debugNamespace = envDebug === "0" || envDebug === "" ? undefined : envDebug;
             if (debugNamespace) log("Debug logs is on with namespace", `"${debugNamespace}"`);
 
-            log(`flags: `, flags);
+            log(`flags: `, { ...flags, chainProviderUrls: flags.chainProviderUrls.map(redactProviderUrl) });
 
             const pkcRpcUrl = new URL(flags.pkcRpcUrl);
-
-            const pkcOptionsFlagNames = Object.keys(flags).filter((flag) => flag.startsWith("pkcOptions"));
-            const pkcOptionsFromFlag: InputPKCOptions | undefined =
-                pkcOptionsFlagNames.length > 0
-                    ? DataObjectParser.transpose(remeda.pick(flags, pkcOptionsFlagNames))["_data"]?.["pkcOptions"]
-                    : undefined;
 
             if (pkcOptionsFromFlag?.pkcRpcClientsOptions && pkcRpcUrl.toString() !== defaults.PKC_RPC_URL.toString()) {
                 this.error(
@@ -358,7 +392,8 @@ export default class Daemon extends Command {
             const { nameResolvers: _nr, ...printablePkcOptions } = mergedPkcOptions;
             console.log("PKC options:", JSON.stringify(printablePkcOptions, null, 2));
             // pkc-js logs through the cli's root: its lines follow the DEBUG enabled above and reach the log file (issue #292)
-            mergedPkcOptions.logger = { ...mergedPkcOptions.logger, instance: getCliLoggerRoot() };
+            // The root was created with the requested buffer, so pkc-js gets only the instance
+            mergedPkcOptions.logger = { instance: getCliLoggerRoot() };
 
             // Migrate data directory before creating PKC instance
             migrateDataDirectory(mergedPkcOptions.dataPath!);

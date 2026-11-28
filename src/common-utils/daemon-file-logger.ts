@@ -111,11 +111,20 @@ export async function createDaemonFileLogger(options: DaemonFileLoggerOptions): 
     let closed = false;
     const deletedFiles: string[] = [];
 
+    // One per stream opened, resolved once it is closed (all its data written) or failed. A rotated stream may still be
+    // flushing a burst after the next one is opened, so close() waits for all of them.
+    const streamsDone: Promise<void>[] = [];
     const openStream = (filePath: string) => {
         const s = fs.createWriteStream(filePath, { flags: "a" });
         s.on("error", () => {
             if (s === stream) failed = true;
         });
+        streamsDone.push(
+            new Promise<void>((resolve) => {
+                s.once("close", () => resolve());
+                s.once("error", () => resolve());
+            })
+        );
         return s;
     };
     let stream = openStream(currentPath);
@@ -173,7 +182,8 @@ export async function createDaemonFileLogger(options: DaemonFileLoggerOptions): 
             if (closed) return;
             closed = true;
             await pruning;
-            await new Promise<void>((resolve) => stream.end(() => resolve()));
+            stream.end();
+            await Promise.all(streamsDone);
         },
         get currentPath() {
             return currentPath;

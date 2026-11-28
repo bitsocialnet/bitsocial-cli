@@ -176,17 +176,29 @@ export default class Logs extends Command {
             if (entries.length > 0) process.stdout.write(entries.map(format).join("\n") + "\n");
         };
 
-        // Read each file once, as bytes, so follow mode continues from exactly what was printed (issue #77)
-        const contents = await Promise.all(runFiles.map((file) => fsPromise.readFile(file.path)));
-        const existing = runFiles.flatMap((file, i) => this._parseEntries(contents[i].toString("utf-8"), file.format));
+        // Read each file once, as bytes, so follow mode continues from exactly what was printed (issue #77). The daemon
+        // deletes a run's oldest files to stay within its limits, so one listed above may be gone by now: skip it.
+        const read = await Promise.all(
+            runFiles.map(async (file) => {
+                try {
+                    return { file, content: await fsPromise.readFile(file.path) };
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+                    throw error;
+                }
+            })
+        );
+        const readFiles = read.filter((item): item is NonNullable<typeof item> => item !== undefined);
+        if (readFiles.length === 0) this.error(`No log files found in ${logPath}\nHave you started the daemon yet?`);
+        const existing = readFiles.flatMap(({ file, content }) => this._parseEntries(content.toString("utf-8"), file.format));
         print(this._tailEntries(filter(existing), flags.tail));
 
         if (!flags.follow) return;
 
         // Follow mode. The daemon only appends to a file, then moves on to the next one (rotation, or a new run), so
         // each file is read from an offset to its end, then the next one from its start.
-        let current = runFiles[runFiles.length - 1];
-        let position = contents[contents.length - 1].length;
+        let current = readFiles[readFiles.length - 1].file;
+        let position = readFiles[readFiles.length - 1].content.length;
         let pendingBuffer = "";
         // Set when a later file shows up. The switch waits one more poll, so the daemon's last writes to this file,
         // which its stream flushes after opening the next one, are read first.

@@ -41,7 +41,7 @@ The daemon, pkc-js and the pkc-js RPC server all log through one logger root, wh
 | Output | Terminal | Log file |
 | --- | --- | --- |
 | stdout (startup lines, warnings for the operator) | yes | yes, namespace `bitsocial-cli:stdout`, level `log` |
-| Debug output of bitsocial-cli and pkc-js | no | yes, under its own namespace |
+| Debug output of bitsocial-cli, pkc-js and other libraries that use `debug` (oclif, acme-client...) | no | yes, under its own namespace |
 | Anything else written to stderr | no | yes, namespace `bitsocial-cli:stderr`, level `error` |
 | Uncaught exceptions and unhandled rejections | yes | yes, as `bitsocial-cli:stderr` |
 
@@ -103,9 +103,11 @@ The daemon enables the debug namespaces `bitsocial*,pkc*,-pkc*trace` by default:
 DEBUG='bitsocial*,pkc*' bitsocial daemon     # includes pkc-js trace output: every RPC call, update-loop detail
 ```
 
-`bitsocial-cli:stdout` and `bitsocial-cli:stderr` are always added, so what the daemon prints is in the file whatever `DEBUG` says, unless `DEBUG` excludes them explicitly (`-bitsocial*`). An idle community logs nothing at the default level.
+`bitsocial-cli:stdout` and `bitsocial-cli:stderr` are always added, so what the daemon prints is in the file whatever `DEBUG` says, unless `DEBUG` excludes them explicitly (`-bitsocial*`). Then stdout is only printed, and stderr is printed to the terminal instead of being dropped. An idle community logs nothing at the default level.
 
-pkc-logger formats each message itself: objects to depth 4, at most 50 keys or array items, strings cut at 2,000 characters, and 16 KiB per message. That applies to captured stdout and stderr text too, so a very long printed line ends in `…`. `DEBUG_DEPTH` has no effect.
+pkc-logger formats each message itself: objects to depth 4, at most 50 keys or array items, strings inside objects cut at 2,000 characters, and 16 KiB per message. A message longer than that, captured stdout and stderr text included, is cut and ends in `…[truncated]`. `DEBUG_DEPTH` has no effect.
+
+Provider URLs given with `--chainProviderUrls` are logged as their origin only (`https://mainnet.infura.io/…`), since a path or query can hold an API key and the log is readable through `getLogs`.
 
 `bin/run-cli.js`, which `bin/run` loads once it has checked the Node version, removes `DEBUG` from the environment before the CLI loads and passes it on as `_PKC_DEBUG`, so the `debug` module never prints to the terminal on its own. Setting `_PKC_DEBUG` directly has the same effect and wins over `DEBUG`. `DEBUG=0` or an empty value means unset.
 
