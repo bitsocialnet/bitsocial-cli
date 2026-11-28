@@ -1,11 +1,15 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { createBsoResolvers } from "../../dist/common-utils/resolvers.js";
+import { createBsoResolvers, loggableNameResolvers, redactProviderUrl } from "../../dist/common-utils/resolvers.js";
+import { PKCLogger } from "../../dist/util.js";
+
+// bso-resolver 0.1.0 requires the caller's log, which pkc-js passes in the daemon
+const log = PKCLogger({ namespace: "bitsocial-cli:test:resolvers" });
 
 describe("createBsoResolvers", () => {
     let resolvers: ReturnType<typeof createBsoResolvers> = [];
 
     afterEach(async () => {
-        for (const r of resolvers) await r.destroy();
+        for (const r of resolvers) await r.destroy({ log });
         resolvers = [];
     });
 
@@ -54,7 +58,7 @@ describe("daemon wiring: chainProviderUrls -> PKC nameResolvers", () => {
     let resolvers: ReturnType<typeof createBsoResolvers> = [];
 
     afterEach(async () => {
-        for (const r of resolvers) await r.destroy();
+        for (const r of resolvers) await r.destroy({ log });
         resolvers = [];
     });
 
@@ -104,5 +108,42 @@ describe("daemon wiring: chainProviderUrls -> PKC nameResolvers", () => {
         expect(pkcOptions.nameResolvers).toHaveLength(2);
         expect(pkcOptions.nameResolvers[0].key).toBe("existing");
         expect(pkcOptions.nameResolvers[1].key).toBe("bso-https://eth.drpc.org");
+    });
+});
+
+// Logged provider URLs reach the log file and getLogs; a path or query can hold the provider's API key
+describe("redactProviderUrl", () => {
+    it("keeps only the origin of a URL with a path, query or credentials", () => {
+        expect(redactProviderUrl("https://mainnet.infura.io/v3/SECRET")).toBe("https://mainnet.infura.io/…");
+        expect(redactProviderUrl("https://rpc.example/?apikey=SECRET")).toBe("https://rpc.example/…");
+        expect(redactProviderUrl("https://user:SECRET@rpc.example")).toBe("https://rpc.example/…");
+    });
+
+    it("leaves a bare origin as it is", () => {
+        expect(redactProviderUrl("https://eth.drpc.org")).toBe("https://eth.drpc.org");
+        expect(redactProviderUrl("https://eth.drpc.org/")).toBe("https://eth.drpc.org");
+    });
+
+    it("does not echo a value that is not a URL", () => {
+        expect(redactProviderUrl("not a url SECRET")).toBe("[invalid URL]");
+    });
+
+    it("redacts WebSocket provider URLs", () => {
+        expect(redactProviderUrl("wss://mainnet.infura.io/ws/v3/SECRET")).toBe("wss://mainnet.infura.io/…");
+        expect(loggableNameResolvers([{ key: "bso-wss://mainnet.infura.io/ws/v3/SECRET" }, { key: "bso-ws://127.0.0.1:8546/SECRET" }])).toEqual([
+            "bso-wss://mainnet.infura.io/…",
+            "bso-ws://127.0.0.1:8546/…"
+        ]);
+    });
+
+    it("redacts all of a provider URL that contains a comma", () => {
+        expect(loggableNameResolvers([{ key: "bso-https://rpc.example/v1,SECRET?key=a,SECRET2" }])).toEqual(["bso-https://rpc.example/…"]);
+    });
+
+    it("redacts the provider URL inside BSO resolver keys", () => {
+        expect(loggableNameResolvers([{ key: "bso-https://mainnet.infura.io/v3/SECRET" }, { key: "custom" }])).toEqual([
+            "bso-https://mainnet.infura.io/…",
+            "custom"
+        ]);
     });
 });

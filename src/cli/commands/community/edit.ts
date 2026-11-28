@@ -80,7 +80,7 @@ For modifying complex settings like challenges, consider using a web UI instead:
     async run(): Promise<void> {
         const { flags, args } = await this.parse(Edit);
 
-        const log = PKCLogger("bitsocial-cli:commands:community:edit");
+        const log = PKCLogger({ namespace: "bitsocial-cli:commands:community:edit" });
         log(`flags: `, flags);
         const pkc = await this._connectToPkcRpc(flags.pkcRpcUrl.toString());
 

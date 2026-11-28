@@ -121,7 +121,7 @@
     },
     "dependencies": {
         "@achingbrain/nat-port-mapper": "4.0.5",
-        "@bitsocial/bso-resolver": "0.0.10",
+        "@bitsocial/bso-resolver": "0.1.0",
         "@libp2p/identify": "4.1.18",
         "@libp2p/noise": "17.0.7",
         "@libp2p/websockets": "10.1.25",
@@ -131,7 +131,8 @@
         "@oclif/plugin-help": "6.2.36",
         "@oclif/plugin-not-found": "3.2.73",
         "@oclif/table": "0.5.1",
-        "@pkcprotocol/pkc-js": "0.0.159",
+        "@pkcprotocol/pkc-js": "0.0.165",
+        "@pkcprotocol/pkc-logger": "0.3.1",
         "dataobject-parser": "1.2.22",
         "decompress": "4.2.1",
         "env-paths": "2.2.1",

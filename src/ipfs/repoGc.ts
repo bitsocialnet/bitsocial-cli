@@ -40,7 +40,7 @@ export async function runRepoGc(options: {
     signal?: AbortSignal;
     fetchImpl?: FetchLike;
 }): Promise<{ ran: boolean; reclaimedCids?: number }> {
-    const log = options.log ?? PKCLogger("bitsocial-cli:ipfs:repoGc");
+    const log = options.log ?? PKCLogger({ namespace: "bitsocial-cli:ipfs:repoGc" });
     const fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
     const apiBase = toConnectableApiBase(options.kuboApiUrl);
 
@@ -86,7 +86,7 @@ export function startRepoGcScheduler(options: {
     log?: any;
     fetchImpl?: FetchLike;
 }): () => void {
-    const log = options.log ?? PKCLogger("bitsocial-cli:ipfs:repoGc");
+    const log = options.log ?? PKCLogger({ namespace: "bitsocial-cli:ipfs:repoGc" });
     const intervalMs = options.intervalMs ?? DEFAULT_REPO_GC_INTERVAL_MS;
     const abortController = new AbortController();
     let inFlight: Promise<unknown> | undefined;

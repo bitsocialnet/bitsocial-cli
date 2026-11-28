@@ -2,86 +2,159 @@ import { describe, it, expect } from "vitest";
 import { directory as randomDirectory } from "tempy";
 import fsPromise from "fs/promises";
 import path from "path";
-import { createDaemonFileLogger } from "../../dist/common-utils/daemon-file-logger.js";
+import {
+    createDaemonFileLogger,
+    listDaemonLogFiles,
+    parseDaemonLogFileName,
+    type DaemonLogEntry
+} from "../../dist/common-utils/daemon-file-logger.js";
 
-const PAYLOAD_LINE_LEN = 500;
+const entry = (i: number, extra: Partial<DaemonLogEntry> = {}): DaemonLogEntry => ({
+    seq: i,
+    time: 1_760_000_000_000 + i,
+    level: "log",
+    namespace: "test:ns",
+    msg: `m${String(i).padStart(5, "0")}-`.padEnd(400, "x"),
+    tags: { publicKey: "12D3KooWtest" },
+    ...extra
+});
 
-const writeNLines = (
-    logger: ReturnType<typeof createDaemonFileLogger>,
-    n: number,
-    label: (i: number) => string = (i) => `m${i}`
-) => {
-    for (let i = 0; i < n; i++) {
-        const line = `${label(i)}-`.padEnd(PAYLOAD_LINE_LEN, "x") + "\n";
-        logger.writeTimestampedLine(line, "stderr");
-    }
+const totalSize = async (dir: string) => {
+    let total = 0;
+    for (const file of await listDaemonLogFiles(dir)) total += (await fsPromise.stat(file.path)).size;
+    return total;
 };
 
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe("daemon file logger", () => {
-    it("does NOT silently freeze writes after the cap is exceeded (regression for #37 bug 1)", async () => {
+    it("writes one JSON line per entry, with seq, time, level, namespace, msg and tags", async () => {
         const dir = randomDirectory();
-        const logFile = path.join(dir, "test.log");
-        const logger = createDaemonFileLogger({ logFilePath: logFile, maxBytes: 100_000, trimToBytes: 60_000 });
-
-        // Write enough volume to exceed 100 KB cap multiple times over
-        writeNLines(logger, 800, (i) => `early-${i}`);
-        // Force any pending trim to complete
-        await logger._trimNow();
-        // Now write a sentinel that MUST appear in the file (would have been silently dropped before fix)
-        const sentinel = `LATE_SENTINEL_LINE_${Date.now()}`;
-        logger.writeTimestampedLine(sentinel + "\n", "stderr");
-        await logger._trimNow();
+        const logger = await createDaemonFileLogger({ logDir: dir, stem: "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z" });
+        logger.writeEntry(entry(1));
+        logger.writeEntry(entry(2, { level: "error", msg: "boom\n    at stack line", tags: {}, seq: undefined }));
         await logger.close();
 
-        const content = await fsPromise.readFile(logFile, "utf-8");
-        expect(content).toContain(sentinel);
+        const lines = (await fsPromise.readFile(logger.currentPath, "utf-8")).trimEnd().split("\n");
+        expect(lines).toHaveLength(2);
+        expect(JSON.parse(lines[0])).toEqual(entry(1));
+        const second = JSON.parse(lines[1]);
+        expect(second).toEqual({ time: entry(2).time, level: "error", namespace: "test:ns", msg: "boom\n    at stack line", tags: {} });
+        expect(second).not.toHaveProperty("seq");
+        expect(path.basename(logger.currentPath)).toBe("bitsocial_cli_daemon_2026-01-01T00-00-00.000Z.jsonl");
     });
 
-    it("keeps the file size bounded near maxBytes after sustained over-cap writes", async () => {
+    // The text logger this replaces trimmed in place, and counted bytes from 0 again after each trim, so its file grew
+    // to trimToBytes + maxBytes (about 35 MB with the 20 MB default) before the next trim
+    it("never lets one file grow past maxFileBytes, nor all of them past maxTotalBytes plus one file", async () => {
         const dir = randomDirectory();
-        const logFile = path.join(dir, "test.log");
-        const maxBytes = 80_000;
-        const trimToBytes = 50_000;
-        const logger = createDaemonFileLogger({ logFilePath: logFile, maxBytes, trimToBytes });
-
-        // ~500 KB of writes across multiple trim cycles
-        writeNLines(logger, 1000, (i) => `m${i}`);
-        await logger._trimNow();
+        const maxFileBytes = 20_000;
+        const maxTotalBytes = 60_000;
+        const logger = await createDaemonFileLogger({ logDir: dir, stem: "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z", maxFileBytes, maxTotalBytes });
+        let peakTotal = 0;
+        for (let i = 0; i < 1000; i++) {
+            logger.writeEntry(entry(i));
+            if (i % 20 === 0) {
+                await tick();
+                await logger._settled();
+                for (const file of await listDaemonLogFiles(dir)) expect((await fsPromise.stat(file.path)).size).toBeLessThanOrEqual(maxFileBytes);
+                peakTotal = Math.max(peakTotal, await totalSize(dir));
+            }
+        }
         await logger.close();
-
-        const stat = await fsPromise.stat(logFile);
-        // After trim, file should be ≤ maxBytes (trimmed down to ~trimToBytes plus pending drain)
-        expect(stat.size).toBeLessThanOrEqual(maxBytes + PAYLOAD_LINE_LEN * 2);
+        peakTotal = Math.max(peakTotal, await totalSize(dir));
+        expect(peakTotal).toBeLessThanOrEqual(maxTotalBytes + maxFileBytes);
+        expect(logger.deletedFiles.length).toBeGreaterThan(0);
     });
 
-    it("preserves the most recent writes after trim, drops the oldest", async () => {
+    it("keeps the newest entries in order across rotated files and deletes the oldest files", async () => {
         const dir = randomDirectory();
-        const logFile = path.join(dir, "test.log");
-        const logger = createDaemonFileLogger({ logFilePath: logFile, maxBytes: 80_000, trimToBytes: 40_000 });
-
-        // 400 lines * ~500 bytes = ~200 KB, well above cap
-        writeNLines(logger, 400, (i) => `msg-${String(i).padStart(4, "0")}`);
-        await logger._trimNow();
+        const stem = "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z";
+        const logger = await createDaemonFileLogger({ logDir: dir, stem, maxFileBytes: 10_000, maxTotalBytes: 30_000 });
+        for (let i = 0; i < 300; i++) logger.writeEntry(entry(i));
         await logger.close();
 
-        const content = await fsPromise.readFile(logFile, "utf-8");
-        // The very latest messages must survive
-        expect(content).toContain("msg-0399");
-        expect(content).toContain("msg-0398");
-        // The oldest must have been trimmed
-        expect(content).not.toMatch(/msg-000[0-5]/);
-        // File should start on a line boundary (the timestamp prefix)
-        const firstChar = content.charCodeAt(0);
-        expect(firstChar).toBe(0x5b /* '[' */);
+        const files = await listDaemonLogFiles(dir);
+        expect(files.length).toBeGreaterThan(1);
+        expect(files.every((file) => file.stem === stem)).toBe(true);
+        const seqs: number[] = [];
+        for (const file of files)
+            for (const line of (await fsPromise.readFile(file.path, "utf-8")).trimEnd().split("\n")) seqs.push(JSON.parse(line).seq);
+        expect(seqs[seqs.length - 1]).toBe(299);
+        expect(seqs[0]).toBeGreaterThan(0);
+        // Contiguous: nothing lost between files
+        expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => seqs[0] + i));
     });
 
-    it("returns false from writeTimestampedLine after close so caller can fall back (regression for #37 bug 2)", async () => {
+    it("keeps the files of at most maxStarts daemon starts, counting this one, including old text logs", async () => {
         const dir = randomDirectory();
-        const logFile = path.join(dir, "test.log");
-        const logger = createDaemonFileLogger({ logFilePath: logFile, maxBytes: 100_000, trimToBytes: 50_000 });
-
-        expect(logger.writeTimestampedLine("first\n", "stderr")).toBe(true);
+        const earlier = [
+            "bitsocial_cli_daemon_2025-01-01T00-00-00.000Z.log",
+            "bitsocial_cli_daemon_2025-02-01T00-00-00.000Z.jsonl",
+            "bitsocial_cli_daemon_2025-02-01T00-00-00.000Z.1.jsonl",
+            "bitsocial_cli_daemon_2025-03-01T00-00-00.000Z.jsonl"
+        ];
+        for (const name of earlier) await fsPromise.writeFile(path.join(dir, name), "x\n");
+        const logger = await createDaemonFileLogger({ logDir: dir, stem: "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z", maxStarts: 3 });
+        logger.writeEntry(entry(1));
         await logger.close();
-        expect(logger.writeTimestampedLine("after-close\n", "stderr")).toBe(false);
+
+        const names = (await listDaemonLogFiles(dir)).map((file) => file.name);
+        // This start and the 2 newest earlier ones; every file of a start is kept or deleted together
+        expect(names).toEqual([
+            "bitsocial_cli_daemon_2025-02-01T00-00-00.000Z.jsonl",
+            "bitsocial_cli_daemon_2025-02-01T00-00-00.000Z.1.jsonl",
+            "bitsocial_cli_daemon_2025-03-01T00-00-00.000Z.jsonl",
+            "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z.jsonl"
+        ]);
+        expect(logger.deletedFiles).toContain("bitsocial_cli_daemon_2025-01-01T00-00-00.000Z.log");
+    });
+
+    it("returns false from writeEntry after close so the caller can print the entry instead (regression for #37 bug 2)", async () => {
+        const dir = randomDirectory();
+        const logger = await createDaemonFileLogger({ logDir: dir, stem: "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z" });
+        expect(logger.writeEntry(entry(1))).toBe(true);
+        await logger.close();
+        expect(logger.writeEntry(entry(2))).toBe(false);
+    });
+
+    it("parses file names whose start time contains a dot, with and without a part number", () => {
+        expect(parseDaemonLogFileName("bitsocial_cli_daemon_2026-11-13T13-25-40.108Z.jsonl")).toMatchObject({
+            stem: "bitsocial_cli_daemon_2026-11-13T13-25-40.108Z",
+            part: 0,
+            format: "jsonl"
+        });
+        expect(parseDaemonLogFileName("bitsocial_cli_daemon_2026-11-13T13-25-40.108Z.12.jsonl")).toMatchObject({
+            stem: "bitsocial_cli_daemon_2026-11-13T13-25-40.108Z",
+            part: 12
+        });
+        expect(parseDaemonLogFileName("bitsocial_cli_daemon_2026-11-13T13-25-40.108Z.log")).toMatchObject({ format: "log", part: 0 });
+        expect(parseDaemonLogFileName("other.jsonl")).toBeUndefined();
+    });
+    // rotate() ended the previous stream without keeping it, so close() waited for the newest stream only: with part 0
+    // still flushing a burst, close() resolved while its entries were not on disk yet
+    it("resolves close() only once every rotated file is fully written", async () => {
+        const dir = randomDirectory();
+        const maxFileBytes = 8_000_000;
+        const logger = await createDaemonFileLogger({
+            logDir: dir,
+            stem: "bitsocial_cli_daemon_2026-01-01T00-00-00.000Z",
+            maxFileBytes,
+            maxTotalBytes: 10 * maxFileBytes
+        });
+        // A burst that fills part 0 synchronously, then one small entry in part 1
+        const big = (i: number) => entry(i, { msg: `m${i}-`.padEnd(100_000, "x") });
+        let written = 0;
+        while (written * 100_000 < maxFileBytes - 200_000) logger.writeEntry(big(written++));
+        logger.writeEntry(big(written++));
+        logger.writeEntry(big(written++));
+        logger.writeEntry(entry(written++));
+        await logger.close();
+
+        let lines = 0;
+        for (const file of await listDaemonLogFiles(dir))
+            lines += (await fsPromise.readFile(file.path, "utf-8")).split("\n").filter(Boolean).length;
+        expect((await listDaemonLogFiles(dir)).length).toBeGreaterThan(1);
+        expect(lines).toBe(written);
     });
 });

@@ -96,7 +96,7 @@ export default class Export extends BaseCommand {
     async run(): Promise<void> {
         const { args, flags } = await this.parse(Export);
 
-        const log = PKCLogger("bitsocial-cli:commands:community:export");
+        const log = PKCLogger({ namespace: "bitsocial-cli:commands:community:export" });
         log(`args: `, args);
         log(`flags: `, flags);
 

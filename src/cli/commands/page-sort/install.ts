@@ -1,6 +1,7 @@
 import { Args, Flags } from "@oclif/core";
 import { BaseCommand } from "../../base-command.js";
 import defaults from "../../../common-utils/defaults.js";
+import { PKCLogger } from "../../../util.js";
 import fs from "fs";
 import { validatePageSortFileFactory } from "@pkcprotocol/pkc-js/page-sorts";
 import {
@@ -54,7 +55,8 @@ export default class Install extends BaseCommand {
                 // Refuse anything a community would reject (e.g. a challenge package) before it replaces an install
                 validate: async (pkgDir, pkg) => {
                     newSortName = validatePageSortFileFactory(await importPackageFactory(PAGE_SORT_PACKAGE_KIND, pkgDir, pkg), {
-                        name: pkg.name
+                        name: pkg.name,
+                        log: PKCLogger({ namespace: "bitsocial-cli:commands:page-sort:install" })
                     }).sortName;
                     // Read the install being replaced while it is still in place. One that no longer loads has no
                     // sortName worth comparing, so it must not block the upgrade that may fix it.

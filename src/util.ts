@@ -4,12 +4,53 @@ import fs from "fs";
 import net from "net";
 import * as fsPromises from "fs/promises";
 import stripJsonComments from "strip-json-comments";
-import PKCLogger from "@pkcprotocol/pkc-logger";
-export { PKCLogger };
+import PKCLoggerModule, { createLogger, type Logger as PKCLoggerInstance } from "@pkcprotocol/pkc-logger";
 
-export type PKCLoggerType = typeof PKCLogger & {
-    inspectOpts?: { depth?: number; colors?: boolean; [key: string]: any };
+export type { PKCLoggerInstance };
+
+let cliLoggerRoot: PKCLoggerInstance | undefined;
+
+/**
+ * The process's single logger root. Every `PKCLogger({ namespace })` in the cli is a child of it, and the daemon and
+ * the RPC client commands pass it to pkc-js as `pkcOptions.logger.instance`. pkc-js's Node bundle carries its own copy
+ * of pkc-logger and `debug`, whose enable state is fixed when its chunk first loads; with the root injected, pkc-js
+ * logs through this package's `debug` instead, the one `setupDebugLogger` enables, whatever the module load order
+ * (issue #292). It also gives the daemon one buffer and one listener for its own, pkc-js's and the RPC server's lines.
+ */
+export function getCliLoggerRoot(): PKCLoggerInstance {
+    return (cliLoggerRoot ??= createLogger());
+}
+
+/**
+ * Creates the root with these options, before anything logs: pkc-logger sizes a root's buffer only when it creates it,
+ * and pkc-js accepts `logger.instance` or `logger.buffer`, not both. The daemon calls this with
+ * `--pkcOptions.logger.buffer`, then passes only the instance to pkc-js.
+ */
+export function initCliLoggerRoot(options: { buffer?: { maxBytes?: number } }): PKCLoggerInstance {
+    if (cliLoggerRoot) throw new Error("The cli's logger root already exists: initCliLoggerRoot must run before anything logs");
+    cliLoggerRoot = createLogger(options.buffer ? { buffer: options.buffer } : {});
+    return cliLoggerRoot;
+}
+
+type PKCLoggerFn = ((options: { namespace: string; tags?: Record<string, string | undefined> }) => PKCLoggerInstance) & {
+    enable: (namespaces: string) => void;
+    disable: () => void;
+    enabled: (namespaces: string) => boolean;
 };
+
+/** A child of the cli's logger root. Same call shape as pkc-logger's default export. */
+export const PKCLogger: PKCLoggerFn = Object.assign((options: { namespace: string; tags?: Record<string, string | undefined> }) => {
+    if (!options?.namespace) throw new Error("PKCLogger({ namespace }) requires a namespace");
+    return getCliLoggerRoot().child(options);
+}, {
+    enable: (namespaces: string) => PKCLoggerModule.enable(namespaces),
+    disable: () => PKCLoggerModule.disable(),
+    enabled: (namespaces: string) => PKCLoggerModule.enabled(namespaces)
+});
+
+export type PKCLoggerType = typeof PKCLogger;
+
+export const DEFAULT_DEBUG_NAMESPACE = "bitsocial*,pkc*,-pkc*trace";
 
 /**
  * Read _PKC_DEBUG / DEBUG env vars and configure the Logger instance.
@@ -18,27 +59,20 @@ export type PKCLoggerType = typeof PKCLogger & {
  * @param options.enableDefaultNamespace - If true, enable "bitsocial*,pkc*,-pkc*trace"
  *   when no DEBUG env is set (used by daemon). If false, only enable if user
  *   explicitly set DEBUG or _PKC_DEBUG (used by non-daemon commands).
+ * @param options.alwaysEnabled - namespaces appended to whatever is enabled (the daemon's stdout/stderr capture).
  */
 export function setupDebugLogger(
-    Logger: PKCLoggerType,
-    options: { enableDefaultNamespace?: boolean } = {}
-): { debugNamespace: string | undefined; debugDepth: number } {
+    Logger: Pick<PKCLoggerType, "enable">,
+    options: { enableDefaultNamespace?: boolean; alwaysEnabled?: string[] } = {}
+): { debugNamespace: string | undefined; enabledNamespaces: string | undefined } {
     const envDebug: string | undefined = process.env["_PKC_DEBUG"] || process.env["DEBUG"];
     const debugNamespace = envDebug === "0" || envDebug === "" ? undefined : envDebug;
 
-    const debugDepth = process.env["DEBUG_DEPTH"] ? parseInt(process.env["DEBUG_DEPTH"]) : 10;
-    Logger.inspectOpts = Logger.inspectOpts || {};
-    Logger.inspectOpts.depth = debugDepth;
+    const selected = debugNamespace ?? (options.enableDefaultNamespace ? DEFAULT_DEBUG_NAMESPACE : undefined);
+    const enabledNamespaces = [selected, ...(options.alwaysEnabled ?? [])].filter(Boolean).join(",") || undefined;
+    if (enabledNamespaces) Logger.enable(enabledNamespaces);
 
-    const defaultNamespace = "bitsocial*,pkc*,-pkc*trace";
-
-    if (debugNamespace) {
-        Logger.enable(debugNamespace);
-    } else if (options.enableDefaultNamespace) {
-        Logger.enable(defaultNamespace);
-    }
-
-    return { debugNamespace, debugDepth };
+    return { debugNamespace, enabledNamespaces };
 }
 
 export function getLanIpV4Address(): string | undefined {

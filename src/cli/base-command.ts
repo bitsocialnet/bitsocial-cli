@@ -1,7 +1,7 @@
 import { Command, Flags } from "@oclif/core";
 import defaults from "../common-utils/defaults.js";
 import PKC from "@pkcprotocol/pkc-js";
-import { PKCLogger, setupDebugLogger, type PKCLoggerType } from "../util.js";
+import { PKCLogger, getCliLoggerRoot, setupDebugLogger } from "../util.js";
 type PKCInstance = Awaited<ReturnType<typeof PKC>>;
 type PKCConnectOverride = (pkcRpcUrl: string) => Promise<PKCInstance>;
 
@@ -21,7 +21,7 @@ export abstract class BaseCommand extends Command {
 
     async init(): Promise<void> {
         await super.init();
-        setupDebugLogger(PKCLogger as PKCLoggerType, { enableDefaultNamespace: false });
+        setupDebugLogger(PKCLogger, { enableDefaultNamespace: false });
     }
 
     protected async _connectToPkcRpc(pkcRpcUrl: string): Promise<PKCInstance> {
@@ -29,7 +29,8 @@ export abstract class BaseCommand extends Command {
         if (connectOverride) {
             return connectOverride(pkcRpcUrl);
         }
-        const pkc = await PKC({ pkcRpcClientsOptions: [pkcRpcUrl] });
+        // The cli's logger root, so pkc-js's lines follow the DEBUG this command enabled (issue #292)
+        const pkc = await PKC({ pkcRpcClientsOptions: [pkcRpcUrl], logger: { instance: getCliLoggerRoot() } });
         const isAuthRequiredError = (err: unknown) =>
             Boolean(err && typeof err === "object" && "code" in err && err.code === "ERR_RPC_AUTH_REQUIRED");
         const errors: Error[] = [];

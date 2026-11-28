@@ -1,18 +1,21 @@
 import { Flags, Command } from "@oclif/core";
 import defaults from "../../common-utils/defaults.js";
-import fs from "fs";
 import fsPromise from "fs/promises";
 import path from "path";
+import { listDaemonLogFiles, type DaemonLogFile } from "../../common-utils/daemon-file-logger.js";
+import {
+    jsonLogEntry,
+    parseJsonlEntries,
+    parseLegacyEntries,
+    renderLogEntry,
+    type ReadLogEntry
+} from "../../common-utils/daemon-log-format.js";
 
-interface LogEntry {
-    timestamp: Date | null;
-    stream: "stdout" | "stderr" | null;
-    lines: string[];
-}
+const LEVELS = ["log", "error", "trace"] as const;
 
 export default class Logs extends Command {
     static override description =
-        "View the latest BitSocial daemon log file. By default dumps the full log and exits. Use --follow to stream new output in real-time (like tail -f).";
+        "View the latest BitSocial daemon log. By default prints the newest daemon run's log and exits. Use --follow to stream new output in real-time (like tail -f). Output has no colors unless --color is given, so it can be piped into grep; --json prints one JSON object per entry for jq.";
 
     static override flags = {
         follow: Flags.boolean({
@@ -40,14 +43,30 @@ export default class Logs extends Command {
             required: false
         }),
         stdout: Flags.boolean({
-            description: "Show only stdout log entries",
+            description: "Show only what the daemon printed to its terminal (stdout)",
             default: false,
             exclusive: ["stderr"]
         }),
         stderr: Flags.boolean({
-            description: "Show only stderr log entries (output of pkc-logger library)",
+            description: "Show only what the daemon did not print to its terminal (debug output and stderr)",
             default: false,
             exclusive: ["stdout"]
+        }),
+        level: Flags.string({
+            description: "Show only entries of this level. Can be given more than once",
+            options: [...LEVELS],
+            multiple: true
+        }),
+        json: Flags.boolean({
+            description:
+                "Print each entry as one JSON object ({ seq, time, level, namespace, msg, tags }), for filtering with jq",
+            default: false,
+            exclusive: ["color"]
+        }),
+        color: Flags.boolean({
+            description: "Color namespaces and errors (off by default, so piped output has no escape sequences)",
+            default: false,
+            exclusive: ["json"]
         })
     };
 
@@ -59,28 +78,39 @@ export default class Logs extends Command {
         "bitsocial logs --since 2026-01-02T13:23:37Z --until 2026-01-02T14:00:00Z",
         "bitsocial logs --since 1h -f",
         "bitsocial logs --stdout",
-        "bitsocial logs --stderr",
-        "bitsocial logs --stdout -f"
+        "bitsocial logs --level error",
+        "bitsocial logs --color | less -R",
+        {
+            description: "Lines of one community",
+            command: 'bitsocial logs | grep -F "publicKey=$PUBLIC_KEY"'
+        },
+        {
+            description: "Lines of one comment (by cid) or one challenge exchange (by signature)",
+            command: 'bitsocial logs | grep -F "cid=$CID"'
+        },
+        {
+            description: "Follow one community's lines as they arrive",
+            command: 'bitsocial logs -f -n 0 | grep --line-buffered -F "publicKey=$PUBLIC_KEY"'
+        },
+        {
+            description: "Errors of one community, stack traces included",
+            command: `bitsocial logs --json --level error | jq -r 'select(.tags.publicKey == "'"$PUBLIC_KEY"'") | .msg'`
+        }
     ];
 
-    private async _findLatestLogFile(logPath: string): Promise<string> {
-        let entries: fs.Dirent[];
+    /** The newest daemon run's files, in order. */
+    private async _findLatestRunFiles(logPath: string): Promise<DaemonLogFile[]> {
+        let files: DaemonLogFile[];
         try {
-            entries = await fsPromise.readdir(logPath, { withFileTypes: true });
+            files = await listDaemonLogFiles(logPath);
         } catch {
             this.error(`Log directory does not exist: ${logPath}\nHave you started the daemon yet?`);
         }
-
-        const logFiles = entries
-            .filter((entry) => entry.isFile() && entry.name.startsWith("bitsocial_cli_daemon_") && entry.name.endsWith(".log"))
-            .map((entry) => entry.name)
-            .sort();
-
-        if (logFiles.length === 0) {
+        if (files.length === 0) {
             this.error(`No log files found in ${logPath}\nHave you started the daemon yet?`);
         }
-
-        return path.join(logPath, logFiles[logFiles.length - 1]);
+        const newestStem = files[files.length - 1].stem;
+        return files.filter((file) => file.stem === newestStem);
     }
 
     _parseTimestamp(value: string): Date {
@@ -103,57 +133,11 @@ export default class Logs extends Command {
         return date;
     }
 
-    _extractTimestamp(line: string): Date | null {
-        const match = line.match(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\] /);
-        if (!match) return null;
-        return new Date(match[1]);
+    _parseEntries(content: string, format: DaemonLogFile["format"]): ReadLogEntry[] {
+        return format === "jsonl" ? parseJsonlEntries(content) : parseLegacyEntries(content);
     }
 
-    _extractStream(line: string): "stdout" | "stderr" | null {
-        const match = line.match(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[(stdout|stderr)\] /);
-        if (!match) return null;
-        return match[1] as "stdout" | "stderr";
-    }
-
-    _parseLogEntries(content: string): LogEntry[] {
-        const lines = content.split("\n");
-        const entries: LogEntry[] = [];
-
-        for (const line of lines) {
-            const timestamp = this._extractTimestamp(line);
-            if (timestamp !== null) {
-                // New timestamped entry
-                const stream = this._extractStream(line);
-                entries.push({ timestamp, stream, lines: [line] });
-            } else if (entries.length > 0) {
-                // Continuation line — belongs to the previous entry
-                entries[entries.length - 1].lines.push(line);
-            } else {
-                // Line before any timestamped entry (legacy/header)
-                entries.push({ timestamp: null, stream: null, lines: [line] });
-            }
-        }
-
-        return entries;
-    }
-
-    _filterEntries(entries: LogEntry[], since?: Date, until?: Date): LogEntry[] {
-        return entries.filter((entry) => {
-            if (entry.timestamp === null) {
-                // Legacy entries with no timestamp: exclude if --since is set, include otherwise
-                return !since;
-            }
-            if (since && entry.timestamp < since) return false;
-            if (until && entry.timestamp > until) return false;
-            return true;
-        });
-    }
-
-    _filterByStream(entries: LogEntry[], stream: "stdout" | "stderr"): LogEntry[] {
-        return entries.filter((entry) => entry.stream === stream);
-    }
-
-    _tailEntries(entries: LogEntry[], tailValue: string): LogEntry[] {
+    _tailEntries(entries: ReadLogEntry[], tailValue: string): ReadLogEntry[] {
         if (tailValue === "all") return entries;
         const n = parseInt(tailValue, 10);
         if (isNaN(n) || n < 0) {
@@ -166,213 +150,145 @@ export default class Logs extends Command {
     async run() {
         const { flags } = await this.parse(Logs);
         const logPath = flags.logPath ?? defaults.PKC_LOG_PATH;
-        const latestLogFile = await this._findLatestLogFile(logPath);
+        const runFiles = await this._findLatestRunFiles(logPath);
 
-        const since = flags.since ? this._parseTimestamp(flags.since) : undefined;
-        const until = flags.until ? this._parseTimestamp(flags.until) : undefined;
-        const streamFilter = flags.stdout ? "stdout" as const : flags.stderr ? "stderr" as const : undefined;
+        const since = flags.since ? this._parseTimestamp(flags.since).getTime() : undefined;
+        const until = flags.until ? this._parseTimestamp(flags.until).getTime() : undefined;
+        const streamFilter = flags.stdout ? ("stdout" as const) : flags.stderr ? ("stderr" as const) : undefined;
+        const levels = flags.level && flags.level.length > 0 ? new Set(flags.level) : undefined;
 
-        if (!flags.follow) {
-            const content = await fsPromise.readFile(latestLogFile, "utf-8");
-            const entries = this._parseLogEntries(content);
-            const filtered = this._filterEntries(entries, since, until);
-            const streamFiltered = streamFilter ? this._filterByStream(filtered, streamFilter) : filtered;
-            const tailed = this._tailEntries(streamFiltered, flags.tail);
-            const output = tailed.map((e) => e.lines.join("\n")).join("\n");
-            if (output) process.stdout.write(output + "\n");
-            return;
+        // --since and --until first, then --stdout/--stderr and --level, then -n
+        const filter = (entries: ReadLogEntry[]) =>
+            entries.filter((entry) => {
+                if (entry.time === null) {
+                    // Text before the first timestamp of an old file: only without --since
+                    if (since !== undefined) return false;
+                } else {
+                    if (since !== undefined && entry.time < since) return false;
+                    if (until !== undefined && entry.time > until) return false;
+                }
+                if (streamFilter && entry.stream !== streamFilter) return false;
+                if (levels && !levels.has(entry.level)) return false;
+                return true;
+            });
+        const format = (entry: ReadLogEntry) => (flags.json ? jsonLogEntry(entry) : renderLogEntry(entry, { color: flags.color }));
+        const print = (entries: ReadLogEntry[]) => {
+            if (entries.length > 0) process.stdout.write(entries.map(format).join("\n") + "\n");
+        };
+
+        // Read each file once, as bytes, so follow mode continues from exactly what was printed (issue #77). The daemon
+        // deletes a run's oldest files to stay within its limits, so one listed above may be gone by now: skip it.
+        const read = await Promise.all(
+            runFiles.map(async (file) => {
+                try {
+                    return { file, content: await fsPromise.readFile(file.path) };
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+                    throw error;
+                }
+            })
+        );
+        const readFiles = read.filter((item): item is NonNullable<typeof item> => item !== undefined);
+        if (readFiles.length === 0) this.error(`No log files found in ${logPath}\nHave you started the daemon yet?`);
+        // In follow mode the text after the last file's last newline is an entry the daemon is still writing: it is
+        // kept back and printed with the rest of it
+        let initialPending = "";
+        const texts = readFiles.map(({ content }) => content.toString("utf-8"));
+        if (flags.follow) {
+            const last = texts[texts.length - 1];
+            const lastNewline = last.lastIndexOf("\n");
+            initialPending = last.slice(lastNewline + 1);
+            texts[texts.length - 1] = last.slice(0, lastNewline + 1);
         }
+        const existing = readFiles.flatMap(({ file }, i) => this._parseEntries(texts[i], file.format));
+        print(this._tailEntries(filter(existing), flags.tail));
 
-        // Follow mode: dump existing content (filtered + tailed) then watch for new data
-        let currentLogFile = latestLogFile;
+        if (!flags.follow) return;
 
-        const existingBytes = await fsPromise.readFile(currentLogFile);
-        const existingContent = existingBytes.toString("utf-8");
-        // Anchor the follow offset to exactly the bytes we just read, NOT a separate
-        // fsPromise.stat() taken afterwards. A later stat is racy: any append landing between
-        // this read and the stat is skipped (position jumps past it) yet was never in the dump
-        // above, so follow mode silently drops those lines. Under load that window widens — this
-        // was the cause of the intermittent CI failure where an appended line was never surfaced
-        // (issue #77). The raw byte count (not string length) because position indexes bytes in the file.
-        let position = existingBytes.length;
-        let pendingBuffer = "";
+        // Follow mode. The daemon only appends to a file, then moves on to the next one (rotation, or a new run), so
+        // each file is read from an offset to its end, then the next one from its start.
+        let current = readFiles[readFiles.length - 1].file;
+        let position = readFiles[readFiles.length - 1].content.length;
+        let pendingBuffer = initialPending;
+        // Set when a later file shows up. The switch waits one more poll, so the daemon's last writes to this file,
+        // which its stream flushes after opening the next one, are read first.
+        let nextFileSeen: DaemonLogFile | undefined;
 
-        const entries = this._parseLogEntries(existingContent);
-        const filtered = this._filterEntries(entries, since, until);
-        const streamFiltered = streamFilter ? this._filterByStream(filtered, streamFilter) : filtered;
-        const tailed = this._tailEntries(streamFiltered, flags.tail);
-        const initialOutput = tailed.map((e) => e.lines.join("\n")).join("\n");
-        if (initialOutput) process.stdout.write(initialOutput + "\n");
-
-        // Watch for new data by reading directly from `position`. We intentionally do
-        // NOT gate on fsPromise.stat().size — on Windows + NTFS, stat() returns a stale
-        // size for a short window after another process appends, which causes the gate
-        // to miss new bytes. read() sees the true file end at syscall time.
         const READ_BUF_SIZE = 64 * 1024;
         const readBuf = Buffer.alloc(READ_BUF_SIZE);
 
-        // The daemon trims its log in place: once it has written 20MB it rewrites the same file to its last 15MB
-        // (daemon-file-logger.ts), so the bytes we read move to an earlier offset. By the next poll the file can end
-        // before `position`, or already be longer again with the lines logged during the trim. `anchor` holds the last
-        // bytes we read, which must sit right before `position`. When they do not, the trimmed file still has them, so we
-        // continue right after them and neither skip nor repeat a line.
-        const ANCHOR_BYTES = 4096;
-        let anchor = Buffer.from(existingBytes.subarray(-ANCHOR_BYTES));
-        const anchorCheckBuf = Buffer.alloc(ANCHOR_BYTES);
-        const keepAnchor = (bytes: Buffer) => {
-            anchor = Buffer.from(Buffer.concat([anchor, bytes]).subarray(-ANCHOR_BYTES));
-        };
-        let shrunkWithoutAnchor = false;
-        const followShrunkFile = async () => {
-            const content = await fsPromise.readFile(currentLogFile);
-            const anchorAt = anchor.length > 0 ? content.lastIndexOf(anchor) : -1;
-            if (anchorAt >= 0) {
-                position = anchorAt + anchor.length;
-                shrunkWithoutAnchor = false;
-                return;
-            }
-            // The file was emptied or replaced, or a trim is still rewriting it. Only the second poll in a row that
-            // finds no anchor follows the file from its start, so a trim caught halfway does not reprint the file.
-            if (!shrunkWithoutAnchor) {
-                shrunkWithoutAnchor = true;
-                return;
-            }
-            shrunkWithoutAnchor = false;
-            position = 0;
-            pendingBuffer = "";
-            anchor = Buffer.alloc(0);
-            process.stderr.write(`\n--- log file was truncated, following it from its start ---\n\n`);
+        const printChunk = (text: string) => {
+            // An old text file's entry can span lines; the whole chunk is parsed together
+            print(filter(this._parseEntries(text, current.format)));
         };
 
+        // Reads from `position` with read(), not gated on stat().size: on Windows + NTFS stat() returns a stale size for
+        // a short time after another process appends, and read() sees the real end
         const readNewData = async () => {
             let fd: fsPromise.FileHandle | undefined;
             try {
-                fd = await fsPromise.open(currentLogFile, "r");
-                if (anchor.length > 0) {
-                    // read(), unlike stat(), sees the file's real end on Windows too (see above)
-                    const { bytesRead } = await fd.read(anchorCheckBuf, 0, anchor.length, position - anchor.length);
-                    if (bytesRead < anchor.length || !anchorCheckBuf.subarray(0, anchor.length).equals(anchor)) {
-                        await followShrunkFile();
-                        return;
-                    }
+                fd = await fsPromise.open(current.path, "r");
+                const size = (await fd.stat()).size;
+                if (size < position) {
+                    // Only an old daemon (text log, trimmed in place) or something other than the daemon shrinks a file
+                    position = 0;
+                    pendingBuffer = "";
+                    process.stderr.write(`\n--- log file was truncated, following it from its start ---\n\n`);
                 }
-                shrunkWithoutAnchor = false;
                 const readChunks: Buffer[] = [];
-                let readPosition = position;
                 while (true) {
-                    const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, readPosition);
+                    const { bytesRead } = await fd.read(readBuf, 0, readBuf.length, position);
                     if (bytesRead === 0) break;
-                    readPosition += bytesRead;
+                    position += bytesRead;
                     readChunks.push(Buffer.from(readBuf.subarray(0, bytesRead)));
                     if (bytesRead < readBuf.length) break;
                 }
                 if (readChunks.length === 0) return;
-                if (anchor.length > 0) {
-                    // A trim can land between the check above and these reads, or between two of them, with the file
-                    // already longer than `position` again. The bytes just read are then not the ones that follow
-                    // what was printed. Only when the anchor still sits before `position` after the reads did the
-                    // file keep its layout throughout; otherwise drop them and find the anchor in the trimmed file.
-                    const { bytesRead } = await fd.read(anchorCheckBuf, 0, anchor.length, position - anchor.length);
-                    if (bytesRead < anchor.length || !anchorCheckBuf.subarray(0, anchor.length).equals(anchor)) {
-                        await followShrunkFile();
-                        return;
-                    }
-                }
-                const readBytes = Buffer.concat(readChunks);
-                position = readPosition;
-                keepAnchor(readBytes);
-                const chunk = readBytes.toString("utf-8");
-
-                const combined = pendingBuffer + chunk;
+                const combined = pendingBuffer + Buffer.concat(readChunks).toString("utf-8");
                 const lastNewline = combined.lastIndexOf("\n");
                 if (lastNewline === -1) {
                     pendingBuffer = combined;
                     return;
                 }
                 pendingBuffer = combined.slice(lastNewline + 1);
-                const completeText = combined.slice(0, lastNewline + 1);
-
-                if (!since && !until && !streamFilter) {
-                    // No filtering — pass through directly
-                    process.stdout.write(completeText);
-                } else {
-                    const newEntries = this._parseLogEntries(completeText.replace(/\n$/, ""));
-                    const filteredNew = this._filterEntries(newEntries, since, until);
-                    const streamFilteredNew = streamFilter ? this._filterByStream(filteredNew, streamFilter) : filteredNew;
-                    const output = streamFilteredNew.map((e) => e.lines.join("\n")).join("\n");
-                    if (output) process.stdout.write(output + "\n");
-                }
+                printChunk(combined.slice(0, lastNewline));
             } catch {
-                // File may have been rotated or deleted
+                // The file may have been deleted to stay within the daemon's log limits
             } finally {
                 if (fd) await fd.close().catch(() => {});
             }
         };
 
-        // Periodically check if a newer log file has appeared (e.g. after daemon restart)
-        const checkForNewLogFile = async () => {
-            try {
-                const newestFile = await this._findLatestLogFile(logPath);
-                if (newestFile === currentLogFile) return;
+        const findNextFile = async (): Promise<DaemonLogFile | undefined> => {
+            const files = await listDaemonLogFiles(logPath).catch(() => [] as DaemonLogFile[]);
+            return files.find((file) => file.stem > current.stem || (file.stem === current.stem && file.part > current.part));
+        };
 
-                // Read the new file before switching to it, and anchor the offset to the bytes read, as for the initial
-                // dump: an offset from a later stat() skips whatever was appended in between (issue #77)
-                const newBytes = await fsPromise.readFile(newestFile);
-
-                // Flush any remaining partial line from old file
-                if (pendingBuffer) {
-                    if (!since && !until && !streamFilter) {
-                        process.stdout.write(pendingBuffer + "\n");
-                    } else {
-                        const pbEntries = this._parseLogEntries(pendingBuffer);
-                        const pbFiltered = this._filterEntries(pbEntries, since, until);
-                        const pbStreamFiltered = streamFilter ? this._filterByStream(pbFiltered, streamFilter) : pbFiltered;
-                        const pbOutput = pbStreamFiltered.map((e) => e.lines.join("\n")).join("\n");
-                        if (pbOutput) process.stdout.write(pbOutput + "\n");
-                    }
-                }
-
-                // Switch in one synchronous step, so the file, the offset and the anchor always agree
-                currentLogFile = newestFile;
-                position = newBytes.length;
-                pendingBuffer = "";
-                anchor = Buffer.from(newBytes.subarray(-ANCHOR_BYTES));
-                shrunkWithoutAnchor = false;
-
-                process.stderr.write(`\n--- switched to new log file: ${path.basename(newestFile)} ---\n\n`);
-
-                // Output entire new file content (with filters, no tail limit)
-                const newContent = newBytes.toString("utf-8");
-                if (newContent) {
-                    if (!since && !until && !streamFilter) {
-                        process.stdout.write(newContent);
-                    } else {
-                        const newEntries = this._parseLogEntries(newContent.replace(/\n$/, ""));
-                        const filteredNew = this._filterEntries(newEntries, since, until);
-                        const streamFilteredNew = streamFilter
-                            ? this._filterByStream(filteredNew, streamFilter)
-                            : filteredNew;
-                        const output = streamFilteredNew.map((e) => e.lines.join("\n")).join("\n");
-                        if (output) process.stdout.write(output + "\n");
-                    }
-                }
-            } catch {
-                // Directory listing failed or file disappeared — retry next cycle
-            }
+        const switchToNextFile = (next: DaemonLogFile) => {
+            if (pendingBuffer) printChunk(pendingBuffer);
+            const newRun = next.stem !== current.stem;
+            current = next;
+            position = 0;
+            pendingBuffer = "";
+            if (newRun) process.stderr.write(`\n--- switched to new log file: ${path.basename(next.path)} ---\n\n`);
         };
 
         // Userspace polling instead of fs.watchFile — libuv's uv_fs_poll_t doesn't
         // reliably notify on cross-process appends on Windows (see nodejs/node#36888).
         let polling = true;
         let pollTimer: NodeJS.Timeout | null = null;
-        let pollCount = 0;
         const pollLoop = async () => {
             if (!polling) return;
             try {
                 await readNewData();
-                // Every 10th poll (~3s) look for a newer log file. In this loop rather than on its own timer, so a read
-                // never runs halfway through a switch, with the new file and the old file's offset
-                if (++pollCount % 10 === 0) await checkForNewLogFile();
+                if (nextFileSeen) {
+                    // Read this file to its end once more before leaving it, in this loop so a read never runs halfway
+                    // through a switch
+                    switchToNextFile(nextFileSeen);
+                    nextFileSeen = undefined;
+                    await readNewData();
+                }
+                nextFileSeen = await findNextFile();
             } finally {
                 if (polling) pollTimer = setTimeout(pollLoop, 300);
             }

@@ -8,6 +8,8 @@
 | --- | --- | --- |
 | `--pkcRpcUrl` | `ws://localhost:9138` | Port the RPC server and web UIs listen on. Only the port is used to bind, see [RPC server](#rpc-server-auth-key-and-web-uis) |
 | `--logPath` | the platform log dir | Directory for the daemon's log files, see [logs.md](logs.md) |
+| `--logMaxFileSize` | `20` | Megabytes at which the daemon moves on to a new log file, see [logs.md](logs.md#where-log-files-are) |
+| `--logMaxTotalSize` | `200` | Megabytes all log files in `--logPath` may take together; the oldest are deleted beyond it |
 | `--chainProviderUrls` | six public Ethereum RPCs (`src/common-utils/resolvers.ts`) | RPC URLs for `.bso` name resolution. Repeat the flag for several |
 | `--[no-]enableIpfsGc` | on | Garbage-collect the kubo repo periodically, see [kubo.md](kubo.md#garbage-collection) |
 | `--ipfsGcIntervalMinutes` | `60` | How often |
@@ -93,7 +95,7 @@ Reachability adds TCP 80, TCP 443, UDP 443 and a loopback WebSocket port; see [r
 | `PKC_RPC_AUTH_KEY` | Fixed RPC auth key |
 | `KUBO_RPC_URL`, `IPFS_GATEWAY_URL` | kubo endpoints, see [kubo.md](kubo.md#which-endpoints-the-daemon-uses) |
 | `IPFS_PATH` | kubo repo directory, instead of `<dataPath>/.bitsocial-cli.ipfs` |
-| `DEBUG`, `DEBUG_DEPTH` | Log namespaces and object depth, see [logs.md](logs.md#choosing-what-is-logged) |
+| `DEBUG` | Log namespaces, see [logs.md](logs.md#choosing-what-is-logged) |
 | `XDG_DATA_HOME`, `XDG_STATE_HOME` | On Linux, move the default data and log dirs, see [data-paths.md](data-paths.md) |
 
 Prefer flags where both exist. New daemon settings are added as flags, not environment variables.
@@ -117,12 +119,14 @@ It allows itself up to 120 seconds. A second signal force-quits at once (exit co
 
 ## Running a second daemon
 
-Give it its own RPC port, data path and kubo ports:
+Give it its own RPC port, data path, log directory and kubo ports:
 
 ```bash
 KUBO_RPC_URL=http://127.0.0.1:50029/api/v0 IPFS_GATEWAY_URL=http://127.0.0.1:6483 \
-  bitsocial daemon --pkcRpcUrl ws://localhost:9139 --pkcOptions.dataPath /path/to/other-data
+  bitsocial daemon --pkcRpcUrl ws://localhost:9139 --pkcOptions.dataPath /path/to/other-data --logPath /path/to/other-logs
 ```
+
+The log directory matters: each daemon keeps its directory within `--logMaxTotalSize` by deleting the oldest files in it, and would delete the other daemon's files, including the one it is writing. Read its log with `bitsocial logs --logPath /path/to/other-logs`.
 
 The two env vars shape the new kubo repo's config when it is first created. The swarm port is not covered by them: the first start creates the repo and then fails because 4001 is taken. Change `Addresses.Swarm` in `<dataPath>/.bitsocial-cli.ipfs/config` and start again. Other commands reach the second daemon with `--pkcRpcUrl ws://localhost:9139`.
 

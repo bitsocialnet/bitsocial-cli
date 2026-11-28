@@ -308,7 +308,7 @@ export async function startKuboNode(
     // It must NOT live inside the new Promise() executor below: an async executor swallows
     // throws as unhandledRejections and the promise never settles, which wedges the daemon's
     // pendingKuboStart tracking and hangs its shutdown (issue #70).
-    const log = PKCLogger("bitsocial-cli:ipfs:startKuboNode");
+    const log = PKCLogger({ namespace: "bitsocial-cli:ipfs:startKuboNode" });
     const ipfsDataPath = resolveKuboRepoPath(dataPath);
     await fs.promises.mkdir(ipfsDataPath, { recursive: true });
     const ipfsConfigPath = path.join(ipfsDataPath, "config");

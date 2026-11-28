@@ -114,12 +114,12 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
             `daemon stderr (tail): ${tailOf(daemonProcess?.capturedStderr ?? "<none>")}`
         ];
         try {
-            const logFiles = (await fsPromise.readdir(logDir)).filter((f) => f.endsWith(".log"));
+            const logFiles = (await fsPromise.readdir(logDir)).filter((f) => f.endsWith(".jsonl"));
             for (const logFile of logFiles) {
                 const content = await fsPromise.readFile(path.join(logDir, logFile), "utf8");
                 parts.push(`daemon log ${logFile} (tail): ${tailOf(content)}`);
             }
-            if (logFiles.length === 0) parts.push(`daemon log dir ${logDir} contains no .log files`);
+            if (logFiles.length === 0) parts.push(`daemon log dir ${logDir} contains no .jsonl files`);
         } catch (e) {
             parts.push(`failed to read daemon log dir ${logDir}: ${e}`);
         }
@@ -138,7 +138,7 @@ describe("CLI commands complete within 10s (real pkc instance)", () => {
         // Wait for log file to appear
         await waitForCondition(async () => {
             const files = await fsPromise.readdir(logDir);
-            return files.some((f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".log"));
+            return files.some((f) => f.startsWith("bitsocial_cli_daemon_") && f.endsWith(".jsonl"));
         }, 10000, 500);
 
         // Wait for RPC WebSocket to accept connections

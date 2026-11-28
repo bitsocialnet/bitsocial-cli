@@ -11,6 +11,7 @@ import { loadChallengesIntoPKC, CHALLENGE_PACKAGE_KIND } from "../challenge-pack
 import { loadPageSortsIntoPKC, PAGE_SORT_PACKAGE_KIND } from "../page-sort-packages/page-sort-utils.js";
 import { formatPackageNameVersion, type InstalledPackage, type PackageKind } from "../common-utils/package-registry.js";
 import { whyWebuiDirDoesNotMatchPins, type WebuiPin } from "./release-manifest.js";
+import { loggableNameResolvers } from "../common-utils/resolvers.js";
 
 const webuiDescriptions: Record<string, string> = {
     seedit: "Similar to old reddit UI",
@@ -85,7 +86,7 @@ export async function startDaemonServer(
     webuiSource?: { webuisDir: string; pins: WebuiPin[] }
 ) {
     // Start pkc-js RPC
-    const log = PKCLogger("bitsocial-cli:daemon:startDaemonServer");
+    const log = PKCLogger({ namespace: "bitsocial-cli:daemon:startDaemonServer" });
     const webuiExpressApp = express();
     // GET /exports/<exportId> is streamed by pkc-js's own request listener, attached to this same
     // http.Server inside PKCWsServer. Express must stay silent for those paths — its catch-all 404
@@ -122,7 +123,7 @@ export async function startDaemonServer(
 
     // Will add ability to edit later, but it's hard coded for now
 
-    log("Will be passing pkc options to RPC server", pkcOptions);
+    log("Will be passing pkc options to RPC server", { ...pkcOptions, nameResolvers: loggableNameResolvers(pkcOptions.nameResolvers) });
 
     const rpcServer = await PKCRpc.default.PKCWsServer({
         server: httpServer,

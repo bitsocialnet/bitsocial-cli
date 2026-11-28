@@ -15,6 +15,7 @@ vi.mock("../../src/util.js", () => {
     const noopLogger = Object.assign(() => () => {}, { disable: () => {}, enable: () => {}, enabled: () => false });
     return {
         PKCLogger: noopLogger,
+        getCliLoggerRoot: () => noopLogger,
         setupDebugLogger: vi.fn()
     };
 });

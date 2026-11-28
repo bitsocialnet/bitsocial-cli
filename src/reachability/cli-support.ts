@@ -55,7 +55,7 @@ export async function resolveNodePaths(dataPath: string) {
 
 // A running daemon holds the repo lock, and `ipfs init` errors out on it, so only init a missing repo.
 export async function ensureKuboRepo(dataPath: string, kuboRpcUrl: URL) {
-    const log = PKCLogger("bitsocial-cli:reachability");
+    const log = PKCLogger({ namespace: "bitsocial-cli:reachability" });
     if (!(await loadKuboConfigFile(dataPath))) await initKuboRepoIfNeeded(log, dataPath, kuboRpcUrl, defaults.IPFS_GATEWAY_URL);
 }
 
