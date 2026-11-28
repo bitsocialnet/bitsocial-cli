@@ -21,7 +21,8 @@ const readEntries = readDaemonLogEntries;
 
 // Loaded into the daemon process: once the daemon has installed its stdout/stderr capture, writes to both the way a
 // library would, outside any logger
-const WRITE_MARKERS = `const originalStderrWrite = process.stderr.write; let i = 0;
+const WRITE_MARKERS = `import util from "node:util";
+const originalStderrWrite = process.stderr.write; let i = 0;
 const originalStdoutWrite = process.stdout.write;
 process.stdout.write = function (chunk, ...rest) {
     if (String(chunk).includes("Communities in data path")) setTimeout(() => console.log("LATE_STDOUT_MARKER"), 1000).unref();
@@ -31,6 +32,7 @@ const timer = setInterval(() => {
     if (process.stderr.write === originalStderrWrite) return;
     console.log("STDOUT_CAPTURE_MARKER 100%s done");
     console.error("STDERR_CAPTURE_MARKER");
+    process.stdout.write("\\x1b[32mCOLORED_STDOUT_MARKER\\x1b[39m " + util.formatWithOptions({ colors: true }, ["a", { b: 1 }]) + "\\n");
     if (++i >= 40) clearInterval(timer);
 }, 250); timer.unref();`;
 
@@ -99,6 +101,13 @@ describe("daemon logs pkc-js through the cli's logger root (default namespaces)"
         // "%s" in the text is not a placeholder
         expect(entry.msg).toBe("STDOUT_CAPTURE_MARKER 100%s done");
         expect(daemonProcess.capturedStdout).toContain("STDOUT_CAPTURE_MARKER");
+    });
+
+    // Node colors objects in console output on a terminal; the file and bitsocial logs keep no escapes
+    it("stores captured stdout without color escapes", async () => {
+        await waitForCondition(async () => (await readEntries(logDir)).some((entry) => entry.msg.includes("COLORED_STDOUT_MARKER")), 20000, 250);
+        const entry = (await readEntries(logDir)).find((e) => e.msg.includes("COLORED_STDOUT_MARKER"))!;
+        expect(entry.msg).toBe("COLORED_STDOUT_MARKER [ 'a', { b: 1 } ]");
     });
 
     // The helper stopped reading stdout once the daemon was ready, so anything printed after that was missing from
@@ -258,5 +267,32 @@ describe("daemon with --pkcOptions.logger.buffer.maxBytes", () => {
     it("starts", () => {
         expect(startError).toBeUndefined();
         expect(daemonProcess).toBeDefined();
+    });
+});
+
+// DEBUG may enable only the error-level namespace of the stderr capture; pkc-logger then logs its lines under it
+describe("daemon with only bitsocial-cli:stderr:error enabled for the stderr capture", () => {
+    let daemonProcess: ManagedChildProcess;
+    let logDir: string;
+
+    beforeAll(async () => {
+        const started = await startDaemon({
+            DEBUG: "pkc*,-pkc*trace,bitsocial-cli:stderr:error,-bitsocial-cli:stderr",
+            _PKC_DEBUG: "",
+            NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(WRITE_MARKERS)}`
+        });
+        logDir = started.logDir;
+        daemonProcess = started.daemon.daemonProcess;
+    });
+
+    afterAll(async () => {
+        await stopPkcDaemon(daemonProcess);
+    });
+
+    it("writes what reaches stderr to the log file and keeps it off the terminal", async () => {
+        await waitForCondition(async () => (await readEntries(logDir)).some((entry) => entry.msg.includes("STDERR_CAPTURE_MARKER")), 15000, 250);
+        const entry = (await readEntries(logDir)).find((e) => e.msg.includes("STDERR_CAPTURE_MARKER"));
+        expect(entry).toMatchObject({ namespace: "bitsocial-cli:stderr", level: "error" });
+        expect(daemonProcess.capturedStderr).not.toContain("STDERR_CAPTURE_MARKER");
     });
 });

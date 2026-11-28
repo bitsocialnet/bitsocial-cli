@@ -128,6 +128,18 @@ describe("redactProviderUrl", () => {
         expect(redactProviderUrl("not a url SECRET")).toBe("[invalid URL]");
     });
 
+    it("redacts WebSocket provider URLs", () => {
+        expect(redactProviderUrl("wss://mainnet.infura.io/ws/v3/SECRET")).toBe("wss://mainnet.infura.io/…");
+        expect(loggableNameResolvers([{ key: "bso-wss://mainnet.infura.io/ws/v3/SECRET" }, { key: "bso-ws://127.0.0.1:8546/SECRET" }])).toEqual([
+            "bso-wss://mainnet.infura.io/…",
+            "bso-ws://127.0.0.1:8546/…"
+        ]);
+    });
+
+    it("redacts all of a provider URL that contains a comma", () => {
+        expect(loggableNameResolvers([{ key: "bso-https://rpc.example/v1,SECRET?key=a,SECRET2" }])).toEqual(["bso-https://rpc.example/…"]);
+    });
+
     it("redacts the provider URL inside BSO resolver keys", () => {
         expect(loggableNameResolvers([{ key: "bso-https://mainnet.infura.io/v3/SECRET" }, { key: "custom" }])).toEqual([
             "bso-https://mainnet.infura.io/…",

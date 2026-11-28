@@ -889,4 +889,24 @@ fsp.readFile = async (file, ...rest) => {
         expect(result.stdout).toContain("SURVIVING_PART_MARKER");
         expect(result.stdout).not.toContain("DELETED_PART_MARKER");
     });
+    // The first read can end partway through the entry the daemon is writing; follow mode must print it once complete
+    it("-f prints an entry whose first part was already in the file when it started", async () => {
+        const { logDir } = await createLogDir();
+        const file = path.join(logDir, "bitsocial_cli_daemon_2026-07-05T00-00-00.000Z.jsonl");
+        const split = jsonlEntry("2026-07-05T00:00:01.000Z", "t:ns", "SPLIT_ENTRY_MARKER");
+        const cut = Math.floor(split.length / 2);
+        await fsPromise.writeFile(file, jsonlEntry("2026-07-05T00:00:00.000Z", "t:ns", "READY_MARKER") + "\n" + split.slice(0, cut));
+        let appended = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            onChunk: (stdout) => {
+                if (appended || !stdout.includes("READY_MARKER")) return;
+                appended = true;
+                void fsPromise.appendFile(file, split.slice(cut) + "\n" + jsonlEntry("2026-07-05T00:00:02.000Z", "t:ns", "AFTER_MARKER") + "\n");
+            },
+            doneWhen: (stdout) => stdout.includes("AFTER_MARKER"),
+            graceMs: 500
+        });
+        expect(result.stdout.split("SPLIT_ENTRY_MARKER").length - 1).toBe(1);
+        expect(result.stdout.indexOf("SPLIT_ENTRY_MARKER")).toBeLessThan(result.stdout.indexOf("AFTER_MARKER"));
+    });
 });

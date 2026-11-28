@@ -11,7 +11,7 @@ The daemon writes everything it logs, plus everything it prints, to log files as
 | Windows | `%LOCALAPPDATA%\bitsocial\Log` |
 | Docker image | `/logs/bitsocial` |
 
-`bitsocial daemon --logPath <dir>` uses another directory. The log directory does not follow `--pkcOptions.dataPath`.
+`bitsocial daemon --logPath <dir>` uses another directory. The log directory does not follow `--pkcOptions.dataPath`. Two daemons running at once need different log directories, since each deletes old files in its own (see [daemon.md](daemon.md#running-a-second-daemon)).
 
 - **One run, one or more files:** a daemon start writes `bitsocial_cli_daemon_<start time>.jsonl`, e.g. `bitsocial_cli_daemon_2026-11-13T13-25-40.108Z.jsonl`. When that file would grow past `--logMaxFileSize` (20 MB by default), the daemon moves on to `<same name>.1.jsonl`, then `.2.jsonl`, and so on. A file is only ever appended to.
 - **At most 200 MB in all:** once the files in the directory together exceed `--logMaxTotalSize` (200 MB by default), the daemon deletes the oldest ones, whole files only, never the one it is writing. Disk use therefore stays under that limit plus one file.

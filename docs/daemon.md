@@ -119,12 +119,14 @@ It allows itself up to 120 seconds. A second signal force-quits at once (exit co
 
 ## Running a second daemon
 
-Give it its own RPC port, data path and kubo ports:
+Give it its own RPC port, data path, log directory and kubo ports:
 
 ```bash
 KUBO_RPC_URL=http://127.0.0.1:50029/api/v0 IPFS_GATEWAY_URL=http://127.0.0.1:6483 \
-  bitsocial daemon --pkcRpcUrl ws://localhost:9139 --pkcOptions.dataPath /path/to/other-data
+  bitsocial daemon --pkcRpcUrl ws://localhost:9139 --pkcOptions.dataPath /path/to/other-data --logPath /path/to/other-logs
 ```
+
+The log directory matters: each daemon keeps its directory within `--logMaxTotalSize` by deleting the oldest files in it, and would delete the other daemon's files, including the one it is writing. Read its log with `bitsocial logs --logPath /path/to/other-logs`.
 
 The two env vars shape the new kubo repo's config when it is first created. The swarm port is not covered by them: the first start creates the repo and then fails because 4001 is taken. Change `Addresses.Swarm` in `<dataPath>/.bitsocial-cli.ipfs/config` and start again. Other commands reach the second daemon with `--pkcRpcUrl ws://localhost:9139`.
 

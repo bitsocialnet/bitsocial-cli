@@ -37,11 +37,11 @@ import {
     type DaemonLogEntry
 } from "../../common-utils/daemon-file-logger.js";
 import { renderLogEntry, streamOfNamespace, STDOUT_NAMESPACE, STDERR_NAMESPACE } from "../../common-utils/daemon-log-format.js";
+import { createLogEntryWriter, stackIsInModuleDir } from "../../common-utils/daemon-log-capture.js";
 import PKCLoggerModule, { formatLogArgs } from "@pkcprotocol/pkc-logger";
 
 import { EOL } from "node:os";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 //@ts-expect-error
 import type { InputPKCOptions } from "@pkcprotocol/pkc-js/dist/node/types.js";
 //@ts-expect-error
@@ -195,18 +195,13 @@ export default class Daemon extends Command {
         const stderrWrite = process.stderr.write.bind(process.stderr);
 
         // If the file cannot take an entry, print it rather than lose it
-        const writeEntry = (entry: DaemonLogEntry) => {
-            if (fileLogger.writeEntry(entry)) return;
-            const text = renderLogEntry({ time: entry.time, level: entry.level, namespace: entry.namespace, stream: streamOfNamespace(entry.namespace), entry }) + EOL;
-            stderrWrite(text);
-        };
+        const writeEntry = createLogEntryWriter({ writeToFile: (entry) => fileLogger.writeEntry(entry), print: (text) => stderrWrite(text) });
 
         // pkc-logger prints each enabled line through `debug` before it hands the entry to listeners, which write it to
         // the file, so `debug` prints nothing itself (its stderr output would reach the capture below a second time).
         // Other libraries in the process (oclif, acme-client...) share this `debug` copy and have no listener: their
         // enabled lines are written to the file here, under their own namespace.
         const pkcLoggerEntry = import.meta.resolve("@pkcprotocol/pkc-logger");
-        const pkcLoggerDir = path.dirname(fileURLToPath(pkcLoggerEntry));
         const debugModule = createRequire(pkcLoggerEntry)("debug");
         // Formatting is pkc-logger's (formatLogArgs below), so debug adds no prefix, color or +ms suffix
         debugModule.formatArgs = () => {};
@@ -215,7 +210,7 @@ export default class Daemon extends Command {
         debugModule.log = function (this: { namespace: string }, ...args: unknown[]) {
             let ownedByPkcLogger = printedByPkcLogger.get(this.namespace);
             if (ownedByPkcLogger === undefined) {
-                ownedByPkcLogger = (new Error().stack ?? "").includes(pkcLoggerDir);
+                ownedByPkcLogger = stackIsInModuleDir(new Error().stack ?? "", pkcLoggerEntry);
                 printedByPkcLogger.set(this.namespace, ownedByPkcLogger);
             }
             if (ownedByPkcLogger) return;
@@ -226,7 +221,12 @@ export default class Daemon extends Command {
             }
         };
         const root = getCliLoggerRoot();
-        root.addListener(writeEntry);
+        // Set by every entry the root delivers; the capture below reads it right after logging, which is synchronous
+        let delivered = false;
+        root.addListener((entry) => {
+            delivered = true;
+            writeEntry(entry);
+        });
         // Code that logs through pkc-logger's default export (no instance in scope) uses another root, whose seq
         // numbers mean nothing next to this root's, so those entries are written without one
         PKCLoggerModule.addListener((entry) => writeEntry({ ...entry, seq: undefined }));
@@ -234,33 +234,33 @@ export default class Daemon extends Command {
         const asString = (data: string | Uint8Array) => (typeof data === "string" ? data : Buffer.from(data).toString());
         const stdoutLog = PKCLogger({ namespace: STDOUT_NAMESPACE });
         const stderrLog = PKCLogger({ namespace: STDERR_NAMESPACE });
-        // False when nothing was logged, so the caller can write the text itself
-        const capture = (namespace: string, logFn: (...args: unknown[]) => void, data: string | Uint8Array) => {
+        // False when nothing was logged, so the caller can write the text itself. DEBUG can exclude the namespace
+        // ("-bitsocial*" wins over the one the daemon appends), and pkc-logger then drops the line without telling, so
+        // what counts is whether the root delivered an entry
+        const capture = (logFn: (...args: unknown[]) => void, data: string | Uint8Array) => {
             const text = asString(data).replace(/\r?\n$/, "");
             if (text.trim().length === 0) return true;
-            // DEBUG can exclude the namespace ("-bitsocial*" wins over the one the daemon appends); pkc-logger then
-            // drops the line without telling
-            if (!PKCLogger.enabled(namespace)) return false;
+            delivered = false;
             try {
                 // "%s", so a "%" in the text is not read as a placeholder
                 logFn("%s", text);
-                return true;
             } catch {
                 return false;
             }
+            return delivered;
         };
 
         process.stdout.write = (...args) => {
             //@ts-expect-error
             const res = stdoutWrite(...args);
-            capture(STDOUT_NAMESPACE, stdoutLog, args[0]);
+            capture(stdoutLog, args[0]);
             return res;
         };
 
         // stderr goes to the log file only, so the terminal shows what the operator must see (stdout) and real errors.
         // What the file does not take is printed.
         process.stderr.write = (...args) => {
-            if (capture(STDERR_NAMESPACE, stderrLog.error, args[0])) return true;
+            if (capture(stderrLog.error, args[0])) return true;
             //@ts-expect-error
             return stderrWrite(...args);
         };

@@ -29,12 +29,20 @@ export function redactProviderUrl(provider: string): string {
     return hasMore ? `${url.origin}/…` : url.origin;
 }
 
-/** `text` with every http(s) URL in it reduced by redactProviderUrl. */
+/** `text` with every URL in it (any scheme: http, https, ws, wss...) reduced by redactProviderUrl. */
 export function redactUrlsInText(text: string): string {
-    return text.replace(/https?:\/\/[^\s"',\]}]+/g, (match) => redactProviderUrl(match));
+    return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"']+/gi, (match) => redactProviderUrl(match));
 }
 
-/** Name resolvers as they may be logged: their keys (which embed the provider URL for BSO resolvers), redacted. */
+const BSO_KEY_PREFIX = "bso-";
+
+/**
+ * Name resolvers as they may be logged: their keys, redacted. A BSO resolver's key is `bso-<provider URL>`
+ * (createBsoResolvers), so all of what follows the prefix is one URL, commas included.
+ */
 export function loggableNameResolvers(resolvers: readonly { key: string }[] | undefined): string[] | undefined {
-    return resolvers?.map((resolver) => redactUrlsInText(String(resolver.key)));
+    return resolvers?.map((resolver) => {
+        const key = String(resolver.key);
+        return key.startsWith(BSO_KEY_PREFIX) ? BSO_KEY_PREFIX + redactProviderUrl(key.slice(BSO_KEY_PREFIX.length)) : redactUrlsInText(key);
+    });
 }

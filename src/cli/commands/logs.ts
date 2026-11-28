@@ -190,7 +190,17 @@ export default class Logs extends Command {
         );
         const readFiles = read.filter((item): item is NonNullable<typeof item> => item !== undefined);
         if (readFiles.length === 0) this.error(`No log files found in ${logPath}\nHave you started the daemon yet?`);
-        const existing = readFiles.flatMap(({ file, content }) => this._parseEntries(content.toString("utf-8"), file.format));
+        // In follow mode the text after the last file's last newline is an entry the daemon is still writing: it is
+        // kept back and printed with the rest of it
+        let initialPending = "";
+        const texts = readFiles.map(({ content }) => content.toString("utf-8"));
+        if (flags.follow) {
+            const last = texts[texts.length - 1];
+            const lastNewline = last.lastIndexOf("\n");
+            initialPending = last.slice(lastNewline + 1);
+            texts[texts.length - 1] = last.slice(0, lastNewline + 1);
+        }
+        const existing = readFiles.flatMap(({ file }, i) => this._parseEntries(texts[i], file.format));
         print(this._tailEntries(filter(existing), flags.tail));
 
         if (!flags.follow) return;
@@ -199,7 +209,7 @@ export default class Logs extends Command {
         // each file is read from an offset to its end, then the next one from its start.
         let current = readFiles[readFiles.length - 1].file;
         let position = readFiles[readFiles.length - 1].content.length;
-        let pendingBuffer = "";
+        let pendingBuffer = initialPending;
         // Set when a later file shows up. The switch waits one more poll, so the daemon's last writes to this file,
         // which its stream flushes after opening the next one, are read first.
         let nextFileSeen: DaemonLogFile | undefined;
